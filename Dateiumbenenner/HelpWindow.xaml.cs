@@ -85,7 +85,7 @@ Hinweis: Umbenennungen erfolgen direkt im Dateisystem. Bitte vorher Sicherungen 
      Microsoft.Web.WebView2   1.0.3650-prerelease  PDF-Vorschau
      UglyToad.PdfPig          1.7.0-custom-5       PDF-Textextraktion
      PdfSharpCore             1.3.46               PDF-Bearbeitung/-Zusammenführung
-     SixLabors.ImageSharp     3.1.3                Bildverarbeitung/Komprimierung
+     SixLabors.ImageSharp     4.1.2 
      NHunspell                1.2.5554.16953       Rechtschreibprüfung (OCR-Korrektur)
      System.Drawing.Common    10.0.0               Grafikfunktionen
      System.Net.Http          4.3.4                HTTP

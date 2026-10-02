@@ -24,7 +24,7 @@
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
     <!-- NEU: PDF & Bild Re-Kompression -->
     <PackageReference Include="PdfSharpCore" Version="1.3.46" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.3" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="4.1.2" />
   </ItemGroup>
 
 </Project>
