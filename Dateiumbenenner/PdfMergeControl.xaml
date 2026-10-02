@@ -171,6 +171,7 @@
                                     <ComboBox x:Name="CmbCompressionMode" Width="200" SelectedIndex="0">
                                         <ComboBoxItem Content="Ghostscript (extern)" Tag="Ghostscript"/>
                                         <ComboBoxItem Content="Nur neu schreiben (verlustfrei)" Tag="Rewrite"/>
+                                                                            <ComboBoxItem Content="Rasterisieren (Seiten als JPEG, Text nicht mehr markierbar)" Tag="Rasterize"/>
                                     </ComboBox>
                                 </StackPanel>
                             </StackPanel>

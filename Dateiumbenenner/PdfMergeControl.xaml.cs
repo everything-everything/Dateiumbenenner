@@ -17,7 +17,7 @@ using Microsoft.VisualBasic.FileIO;
 namespace Dateiumbenenner
 {
     // NEU: Kompressionseinstellungen-Klasse
-    public enum PdfCompressionMode { Ghostscript, Rewrite }
+    public enum PdfCompressionMode { Ghostscript, Rewrite, Rasterize }
     public class PdfCompressionSettings
     {
         public int? ImageDpi { get; set; } // null = Original
@@ -835,7 +835,12 @@ namespace Dateiumbenenner
             // Modus auslesen
             if (CmbCompressionMode?.SelectedItem is ComboBoxItem modeItem && modeItem.Tag is string tag)
             {
-                settings.Mode = tag == "Rewrite" ? PdfCompressionMode.Rewrite : PdfCompressionMode.Ghostscript;
+                settings.Mode = tag switch
+                {
+                    "Rewrite" => PdfCompressionMode.Rewrite,
+                    "Rasterize" => PdfCompressionMode.Rasterize,
+                    _ => PdfCompressionMode.Ghostscript
+                };
             }
 
             return settings;
