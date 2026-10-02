@@ -1,0 +1,11 @@
+.vs/
+bin/
+obj/
+publish/
+release/
+*.user
+*.suo
+*.backup
+*.pfx
+Dictionaries/*.dic
+Dictionaries/*.aff

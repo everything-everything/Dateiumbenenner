@@ -1,0 +1,14 @@
+Test-Datei für Datumserkennung
+=====================================
+
+Diese Datei enthält verschiedene Datumsformate zum Testen:
+
+1. Datum: 6. Mai 2024
+2. Rechnungsdatum: 12. Juni 2024
+3. Datum 01.05.2024
+4. 2024-06-12
+5. Mai 2024
+6. 6 Mai 2024 (ohne Punkt)
+7. 12. Juni 2024 (mit Punkt)
+
+Die Anwendung sollte alle diese Formate erkennen.

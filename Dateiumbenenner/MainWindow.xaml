@@ -1,0 +1,458 @@
+﻿<Window x:Class="Dateiumbenenner.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        xmlns:local="clr-namespace:Dateiumbenenner"
+        mc:Ignorable="d"
+        Title="Dateiumbenenner" Height="800" Width="1200">
+    <DockPanel>
+    <Menu DockPanel.Dock="Top">
+        <MenuItem Header="_Datei">
+            <MenuItem Header="_Ordner öffnen..." Click="BtnSelectFolder_Click"/>
+            <Separator/>
+            <MenuItem Header="_Beenden" Click="MenuExit_Click"/>
+        </MenuItem>
+        <MenuItem Header="_?">
+            <MenuItem Header="_Programmhilfe" Click="MenuHelp_Click"/>
+            <MenuItem Header="_Lizenzen und Drittanbieter" Click="MenuLicenses_Click"/>
+            <Separator/>
+            <MenuItem Header="_Über / Impressum" Click="MenuAbout_Click"/>
+        </MenuItem>
+    </Menu>
+    <TabControl>
+        <!-- Registerkarte: Präfix-Umbenennung -->
+        <TabItem Header="Präfix-Umbenennung">
+            <local:PrefixRenamerControl x:Name="PrefixRenamerTab"/>
+        </TabItem>
+
+        <!-- Registerkarte: Umbenennen -->
+        <TabItem Header="Umbenennen">
+            <Grid Margin="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition Width="3*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Top bar -->
+                <Grid Grid.Row="0" Grid.ColumnSpan="2" Margin="0,0,0,10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/> <!-- Ordner wählen Button -->
+                        <ColumnDefinition Width="10"/>   <!-- Spacer -->
+                        <ColumnDefinition Width="*"/>    <!-- Pfad (stretch) -->
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Erste Zeile: Ordner wählen Button + Pfad -->
+                    <Button x:Name="BtnSelectFolder" Grid.Row="0" Grid.Column="0" Content="Ordner wählen" Width="145" HorizontalAlignment="Left" Click="BtnSelectFolder_Click"/>
+                    <TextBox x:Name="TxtFolder" Grid.Row="0" Grid.Column="2" Margin="0" IsReadOnly="True" HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+
+                    <!-- Zweite Zeile: Umbenennen-Buttons + Sortierungsoption -->
+                    <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,5,0,0">
+                        <Button x:Name="BtnRenameSelected" Content="Ausgewählte umbenennen" Width="145" Margin="0,0,5,0" Click="BtnRenameSelected_Click"/>
+                        <Button x:Name="BtnRenameAll" Content="Alle umbenennen" Width="145" Click="BtnRenameAll_Click"/>
+                        <Button Content="MB/KB umschalten" Width="130" Margin="10,0,0,0" Click="ToggleSizeUnit_Click"/>
+                        <Button x:Name="BtnAddToMerge" Content="Zur Liste Zusammenfügen hinzufügen" Width="220" Margin="10,0,0,0" Click="BtnAddToMerge_Click"/>
+                        <!-- Neue Option für natürliche Sortierung -->
+                        <CheckBox x:Name="ChkNaturalSort" Content="Natürliche Dateinamensortierung (_ = -)" Margin="20,0,0,0" VerticalAlignment="Center" Checked="ChkNaturalSort_Changed" Unchecked="ChkNaturalSort_Changed"/>
+                        <!-- NEU: OCR Korrektur Umschalter -->
+                        <CheckBox x:Name="ChkOcrCorrection" Content="OCR Korrektur" Margin="20,0,0,0" VerticalAlignment="Center" Checked="ChkOcrCorrection_Changed" Unchecked="ChkOcrCorrection_Changed"/>
+                    </StackPanel>
+                </Grid>
+
+                <!-- File list -->
+                <Grid Grid.Row="1" Grid.Column="0" Margin="0,10,10,10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBox x:Name="TxtFilter" Margin="0,0,0,5" TextChanged="TxtFilter_TextChanged"/>
+                    <ListView x:Name="LvFiles" Grid.Row="1" SelectionMode="Extended" SelectionChanged="LvFiles_SelectionChanged">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Width="180">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="FileName" Content="Datei"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.DisplayMemberBinding>
+                                        <Binding Path="FileName"/>
+                                    </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                                <GridViewColumn Width="90">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="DocumentType" Content="Typ"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.DisplayMemberBinding>
+                                        <Binding Path="DocumentType"/>
+                                    </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                                <GridViewColumn Width="90">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="InvoiceNumber" Content="Rechnung.Nr"/> <!-- geändert von Rechng.Nr -->
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.DisplayMemberBinding>
+                                        <Binding Path="InvoiceNumber"/>
+                                    </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                                <GridViewColumn Width="90">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="DocumentNumber" Content="Beleg.Nr"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.DisplayMemberBinding>
+                                        <Binding Path="DocumentNumber"/>
+                                    </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                                <GridViewColumn Width="90">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="Date" Content="Datum"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.DisplayMemberBinding>
+                                        <Binding Path="Date"/>
+                                    </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                                <GridViewColumn Width="50">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="PageCount" Content="Seiten"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.DisplayMemberBinding>
+                                        <Binding Path="PageCount"/>
+                                    </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                                <!-- NEU: Dateigröße -->
+                                <GridViewColumn Width="90">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="FileSizeBytes" Content="Größe"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.DisplayMemberBinding>
+                                        <Binding Path="FileSizeDisplay"/>
+                                    </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                                <!-- NEU: DPI -->
+                                <GridViewColumn Width="60">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="Dpi" Content="DPI"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.DisplayMemberBinding>
+                                        <Binding Path="DpiDisplay"/>
+                                    </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </Grid>
+
+                <!-- Details and preview - Rest des bestehenden Codes -->
+                <Grid Grid.Row="1" Grid.Column="1" Margin="0,10,0,10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="3*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <GroupBox Header="Details" Grid.Row="0" Margin="0,0,0,5">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Rechnungsnummer:" Grid.Row="0" Grid.Column="0" Margin="0,0,5,5"/>
+                            <TextBlock x:Name="TxtDetailInvoice" Grid.Row="0" Grid.Column="1"/>
+                            <TextBlock Text="Belegnummer:" Grid.Row="1" Grid.Column="0" Margin="0,0,5,5"/>
+                            <TextBlock x:Name="TxtDetailDocument" Grid.Row="1" Grid.Column="1"/>
+                            <TextBlock Text="Datum (erster Treffer):" Grid.Row="2" Grid.Column="0" Margin="0,0,5,5"/>
+                            <TextBlock x:Name="TxtDetailDate" Grid.Row="2" Grid.Column="1"/>
+                            <TextBlock Text="Seiten:" Grid.Row="3" Grid.Column="0" Margin="0,0,5,5"/>
+                            <TextBlock x:Name="TxtDetailPages" Grid.Row="3" Grid.Column="1"/>
+
+                            <!-- Überschrift für Einfügepositionen -->
+                            <TextBlock Grid.Row="4" Grid.Column="1" Text="Einfügepositionen (aktivieren/deaktivieren)" 
+                                       FontWeight="Bold" Margin="0,10,0,5" HorizontalAlignment="Right"/>
+
+                            <TextBlock Text="Dokumenttyp (Auswahl):" Grid.Row="5" Grid.Column="0" Margin="0,4,5,5"/>
+                            <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
+                                <ComboBox x:Name="CmbDocType" IsEditable="True" SelectionChanged="CmbDocType_SelectionChanged" 
+                                          LostFocus="EditableCombo_DropDownClosed" MaxDropDownHeight="180" KeyDown="EditableCombo_KeyDown" 
+                                          Width="170" Margin="0,0,10,0"/>
+                                <TextBlock Text=":" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <ComboBox x:Name="CmbDocTypePosition" Width="90" SelectedIndex="2" SelectionChanged="InsertPosition_Changed">
+                                    <ComboBoxItem Content="Position 1"/>
+                                    <ComboBoxItem Content="Position 2"/>
+                                    <ComboBoxItem Content="Position 3"/>
+                                    <ComboBoxItem Content="Deaktiviert"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <TextBlock Text="Nummer (Auswahl / editierbar):" Grid.Row="6" Grid.Column="0" Margin="0,4,5,5"/>
+                            <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
+                                <ComboBox x:Name="CmbNumberCandidates" IsEditable="True" SelectionChanged="CmbNumberCandidates_SelectionChanged" 
+                                          LostFocus="CmbNumberCandidates_LostFocus" TextBoxBase.TextChanged="CmbNumberCandidates_TextChanged" 
+                                          PreviewMouseLeftButtonDown="EditableCombo_PreviewMouseLeftButtonDown" 
+                                          DropDownClosed="EditableCombo_DropDownClosed" KeyDown="EditableCombo_KeyDown" MaxDropDownHeight="180" 
+                                          Width="170" Margin="0,0,10,0"/>
+                                <TextBlock Text=":" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <ComboBox x:Name="CmbNumberPosition" Width="90" SelectedIndex="0" SelectionChanged="InsertPosition_Changed">
+                                    <ComboBoxItem Content="Position 1"/>
+                                    <ComboBoxItem Content="Position 2"/>
+                                    <ComboBoxItem Content="Position 3"/>
+                                    <ComboBoxItem Content="Deaktiviert"/>
+                                </ComboBox>
+                                <TextBlock Text="Min. Stellen:" VerticalAlignment="Center" Margin="10,0,5,0"/>
+                                <TextBox x:Name="TxtMinDigits" Width="40" Text="0" VerticalContentAlignment="Center" TextChanged="TxtMinDigits_TextChanged">
+                                    <TextBox.ToolTip>
+                                        <TextBlock TextWrapping="Wrap" MaxWidth="380">
+                                            <Run Text="Mindest-Stellenanzahl für Nummern-Auswahl (global)" FontWeight="Bold"/>
+                                            <LineBreak/>
+                                            <Run Text="Bei >0 wird zusätzlich im Umfeld dokumenttypspezifischer Schlüsselwörter gesucht." FontStyle="Italic" Foreground="Gray"/>
+                                        </TextBlock>
+                                    </TextBox.ToolTip>
+                                </TextBox>
+                                <!-- NEU: Richtung für dokumenttyp-nahe Nummernsuche -->
+                                <TextBlock Text="Richtung:" VerticalAlignment="Center" Margin="10,0,5,0"/>
+                                <ComboBox x:Name="CmbDocTypeNumberDirection" Width="90" SelectedIndex="0" SelectionChanged="CmbDocTypeNumberDirection_SelectionChanged">
+                                    <ComboBoxItem Content="Vorwärts"/>
+                                    <ComboBoxItem Content="Rückwärts"/>
+                                </ComboBox>
+                                <TextBlock Text="Schritte:" VerticalAlignment="Center" Margin="10,0,5,0"/>
+                                <TextBox x:Name="TxtDocTypeNumberSteps" Width="40" Text="1" VerticalContentAlignment="Center" TextChanged="TxtDocTypeNumberSteps_TextChanged">
+                                    <TextBox.ToolTip>
+                                        <TextBlock TextWrapping="Wrap" MaxWidth="300">
+                                            <Run Text="Anzahl Token (Wörter), die ab dem Treffer des Schlüsselworts vorwärts/rückwärts geprüft werden."/>
+                                            <LineBreak/>
+                                            <Run Text="Erster gültiger Kandidat mit >= Min. Stellen wird bevorzugt." FontStyle="Italic"/>
+                                        </TextBlock>
+                                    </TextBox.ToolTip>
+                                </TextBox>
+                            </StackPanel>
+
+                            <TextBlock Text="Datum (Auswahl / editierbar):" Grid.Row="7" Grid.Column="0" Margin="0,4,5,5"/>
+                            <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
+                                <ComboBox x:Name="CmbDateCandidates" IsEditable="True" SelectionChanged="CmbDateCandidates_SelectionChanged" 
+                                          LostFocus="CmbDateCandidates_LostFocus" TextBoxBase.TextChanged="CmbDateCandidates_TextChanged" 
+                                          PreviewMouseLeftButtonDown="EditableCombo_PreviewMouseLeftButtonDown" 
+                                          DropDownClosed="EditableCombo_DropDownClosed" KeyDown="EditableCombo_KeyDown" MaxDropDownHeight="180" 
+                                          Width="170" Margin="0,0,10,0"/>
+                                <TextBlock Text=":" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <ComboBox x:Name="CmbDatePosition" Width="90" SelectedIndex="1" SelectionChanged="InsertPosition_Changed">
+                                    <ComboBoxItem Content="Position 1"/>
+                                    <ComboBoxItem Content="Position 2"/>
+                                    <ComboBoxItem Content="Position 3"/>
+                                    <ComboBoxItem Content="Deaktiviert"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <TextBlock Text="Trennzeichen:" Grid.Row="8" Grid.Column="0" Margin="0,4,5,5"/>
+                            <TextBox x:Name="TxtDelimiter" Grid.Row="8" Grid.Column="1" Width="50" Text="_" TextChanged="DelimiterRelated_Changed" VerticalContentAlignment="Center" HorizontalAlignment="Left">
+                                <TextBox.ToolTip>
+                                    <TextBlock Text="Wird automatisch aus dem Dateinamen erkannt. Sie können es manuell ändern."/>
+                                </TextBox.ToolTip>
+                            </TextBox>
+
+                            <TextBlock Text="Segment-Index:" Grid.Row="9" Grid.Column="0" Margin="0,4,5,5"/>
+                            <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal">
+                                <TextBox x:Name="TxtSegmentIndex" Width="60" Text="2" TextChanged="TxtSegmentIndex_TextChanged" VerticalContentAlignment="Center" HorizontalAlignment="Left">
+                                    <TextBox.ToolTip>
+                                        <TextBlock Text="Gibt den Segment-Index an, an dem eingefügt wird."/>
+                                    </TextBox.ToolTip>
+                                </TextBox>
+                                <CheckBox x:Name="ChkUseDelimiterPosition" Content="Trennzeichen per Position" IsChecked="True" Margin="10,0,0,0" VerticalAlignment="Center" Checked="ChkUseDelimiterPosition_Changed" Unchecked="ChkUseDelimiterPosition_Changed">
+                                    <CheckBox.ToolTip>
+                                        <TextBlock TextWrapping="Wrap" MaxWidth="450">
+                                            <Run Text="Aktiviert: Fügt nach dem N-ten Vorkommen des aktuellen Trennzeichens ein." FontWeight="Bold"/>
+                                            <LineBreak/>
+                                            <Run Text="  Index 1 = nach dem 1. Vorkommen des Trennzeichens"/>
+                                            <LineBreak/>
+                                            <Run Text="  Index 2 = nach dem 2. Vorkommen des Trennzeichens"/>
+                                            <LineBreak/>
+                                            <Run Text="  Index 3 = nach dem 3. Vorkommen des Trennzeichens"/>
+                                            <LineBreak/>
+                                            <Run Text="  usw."/>
+                                            <LineBreak/>
+                                            <LineBreak/>
+                                            <Run Text="Beispiel: Bei 'Stadtwerke-GD-6245204' mit Delimiter '-' und Index 2:" FontStyle="Italic"/>
+                                            <LineBreak/>
+                                            <Run Text="  Es wird nur das Trennzeichen '-' gezählt"/>
+                                            <LineBreak/>
+                                            <Run Text="  1. '-' = nach 'Stadtwerke'"/>
+                                            <LineBreak/>
+                                            <Run Text="  2. '-' = nach 'GD' → hier wird eingefügt"/>
+                                            <LineBreak/>
+                                            <Run Text="  Ergebnis: 'Stadtwerke-GD-{WERT}-6245204'" FontStyle="Italic" FontWeight="Bold"/>
+                                            <LineBreak/>
+                                            <LineBreak/>
+                                            <Run Text="Deaktiviert: Verwendet den Index als absolute Segment-Position (Standard)." FontWeight="Bold"/>
+                                        </TextBlock>
+                                    </CheckBox.ToolTip>
+                                </CheckBox>
+                                <TextBlock x:Name="TxtDelimiterFound" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="Blue" FontWeight="Bold"/>
+                            </StackPanel>
+
+                            <TextBlock Text="Einfügen:" Grid.Row="10" Grid.Column="0" Margin="0,4,5,5" VerticalAlignment="Top"/>
+                            <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Vertical">
+                                <CheckBox x:Name="ChkRemoveDuplicates" Content="Doppelte Segmente entfernen" VerticalAlignment="Center" Checked="ChkRemoveDuplicates_Changed" Unchecked="ChkRemoveDuplicates_Changed" Margin="0,0,0,5">
+                                    <CheckBox.ToolTip>
+                                        <TextBlock TextWrapping="Wrap" MaxWidth="300">
+                                            <Run Text="Entfernt alle doppelten Segmente aus dem Dateinamen (nicht nur aufeinanderfolgende)."/>
+                                            <LineBreak/>
+                                            <Run Text="Beispiel: 'Teil1-Teil2-Teil2-Teil3-Teil1' wird zu 'Teil1-Teil2-Teil3'" FontStyle="Italic"/>
+                                        </TextBlock>
+                                    </CheckBox.ToolTip>
+                                </CheckBox>
+                                <CheckBox x:Name="ChkReplaceSegments" Content="Segmente ersetzen (statt einfügen)" VerticalAlignment="Center" Checked="ChkReplaceSegments_Changed" Unchecked="ChkReplaceSegments_Changed" Margin="0,0,0,5">
+                                    <CheckBox.ToolTip>
+                                        <TextBlock TextWrapping="Wrap" MaxWidth="450">
+                                            <Run Text="Aktiviert: Ersetzt bestehende Segmente ab dem Index (statt neue einzufügen)." FontWeight="Bold"/>
+                                            <LineBreak/>
+                                            <LineBreak/>
+                                            <Run Text="Beispiel bei 'Stadtwerke-GD-6245204-Alt' mit Index 2:" FontStyle="Italic"/>
+                                            <LineBreak/>
+                                            <Run Text="  • Segment 2 (GD) wird durch Nummer ersetzt"/>
+                                            <LineBreak/>
+                                            <Run Text="  • Segment 3 (6245204) wird durch Datum ersetzt"/>
+                                            <LineBreak/>
+                                            <Run Text="  • Segment 4 (Alt) wird durch Dokumenttyp ersetzt"/>
+                                            <LineBreak/>
+                                            <Run Text="  Ergebnis: 'Stadtwerke-{NUMMER}-{DATUM}-{DOKUMENTTYP}'" FontStyle="Italic" FontWeight="Bold"/>
+                                            <LineBreak/>
+                                            <LineBreak/>
+                                            <Run Text="Deaktiviert: Fügt neue Segmente ein (Standard)." FontWeight="Bold"/>
+                                        </TextBlock>
+                                    </CheckBox.ToolTip>
+                                </CheckBox>
+                                <CheckBox x:Name="ChkRemoveAttachment" Content="Letzten Anhang entfernen (WAxxxx[_ocred])" VerticalAlignment="Center" Checked="ChkRemoveAttachment_Changed" Unchecked="ChkRemoveAttachment_Changed">
+                                    <CheckBox.ToolTip>
+                                        <TextBlock TextWrapping="Wrap" MaxWidth="400">
+                                            <Run Text="Entfernt das letzte Segment, wenn es wie ein technischer Anhang aussieht (z.B. WA0046 oder WA0046_ocred)."/>
+                                            <LineBreak/>
+                                            <Run Text="Beispiel: 'Werner-Walter-700505-25.05.2025-Rechnung-WA0046_ocred' → 'Werner-Walter-700505-25.05.2025-Rechnung'" FontStyle="Italic"/>
+                                        </TextBlock>
+                                    </CheckBox.ToolTip>
+                                </CheckBox>
+                            </StackPanel>
+
+                            <TextBlock Text="Neuer Dateiname (Vorschau):" Grid.Row="11" Grid.Column="0" Margin="0,4,5,0"/>
+                            <TextBox x:Name="TxtEditableNewName" Grid.Row="11" Grid.Column="1" FontWeight="Bold" TextChanged="TxtEditableNewName_TextChanged" VerticalContentAlignment="Center">
+                                <TextBox.ToolTip>
+                                    <TextBlock>
+                                        <Run Text="Dateiname kann manuell editiert werden."/>
+                                        <LineBreak/>
+                                        <Run Text="Ungültige Zeichen ( \ / : * ? &quot; &lt; &gt; | )werden automatisch ersetzt." FontStyle="Italic" Foreground="Gray"/>
+                                    </TextBlock>
+                                </TextBox.ToolTip>
+                            </TextBox>
+                        </Grid>
+                    </GroupBox>
+                
+                <!-- PDF Vorschau (jetzt oben, Grid.Row="1") -->
+                <GroupBox Header="Vorschau (PDF)" Grid.Row="1" MinHeight="200">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,5">
+                            <TextBlock Text="Modus:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="CmbPdfPreviewMode" Width="180" SelectionChanged="CmbPdfPreviewMode_SelectionChanged" MaxDropDownHeight="180" KeyDown="EditableCombo_KeyDown">
+                                <ComboBoxItem Content="Auto" IsSelected="True"/>
+                                <ComboBoxItem Content="WebView2"/>
+                                <ComboBoxItem Content="Text"/>
+                            </ComboBox>
+                            <Button x:Name="BtnOpenPdfInWindow" Content="In neuem Fenster öffnen" Margin="10,0,0,0" Click="BtnOpenPdfInWindow_Click" Width="160"/>
+                        </StackPanel>
+                        <Grid Grid.Row="1">
+                            <wv2:WebView2 x:Name="PdfWebView" Visibility="Collapsed"/>
+                            <Image x:Name="ImgPdfPreview" Stretch="Uniform" Visibility="Collapsed"/>
+                            <ScrollViewer x:Name="PdfTextScroll" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                                <TextBox x:Name="TxtPdfFallback" 
+                                         IsReadOnly="True" 
+                                         TextWrapping="Wrap" 
+                                         AcceptsReturn="True"
+                                         BorderThickness="0"
+                                         Background="Transparent"/>
+                            </ScrollViewer>
+                        </Grid>
+                    </Grid>
+                </GroupBox>
+                
+                <!-- GridSplitter für variable Größenanpassung -->
+                <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center" 
+                              Background="LightGray" ShowsPreview="True" Cursor="SizeNS"/>
+                
+                <!-- Text Vorschau (jetzt unten, Grid.Row="3") -->
+                <GroupBox Header="Vorschau (Text)" Grid.Row="3" MinHeight="100">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        
+                        <!-- Suchleiste -->
+                        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,5">
+                            <TextBlock Text="Suchen:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                            <TextBox x:Name="TxtSearch" Width="200" VerticalContentAlignment="Center" TextChanged="TxtSearch_TextChanged"/>
+                            <Button x:Name="BtnSearchPrevious" Content="◀ Zurück" Width="70" Margin="5,0,0,0" Click="BtnSearchPrevious_Click"/>
+                            <Button x:Name="BtnSearchNext" Content="Weiter ▶" Width="70" Margin="5,0,0,0" Click="BtnSearchNext_Click"/>
+                            <TextBlock x:Name="TxtSearchInfo" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="Gray"/>
+                            
+                            <Separator Margin="15,0,15,0" Width="2" Background="LightGray"/>
+                            
+                            <Button x:Name="BtnHighlightNumber" Content="🔍 Nummer markieren" Width="140" Margin="0,0,5,0" Click="BtnHighlightNumber_Click"/>
+                            <Button x:Name="BtnHighlightDate" Content="🔍 Datum markieren" Width="130" Margin="0,0,5,0" Click="BtnHighlightDate_Click"/>
+                            <Button x:Name="BtnClearHighlight" Content="✖ Zurücksetzen" Width="110" Margin="0,0,0,0" Click="BtnClearHighlight_Click"/>
+                        </StackPanel>
+                        
+                        <!-- Text mit RichTextBox für Highlighting -->
+                        <RichTextBox x:Name="TxtPreviewRich" 
+                                     Grid.Row="1"
+                                     IsReadOnly="True" 
+                                     VerticalScrollBarVisibility="Auto"
+                                     FontFamily="Consolas" 
+                                     FontSize="12"
+                                     BorderThickness="0"
+                                     Background="Transparent"/>
+                    </Grid>
+                </GroupBox>
+            </Grid>
+
+                <!-- Status -->
+                <StatusBar Grid.Row="2" Grid.ColumnSpan="2">
+                    <StatusBarItem>
+                        <TextBlock x:Name="TxtStatus" Text="Bereit"/>
+                    </StatusBarItem>
+                    <!-- NEU: Ladefortschritt -->
+                    <StatusBarItem>
+                        <ProgressBar x:Name="LoadingProgress" Width="150" Height="16" Minimum="0" Maximum="100" Visibility="Collapsed"/>
+                    </StatusBarItem>
+                </StatusBar>
+            </Grid>
+        </TabItem>
+
+        <!-- Registerkarte: PDF Zusammenführen -->
+        <TabItem Header="PDF Zusammenführen">
+            <local:PdfMergeControl x:Name="PdfMergeTab"/>
+        </TabItem>
+    </TabControl>
+    </DockPanel>
+</Window>

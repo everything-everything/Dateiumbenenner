@@ -1,0 +1,83 @@
+# ====================================================
+#  OCR-Korrekturen Konfiguration
+# ====================================================
+
+# === EINFACHE ERSETZUNGEN ===
+# Format: fehlerhaft=korrekt
+Rechnu ng=Rechnung
+Gu tschrift=Gutschrift
+Liefe rschein=Lieferschein
+Rech nung=Rechnung
+Be leg=Beleg
+Ange bot=Angebot
+
+# === LABEL-WÖRTER (Automatische Abstandskorrektur) ===
+# Diese Wörter werden automatisch von angrenzenden Werten getrennt
+@labels=Auftragsnummer,Datum,Kundennummer,Belegnummer,Standort,Lieferdatum,Besteller,Seite,Rechnungsnummer,Rechnungsdatum
+
+# === REGEX-ERSETZUNGEN ===
+# Format: @regex=Muster=>Ersetzung
+# Trenne lange Nummern von Datum/Jahr-Angaben
+@regex=(\d{6,})(\d{4}/\d{1,2})=>$1 $2
+
+# === WÖRTERBUCH FÜR SCHNELLE RECHTSCHREIBPRÜFUNG ===
+# Häufig verwendete Begriffe die NICHT durch Hunspell geprüft werden sollen
+@dictionary=Rechnung,Gutschrift,Lieferschein,Bestellung,Angebot,Mahnung,Sammelrechnung,Stornorechnung,Beleg,Auftrag,Lieferung,Widmann,GmbH,KG,AG,UG,OHG,Rechnungsnummer,Belegnummer,Auftragsnummer,Kundennummer
+
+# === HUNSPELL RECHTSCHREIBPRÜFUNG ===
+# Aktiviert Duden-basierte Rechtschreibprüfung
+# WICHTIG: Benötigt .dic/.aff Dateien im Dictionaries-Ordner!
+# 
+# Verfügbare Sprachen (wenn Wörterbücher installiert):
+#   de_DE = Deutsch (Deutschland)
+#   de_AT = Deutsch (Österreich)
+#   de_CH = Deutsch (Schweiz)
+#   en_US = Englisch (USA)
+#   en_GB = Englisch (UK)
+#
+# Zum Aktivieren, entfernen Sie das # vor der nächsten Zeile:
+# @spellcheck=de_DE,en_US
+
+# === HÄUFIGE OCR-FEHLER ===
+# Zahlen/Buchstaben Verwechslungen
+0=O
+O=0
+l=1
+I=1
+
+# Häufige deutsche Begriffe
+Rechnungs nummer=Rechnungsnummer
+Liefer schein=Lieferschein
+Auftrags nummer=Auftragsnummer
+Kunden nummer=Kundennummer
+
+# === FIRMEN UND NAMEN ===
+# Fügen Sie hier häufig vorkommende Firmennamen hinzu
+Widma nn=Widmann
+Mül ler=Müller
+Schm idt=Schmidt
+
+# === DATUMSFORMATE ===
+# OCR verwechselt manchmal Punkte und Kommas
+# (wird automatisch durch Datumsparser behandelt)
+
+# ====================================================
+#  ANLEITUNG ZUM HINZUFÜGEN NEUER KORREKTUREN
+# ====================================================
+#
+# 1. DIREKTE ERSETZUNG:
+#    fehlerhaft=korrekt
+#
+# 2. LABEL HINZUFÜGEN:
+#    @labels=existierende,neue_labels
+#
+# 3. REGEX PATTERN:
+#    @regex=(\w+)\s+(\w+)=>$1$2
+#
+# 4. WÖRTERBUCH ERWEITERN:
+#    @dictionary=Wort1,Wort2,Wort3
+#
+# 5. SPRACHE AKTIVIEREN:
+#    @spellcheck=de_DE,en_US
+#
+# ====================================================
