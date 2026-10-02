@@ -1,4 +1,4 @@
-# Erstellt ein signiertes Release: Publish, Authenticode-Signatur (selbst ausgestelltes Zertifikat),
+﻿# Erstellt ein signiertes Release: Publish, Authenticode-Signatur (selbst ausgestelltes Zertifikat),
 # SHA-256-Hashliste aller Dateien inkl. CMS-Signatur, ZIP-Archiv.
 param(
     [string]$Version = "1.0.0",

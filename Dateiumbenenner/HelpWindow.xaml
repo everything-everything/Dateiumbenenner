@@ -1,24 +1,87 @@
 <Window x:Class="Dateiumbenenner.HelpWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Hilfe" Height="650" Width="800" WindowStartupLocation="CenterOwner">
-    <DockPanel Margin="10">
-        <Button DockPanel.Dock="Bottom" Content="Schließen" Width="100" HorizontalAlignment="Right" Margin="0,10,0,0" IsCancel="True" Click="BtnClose_Click"/>
-        <TabControl x:Name="Tabs">
-            <TabItem Header="Programmhilfe">
-                <TextBox x:Name="TxtHelp" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" BorderThickness="0"/>
-            </TabItem>
-            <TabItem Header="Lizenzen">
-                <TextBox x:Name="TxtLicenses" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" BorderThickness="0"/>
-            </TabItem>
-            <TabItem Header="Über / Impressum">
-                <StackPanel Margin="5">
-                    <TextBox x:Name="TxtAbout" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" BorderThickness="0"/>
-                    <TextBlock Margin="0,10,0,0">
-                        <Hyperlink NavigateUri="https://github.com/everything-everything" RequestNavigate="Hyperlink_RequestNavigate">https://github.com/everything-everything</Hyperlink>
-                    </TextBlock>
+        Title="Dateiumbenenner-Hilfe" Height="600" Width="680" MinWidth="420" MinHeight="300"
+        WindowStartupLocation="CenterOwner" Background="#C0C0C0"
+        FontFamily="Microsoft Sans Serif" FontSize="11" UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <!-- Klassischer 3D-Knopf im Stil von Windows 95/98 -->
+        <Style x:Key="Win95Button" TargetType="Button">
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="MinWidth" Value="62"/>
+            <Setter Property="Height" Value="23"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Outer" Background="#C0C0C0" BorderThickness="1,1,1,1"
+                                BorderBrush="Black">
+                            <Border x:Name="Raise" BorderThickness="1,1,0,0" BorderBrush="White">
+                                <Border x:Name="Shade" BorderThickness="0,0,1,1" BorderBrush="#808080" Padding="6,0">
+                                    <ContentPresenter x:Name="Cp" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Border>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Raise" Property="BorderBrush" Value="#808080"/>
+                                <Setter TargetName="Shade" Property="BorderBrush" Value="#C0C0C0"/>
+                                <Setter TargetName="Cp" Property="Margin" Value="1,1,0,0"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#808080"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <Menu DockPanel.Dock="Top" Background="#C0C0C0" FontFamily="Microsoft Sans Serif" FontSize="11">
+            <MenuItem Header="_Datei">
+                <MenuItem Header="_Drucken..." Click="BtnPrint_Click"/>
+                <Separator/>
+                <MenuItem Header="_Beenden" Click="BtnClose_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Bearbeiten">
+                <MenuItem Header="_Kopieren" Click="MenuCopy_Click"/>
+            </MenuItem>
+            <MenuItem Header="_?">
+                <MenuItem Header="_Info zur Hilfe" Click="MenuAboutHelp_Click"/>
+            </MenuItem>
+        </Menu>
+
+        <!-- Schaltflächenleiste -->
+        <Border DockPanel.Dock="Top" BorderBrush="#808080" BorderThickness="0,1,0,0">
+            <Border BorderBrush="White" BorderThickness="0,1,0,0" Padding="2,3,2,4">
+                <StackPanel Orientation="Horizontal">
+                    <Button Style="{StaticResource Win95Button}" Content="_Inhalt" Click="BtnContents_Click"/>
+                    <Button Style="{StaticResource Win95Button}" Content="I_ndex" Click="BtnIndex_Click"/>
+                    <Button Style="{StaticResource Win95Button}" x:Name="BtnBack" Content="_Zurück" Click="BtnBack_Click"/>
+                    <Button Style="{StaticResource Win95Button}" Content="_Drucken" Click="BtnPrint_Click"/>
+                    <Button Style="{StaticResource Win95Button}" x:Name="BtnPrev" Content="&lt;&lt;" MinWidth="30" Click="BtnPrev_Click"/>
+                    <Button Style="{StaticResource Win95Button}" x:Name="BtnNext" Content="&gt;&gt;" MinWidth="30" Click="BtnNext_Click"/>
                 </StackPanel>
-            </TabItem>
-        </TabControl>
+            </Border>
+        </Border>
+
+        <!-- Themenbereich mit vertieftem Rahmen -->
+        <Border Margin="2,0,2,2" BorderBrush="#808080" BorderThickness="1,1,0,0">
+            <Border BorderBrush="White" BorderThickness="0,0,1,1">
+                <Border BorderBrush="Black" BorderThickness="1,1,0,0">
+                    <DockPanel Background="White">
+                        <!-- Nicht scrollender Bereich (Thementitel) -->
+                        <Border DockPanel.Dock="Top" Background="#FFFFF0" BorderBrush="#808080" BorderThickness="0,0,0,1" Padding="10,6">
+                            <TextBlock x:Name="TxtTopicTitle" FontFamily="Arial" FontSize="15" FontWeight="Bold" Foreground="#000080"/>
+                        </Border>
+                        <FlowDocumentScrollViewer x:Name="Viewer" VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled" IsToolBarVisible="False"/>
+                    </DockPanel>
+                </Border>
+            </Border>
+        </Border>
     </DockPanel>
 </Window>

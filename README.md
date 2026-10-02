@@ -1,4 +1,4 @@
-# Dateiumbenenner
+﻿# Dateiumbenenner
 
 Version 1.0.0 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen und Komprimieren von PDF-Dokumenten (Rechnungen, Belege).
 
