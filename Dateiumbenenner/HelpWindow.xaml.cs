@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Navigation;
@@ -83,9 +83,7 @@ Hinweis: Umbenennungen erfolgen direkt im Dateisystem. Bitte vorher Sicherungen 
  - Sprache / Framework: C# 12, .NET 8 (net8.0-windows), WPF + Windows Forms
  - Eingebundene NuGet-Pakete:
      Microsoft.Web.WebView2   1.0.3650-prerelease  PDF-Vorschau
-     UglyToad.PdfPig          1.7.0-custom-5       PDF-Textextraktion
-     PdfSharpCore             1.3.46               PDF-Bearbeitung/-Zusammenführung
-     SixLabors.ImageSharp     4.1.2 
+     UglyToad.PdfPig          1.7.0-custom-5       PDF-Textextraktion, Zusammenführen, PDF-Erzeugung
      NHunspell                1.2.5554.16953       Rechtschreibprüfung (OCR-Korrektur)
      System.Drawing.Common    10.0.0               Grafikfunktionen
      System.Net.Http          4.3.4                HTTP
@@ -110,11 +108,6 @@ DRITTANBIETER-KOMPONENTEN
 =========================
 Microsoft.Web.WebView2 ........ Microsoft BSD-artige Lizenz (WebView2 SDK)
 UglyToad.PdfPig ............... Apache License 2.0
-PdfSharpCore .................. MIT License
-SixLabors.ImageSharp .......... Six Labors Split License 1.0
-                                (kostenlos für Open-Source-Projekte unter
-                                OSI-Lizenz sowie bei weniger als 1 Mio. USD
-                                Jahresumsatz; sonst kommerzielle Lizenz nötig)
 NHunspell ..................... LGPL / GPL / MPL (Tri-Lizenz), hier unter LGPL
                                 genutzt, unverändert als separate DLL
 System.Drawing.Common,

@@ -1,31 +1,41 @@
 using System.IO;
-using PdfSharpCore.Pdf;
-using PdfSharpCore.Drawing;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Formats.Jpeg;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using UglyToad.PdfPig.Writer;
 
 namespace Dateiumbenenner.Compression
 {
     public class RasterizeCompressor : IPdfCompressor
     {
         public string Name => "Rasterize";
-        public bool IsAvailable() => true; // keine externen Tools
+
+        // Zum Rendern von PDF-Seiten in Bilder ist ein PDF-Renderer nötig (noch nicht eingebunden).
+        // Bis dahin deaktiviert, damit keine Inhalte durch leere Seiten ersetzt werden.
+        public bool IsAvailable() => false;
+
         public string Compress(string inputPath, PdfCompressionSettings settings)
+            => throw new System.NotSupportedException("Rasterisierung benötigt einen PDF-Renderer.");
+
+        /// <summary>Kodiert ein gerendertes Seitenbild als JPEG (WPF-Encoder, keine externe Bibliothek).</summary>
+        public static byte[] EncodeJpeg(BitmapSource image, int quality)
         {
-            var tmp = inputPath + ".raster.tmp";
-            using var outDoc = new PdfDocument();
-            using var img = new Image<Rgba32>(1200, 1600, new Rgba32(255,255,255,255));
+            var encoder = new JpegBitmapEncoder { QualityLevel = System.Math.Clamp(quality, 1, 100) };
+            encoder.Frames.Add(BitmapFrame.Create(image));
             using var ms = new MemoryStream();
-            img.Save(ms, new JpegEncoder { Quality = settings.JpegQuality });
-            ms.Position = 0;
-            var page = outDoc.AddPage();
-            using var gfx = XGraphics.FromPdfPage(page);
-            using var ximg = XImage.FromStream(() => ms);
-            gfx.DrawImage(ximg, 0, 0, page.Width, page.Height);
-            outDoc.Save(tmp);
-            File.Delete(inputPath); File.Move(tmp, inputPath);
-            return inputPath;
+            encoder.Save(ms);
+            return ms.ToArray();
+        }
+
+        /// <summary>Erstellt aus JPEG-Seitenbildern eine PDF (PdfPig-Builder). Seitengröße in Punkt (1/72 Zoll).</summary>
+        public static byte[] BuildPdfFromJpegs(IEnumerable<(byte[] Jpeg, double WidthPt, double HeightPt)> pages)
+        {
+            var builder = new PdfDocumentBuilder();
+            foreach (var (jpeg, w, h) in pages)
+            {
+                var page = builder.AddPage(w, h);
+                page.AddJpeg(jpeg, new UglyToad.PdfPig.Core.PdfRectangle(0, 0, w, h));
+            }
+            return builder.Build();
         }
     }
 }
