@@ -1,19 +1,19 @@
-﻿# Third-Party Notices
+# Third-Party Notices
 
 Dateiumbenenner (MIT) verwendet folgende Komponenten. Diese werden per NuGet bezogen und unterliegen ihren eigenen Lizenzen.
 
 | Paket | Version | Lizenz | Link |
 |---|---|---|---|
-| Microsoft.Web.WebView2 | 1.0.3650-prerelease | Microsoft WebView2 SDK License (BSD-artig) | https://www.nuget.org/packages/Microsoft.Web.WebView2/ |
+| Microsoft.Web.WebView2 | 1.0.4258.31 | Microsoft WebView2 SDK License (BSD-artig) | https://www.nuget.org/packages/Microsoft.Web.WebView2/ |
 | UglyToad.PdfPig | 1.7.0-custom-5 | Apache-2.0 | https://github.com/UglyToad/PdfPig |
-| NHunspell | 1.2.5554.16953 | LGPL / GPL / MPL (Tri-Lizenz, hier LGPL) | https://www.nuget.org/packages/NHunspell/ |
-| System.Drawing.Common | 10.0.0 | MIT | https://github.com/dotnet/runtime |
+| WeCantSpell.Hunspell | 7.0.1 | MPL-1.1 / GPL-2.0 / LGPL-2.1 (hier LGPL) | https://github.com/aarondandy/WeCantSpell.Hunspell |
+| System.Drawing.Common | 10.0.12 | MIT | https://github.com/dotnet/runtime |
 | System.Net.Http | 4.3.4 | MIT | https://github.com/dotnet/runtime |
 | System.Text.RegularExpressions | 4.3.1 | MIT | https://github.com/dotnet/runtime |
 
 ## Hinweise
 
-- **NHunspell**: Wird unverändert als separate DLL dynamisch eingebunden (LGPL-konform). Quellcode: siehe NuGet-Projektseite.
+- **WeCantSpell.Hunspell**: Wird unverändert als separate DLL dynamisch eingebunden (LGPL-konform). Quellcode: siehe NuGet-Projektseite.
 - **PdfPig**: Apache-2.0 – Copyright-Hinweise und NOTICE der Originalautoren bleiben erhalten.
 
 ## Nicht enthalten

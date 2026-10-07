@@ -15,7 +15,7 @@ using List = System.Windows.Documents.List;
 
 namespace Dateiumbenenner
 {
-    /// <summary>Hilfefenster im Stil der klassischen Windows-Hilfe (WinHlp32, Windows 95/98).</summary>
+    /// <summary>Hilfefenster im Stil der Windows-XP-Hilfe (Luna-Design).</summary>
     public partial class HelpWindow : Window
     {
         public enum Page { Help, Licenses, About }
@@ -26,9 +26,9 @@ namespace Dateiumbenenner
         public const string ContactEmail = "85025743+everything-everything@users.noreply.github.com";
 
         public static string AppVersion =>
-            Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
+            Assembly.GetExecutingAssembly().GetName().Version?.ToString(2) ?? "3.11";
 
-        private static readonly Brush LinkBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x80, 0x00));
+        private static readonly Brush LinkBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x66, 0xCC));
         private static readonly Regex LinkRegex = new(@"\[\[(?<target>[^|\]]+)\|(?<text>[^\]]+)\]\]", RegexOptions.Compiled);
 
         private readonly List<(string Id, string Title, string Body)> _topics;
@@ -98,8 +98,8 @@ namespace Dateiumbenenner
         {
             var doc = new FlowDocument
             {
-                FontFamily = new WpfFontFamily("Arial"),
-                FontSize = 13,
+                FontFamily = new WpfFontFamily("Tahoma"),
+                FontSize = 12,
                 PagePadding = new Thickness(12, 8, 12, 12),
                 Background = Brushes.White
             };
@@ -114,7 +114,7 @@ namespace Dateiumbenenner
                 if (line.StartsWith("# "))
                 {
                     list = null; para = null;
-                    var h = new Paragraph { FontWeight = FontWeights.Bold, Margin = new Thickness(0, 10, 0, 2) };
+                    var h = new Paragraph { FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0x33, 0x99)), Margin = new Thickness(0, 10, 0, 2) };
                     AddInlines(h.Inlines, line[2..]);
                     doc.Blocks.Add(h);
                 }
@@ -155,7 +155,7 @@ namespace Dateiumbenenner
             if (pos < text.Length) inlines.Add(new Run(text[pos..]));
         }
 
-        // Verweise wie in WinHelp: grün mit gepunkteter Unterstreichung
+        // Verweise wie in der XP-Hilfe: blau mit gepunkteter Unterstreichung
         private Hyperlink CreateLink(string target, string text)
         {
             var link = new Hyperlink(new Run(text)) { Foreground = LinkBrush, Cursor = System.Windows.Input.Cursors.Hand };
@@ -306,14 +306,16 @@ Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
 * Framework: .NET 8, Zielplattform net8.0-windows10.0.19041.0
 * Oberfläche: WPF, für Ordnerauswahl zusätzlich Windows Forms
 * Version: {AppVersion}
+* Mindest-Windows-Version: 10.0.17763 (1809), x64
+* Erweiterbar über Plugins (Ordner ""Plugins"")
 
-# NuGet-Pakete
-> Microsoft.Web.WebView2          PDF-Vorschau
-> UglyToad.PdfPig                 Text lesen, zusammenführen, PDF erzeugen
-> NHunspell                       Rechtschreibprüfung (OCR-Korrektur)
-> System.Drawing.Common           Grafikfunktionen
-> System.Net.Http                 HTTP-Zugriffe
-> System.Text.RegularExpressions  Mustererkennung
+# NuGet-Pakete (Name, Version, Zweck)
+> Microsoft.Web.WebView2          1.0.4258.31     PDF-Vorschau
+> UglyToad.PdfPig                 1.7.0-custom-5  Text lesen, zusammenführen, PDF erzeugen
+> WeCantSpell.Hunspell            7.0.1           Rechtschreibprüfung (OCR-Korrektur)
+> System.Drawing.Common           10.0.12         Grafikfunktionen
+> System.Net.Http                 4.3.4           HTTP-Zugriffe
+> System.Text.RegularExpressions  4.3.1           Mustererkennung
 
 # Ohne Zusatzpaket (in Windows bzw. .NET enthalten)
 * Windows.Data.Pdf – Rendern von PDF-Seiten beim Rasterisieren
@@ -341,12 +343,12 @@ Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2025 
 # Mitgelieferte Komponenten
 > Microsoft.Web.WebView2   Microsoft BSD-artige Lizenz
 > UglyToad.PdfPig          Apache License 2.0
-> NHunspell                LGPL/GPL/MPL, genutzt unter LGPL
+> WeCantSpell.Hunspell     MPL 1.1/GPL 2/LGPL 2.1, genutzt unter LGPL
 > System.Drawing.Common    MIT (.NET Foundation)
 > System.Net.Http          MIT (.NET Foundation)
 > System.Text.RegularExpr. MIT (.NET Foundation)
 
-NHunspell wird unverändert als eigenständige DLL eingebunden (LGPL-konform).
+WeCantSpell.Hunspell wird unverändert als eigenständige DLL eingebunden (LGPL-konform).
 
 # Nicht enthalten (separat zu beziehen)
 * Hunspell-Wörterbücher – GPL/LGPL/MPL; Download per Skript, siehe [[ocr|OCR-Korrektur]]

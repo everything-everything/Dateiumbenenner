@@ -9,3 +9,8 @@ release/
 *.pfx
 Dictionaries/*.dic
 Dictionaries/*.aff
+
+# Privates Plugin – nicht Teil des oeffentlichen Programms
+/Plugins/
+Dateiumbenenner.Private.slnx
+

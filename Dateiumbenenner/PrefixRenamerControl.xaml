@@ -15,13 +15,13 @@
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <TextBlock Grid.Row="0" Text="Präfix-Umbenennung" FontSize="16" FontWeight="Bold" Margin="10"/>
+
 
         <!-- Einstellungen -->
         <GroupBox Grid.Row="1" Header="Einstellungen" Margin="10,0,10,10">
             <StackPanel>
                 <!-- Anleitung -->
-                <Border Background="LightYellow" BorderBrush="Orange" BorderThickness="1" Padding="8" Margin="0,0,0,10">
+                <Border Background="LightYellow" BorderBrush="Orange" BorderThickness="1" Padding="8" Margin="0,0,0,10" Visibility="Collapsed">
                     <TextBlock TextWrapping="Wrap">
                         <Run Text="📌 Anleitung:" FontWeight="Bold"/>
                         <LineBreak/>
@@ -64,29 +64,30 @@
                     <TextBlock Grid.Column="4" Text="Segmente entfernen:" VerticalAlignment="Center" Margin="5"/>
                     <TextBox Grid.Column="5" x:Name="TxtRemoveSegments" Text="0" Margin="5" TextChanged="TxtRemoveSegments_TextChanged"/>
 
-                    <Button Grid.Column="6" Content="Vom Hauptfenster laden" Click="BtnLoadFromMain_Click" Margin="5" HorizontalAlignment="Right"/>
+                    <TextBlock Grid.Column="6" Text="Dateien werden beim Einlesen des Ordners automatisch übernommen." Foreground="Gray" FontStyle="Italic" VerticalAlignment="Center" Margin="10,5,5,5"/>
                 </Grid>
             </StackPanel>
         </GroupBox>
 
-        <!-- Dateiliste -->
-        <GroupBox Grid.Row="2" Header="Dateien und Vorschau" Margin="10,0,10,10">
+        <!-- Dateiliste ausgeblendet (Auswahl über Hauptliste), Vorschau bleibt sichtbar -->
+        <GroupBox Grid.Row="2" Header="Vorschau" Margin="10,0,10,10" Visibility="Collapsed">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="3*"/>
-                    <ColumnDefinition Width="5"/>
-                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="0"/>
+                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                
-                <!-- Linke Seite: Dateiliste -->
-                <Grid Grid.Column="0">
+
+                <!-- Linke Seite: Dateiliste (ausgeblendet) -->
+                <Grid Grid.Column="0" Visibility="Collapsed">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
                     <!-- Buttons -->
-                    <WrapPanel Grid.Row="0" Margin="5">
+                    <!-- Schaltflächen wurden in die obere Leiste des Hauptfensters verschoben (ausgeblendet, nicht gelöscht) -->
+                    <WrapPanel Grid.Row="0" Margin="5" Visibility="Collapsed">
                         <Button Content="Alle auswählen" Click="BtnSelectAll_Click" Margin="0,0,5,0" Padding="10,3"/>
                         <Button Content="Alle abwählen" Click="BtnDeselectAll_Click" Margin="0,0,5,0" Padding="10,3"/>
                         
@@ -201,7 +202,7 @@
                 <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="LightGray" ShowsPreview="True"/>
 
                 <!-- Rechte Seite: Vorschau -->
-                <GroupBox Grid.Column="2" Header="Dateivorschau" Padding="5">
+                <GroupBox Grid.Column="2" Header="Dateivorschau" Padding="5" Visibility="Collapsed">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
                             <TextBlock Text="Dateiname:" FontWeight="Bold" Margin="0,0,0,5"/>

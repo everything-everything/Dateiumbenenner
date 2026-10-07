@@ -14,6 +14,21 @@
             <Separator/>
             <MenuItem Header="_Beenden" Click="MenuExit_Click"/>
         </MenuItem>
+        <MenuItem Header="_Extras">
+            <MenuItem x:Name="MenuAMode" Header="_A-Modus (Text aus gleichnamiger .txt)" IsCheckable="True" Click="MenuAMode_Click"/>
+            <MenuItem x:Name="MenuOcrCorrection" Header="_OCR-Korrektur (alle Register)" IsCheckable="True" Click="MenuOcrCorrection_Click"/>
+            <Separator/>
+            <MenuItem Header="_OCR-/Parallel-Vergleichstest" Click="MenuOcrTest_Click"/>
+            <Separator/>
+            <MenuItem Header="_PLZ-Verzeichnis (DE) aktualisieren" Click="MenuPlzUpdate_Click"/>
+            <Separator/>
+            <MenuItem Header="_Einstellungen..." Click="MenuSettings_Click"/>
+        </MenuItem>
+        <MenuItem x:Name="MenuPlugins" Header="_Plugins">
+            <MenuItem Header="Plugin _importieren..." Click="MenuPluginImport_Click"/>
+            <MenuItem Header="Plugin-_Ordner öffnen" Click="MenuPluginFolder_Click"/>
+            <Separator x:Name="PluginMenuSeparator"/>
+        </MenuItem>
         <MenuItem Header="_?">
             <MenuItem Header="_Programmhilfe" Click="MenuHelp_Click"/>
             <MenuItem Header="_Lizenzen und Drittanbieter" Click="MenuLicenses_Click"/>
@@ -21,18 +36,15 @@
             <MenuItem Header="_Über / Impressum" Click="MenuAbout_Click"/>
         </MenuItem>
     </Menu>
-    <TabControl>
-        <!-- Registerkarte: Präfix-Umbenennung -->
-        <TabItem Header="Präfix-Umbenennung">
-            <local:PrefixRenamerControl x:Name="PrefixRenamerTab"/>
-        </TabItem>
-
-        <!-- Registerkarte: Umbenennen -->
+    <TabControl x:Name="MainTabs">
+        <!-- Registerkarte: Umbenennen (inkl. Präfix-Umbenennung) -->
         <TabItem Header="Umbenennen">
             <Grid Margin="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
@@ -45,10 +57,11 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/> <!-- Ordner wählen Button -->
-                        <ColumnDefinition Width="10"/>   <!-- Spacer -->
+                        <ColumnDefinition Width="10"/>
                         <ColumnDefinition Width="*"/>    <!-- Pfad (stretch) -->
                     </Grid.ColumnDefinitions>
 
@@ -62,11 +75,32 @@
                         <Button x:Name="BtnRenameAll" Content="Alle umbenennen" Width="145" Click="BtnRenameAll_Click"/>
                         <Button Content="MB/KB umschalten" Width="130" Margin="10,0,0,0" Click="ToggleSizeUnit_Click"/>
                         <Button x:Name="BtnAddToMerge" Content="Zur Liste Zusammenfügen hinzufügen" Width="220" Margin="10,0,0,0" Click="BtnAddToMerge_Click"/>
+                        <Button x:Name="BtnCompanyPrefix" Content="Firma als Präfix (Auswahl)" Width="170" Margin="10,0,0,0" Click="BtnCompanyPrefix_Click" ToolTip="Setzt für die in der Liste markierten Dateien den erkannten Firmennamen als neuen Präfix und öffnet den Präfix-Bereich."/>
+                        <Button x:Name="BtnApplyTemplate" Content="Eigenschaften übertragen" Width="160" Margin="10,0,0,0" Click="BtnApplyTemplate_Click" ToolTip="Speichert die Eigenschaften des aktuellen Dokuments als Vorlage für Firma + Dokumenttyp und überträgt sie auf markierte bzw. gleichartige Dokumente."/>
                         <!-- Neue Option für natürliche Sortierung -->
                         <CheckBox x:Name="ChkNaturalSort" Content="Natürliche Dateinamensortierung (_ = -)" Margin="20,0,0,0" VerticalAlignment="Center" Checked="ChkNaturalSort_Changed" Unchecked="ChkNaturalSort_Changed"/>
                         <!-- NEU: OCR Korrektur Umschalter -->
                         <CheckBox x:Name="ChkOcrCorrection" Content="OCR Korrektur" Margin="20,0,0,0" VerticalAlignment="Center" Checked="ChkOcrCorrection_Changed" Unchecked="ChkOcrCorrection_Changed"/>
                     </StackPanel>
+
+                    <!-- Dritte Zeile: Präfix-Aktionen (aus dem Präfix-Bereich verschoben) -->
+                    <WrapPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,5,0,0">
+                        <Button Content="Alle auswählen" Tag="SelectAll" Click="BtnPrefixAction_Click" Margin="0,0,5,0" Padding="8,2"/>
+                        <Button Content="Alle abwählen" Tag="DeselectAll" Click="BtnPrefixAction_Click" Margin="0,0,10,0" Padding="8,2"/>
+                        <Button Content="Firmenname verwenden" Tag="UseCompany" Click="BtnPrefixAction_Click" Margin="0,0,5,0" Padding="8,2" FontWeight="Bold" Background="LightBlue"/>
+                        <Button Content="Firma → markierte" Tag="CompanyToSelected" Click="BtnPrefixAction_Click" Margin="0,0,5,0" Padding="8,2" Background="LightCyan" ToolTip="Firmennamen auf markierte Dateien (Checkbox) übertragen"/>
+                        <Button Content="Firma → alle" Tag="CompanyToAll" Click="BtnPrefixAction_Click" Margin="0,0,10,0" Padding="8,2" Background="LightCyan" ToolTip="Firmennamen auf alle Dateien übertragen"/>
+                        <Button Content="Präfix → markierte" Tag="PrefixToSelected" Click="BtnPrefixAction_Click" Margin="0,0,5,0" Padding="8,2" ToolTip="Präfix der ausgewählten Zeile auf markierte Dateien anwenden"/>
+                        <Button Content="Präfix → alle" Tag="PrefixToAll" Click="BtnPrefixAction_Click" Margin="0,0,10,0" Padding="8,2" ToolTip="Präfix der ausgewählten Zeile auf alle Dateien anwenden"/>
+                        <Button Content="Segmente von markierten entfernen" Tag="RemoveSegments" Click="BtnPrefixAction_Click" Margin="0,0,10,0" Padding="8,2"/>
+                        <TextBlock Text="Trennz.:" VerticalAlignment="Center" Margin="0,0,3,0"/>
+                        <TextBox x:Name="TxtPrefixDelimiter" Text="_" Width="30" Margin="0,0,8,0" VerticalContentAlignment="Center" TextChanged="PrefixSettings_Changed" ToolTip="Trennzeichen für die Präfix-Aufteilung"/>
+                        <TextBlock Text="Segment:" VerticalAlignment="Center" Margin="0,0,3,0"/>
+                        <TextBox x:Name="TxtPrefixSegment" Text="2" Width="30" Margin="0,0,8,0" VerticalContentAlignment="Center" TextChanged="PrefixSettings_Changed" ToolTip="Segment-Index: bis hierhin gilt der Name als Präfix"/>
+                        <TextBlock Text="Entf.:" VerticalAlignment="Center" Margin="0,0,3,0"/>
+                        <TextBox x:Name="TxtPrefixRemove" Text="0" Width="30" Margin="0,0,10,0" VerticalContentAlignment="Center" TextChanged="PrefixSettings_Changed" ToolTip="Anzahl Segmente, die entfernt werden"/>
+                        <Button Content="Präfix-Umbenennung ausführen" Tag="Rename" Click="BtnPrefixAction_Click" Padding="8,2" FontWeight="Bold" Background="LightGreen"/>
+                    </WrapPanel>
                 </Grid>
 
                 <!-- File list -->
@@ -77,6 +111,11 @@
                     </Grid.RowDefinitions>
                     <TextBox x:Name="TxtFilter" Margin="0,0,0,5" TextChanged="TxtFilter_TextChanged"/>
                     <ListView x:Name="LvFiles" Grid.Row="1" SelectionMode="Extended" SelectionChanged="LvFiles_SelectionChanged">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <EventSetter Event="PreviewGotKeyboardFocus" Handler="LvFilesItem_PreviewGotKeyboardFocus"/>
+                            </Style>
+                        </ListView.ItemContainerStyle>
                         <ListView.View>
                             <GridView>
                                 <GridViewColumn Width="180">
@@ -86,6 +125,19 @@
                                     <GridViewColumn.DisplayMemberBinding>
                                         <Binding Path="FileName"/>
                                     </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                                <GridViewColumn Width="170">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="CompanyName" Content="Firma (wählbar)"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <ComboBox ItemsSource="{Binding CompanyCandidates}"
+                                                      Text="{Binding CompanyName, UpdateSourceTrigger=LostFocus}"
+                                                      IsEditable="True" MinWidth="150" MaxDropDownHeight="200"
+                                                      ToolTip="Erkannten Firmennamen wählen oder korrigieren (wird für den Präfix verwendet)."/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
                                 <GridViewColumn Width="90">
                                     <GridViewColumn.Header>
@@ -185,7 +237,21 @@
                             <TextBlock Text="Datum (erster Treffer):" Grid.Row="2" Grid.Column="0" Margin="0,0,5,5"/>
                             <TextBlock x:Name="TxtDetailDate" Grid.Row="2" Grid.Column="1"/>
                             <TextBlock Text="Seiten:" Grid.Row="3" Grid.Column="0" Margin="0,0,5,5"/>
-                            <TextBlock x:Name="TxtDetailPages" Grid.Row="3" Grid.Column="1"/>
+                            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+                                <TextBlock x:Name="TxtDetailPages"/>
+                                <TextBlock Text="Absender:" Margin="20,0,5,0" Foreground="Gray"/>
+                                <TextBlock x:Name="TxtDetailAddress" ToolTip="Erkannte Absenderadresse (Engine-Bewertung)"/>
+                            </StackPanel>
+
+                            <!-- Präfix (Firmenname) - aus dem Präfix-Bereich hierher verlagert -->
+                            <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,10,0,5">
+                                <TextBlock Text="Firma:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <ComboBox x:Name="CmbMainCompany" IsEditable="True" Width="170" Margin="0,0,10,0" ToolTip="Firmenname auswählen oder eingeben"/>
+                                <TextBlock Text="Neuer Präfix:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <TextBox x:Name="TxtMainNewPrefix" Width="130" Margin="0,0,10,0" VerticalContentAlignment="Center"/>
+                                <TextBlock x:Name="TxtMainPrefixNewName" VerticalAlignment="Center" FontWeight="Bold" Foreground="Green" ToolTip="Neuer Dateiname nach Präfix-Umbenennung"/>
+                                <TextBlock x:Name="TxtMainSplitInfo" Text="Akt. Präfix: –  |  Suffix: –" VerticalAlignment="Center" Foreground="Gray" Margin="10,0,0,0" ToolTip="Aufteilung des aktuellen Dateinamens nach Trennzeichen/Segment-Index"/>
+                            </StackPanel>
 
                             <!-- Überschrift für Einfügepositionen -->
                             <TextBlock Grid.Row="4" Grid.Column="1" Text="Einfügepositionen (aktivieren/deaktivieren)" 
@@ -256,6 +322,21 @@
                                           Width="170" Margin="0,0,10,0"/>
                                 <TextBlock Text=":" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <ComboBox x:Name="CmbDatePosition" Width="90" SelectedIndex="1" SelectionChanged="InsertPosition_Changed">
+                                    <ComboBoxItem Content="Position 1"/>
+                                    <ComboBoxItem Content="Position 2"/>
+                                    <ComboBoxItem Content="Position 3"/>
+                                    <ComboBoxItem Content="Deaktiviert"/>
+                                </ComboBox>
+                                <TextBlock Text="Adresse:" VerticalAlignment="Center" Margin="15,0,5,0"/>
+                                <ComboBox x:Name="CmbAddressPart" Width="90" SelectedIndex="3" SelectionChanged="InsertPosition_Changed" ToolTip="Welcher Teil der erkannten Absenderadresse eingefügt wird">
+                                    <ComboBoxItem Content="Straße"/>
+                                    <ComboBoxItem Content="PLZ"/>
+                                    <ComboBoxItem Content="Ort"/>
+                                    <ComboBoxItem Content="PLZ Ort"/>
+                                    <ComboBoxItem Content="Komplett"/>
+                                </ComboBox>
+                                <TextBlock Text=":" VerticalAlignment="Center" Margin="5,0,5,0"/>
+                                <ComboBox x:Name="CmbAddressPosition" Width="90" SelectedIndex="3" SelectionChanged="InsertPosition_Changed" ToolTip="Deaktiviert = Adresse wird nicht berechnet">
                                     <ComboBoxItem Content="Position 1"/>
                                     <ComboBoxItem Content="Position 2"/>
                                     <ComboBoxItem Content="Position 3"/>
@@ -436,8 +517,11 @@
                 </GroupBox>
             </Grid>
 
+                <!-- Präfix-Logik (unsichtbar; Bedienung über obere Leiste und Details-Box) -->
+                <local:PrefixRenamerControl x:Name="PrefixRenamerTab" Grid.Row="3" Grid.ColumnSpan="2" Visibility="Collapsed"/>
+
                 <!-- Status -->
-                <StatusBar Grid.Row="2" Grid.ColumnSpan="2">
+                <StatusBar Grid.Row="4" Grid.ColumnSpan="2">
                     <StatusBarItem>
                         <TextBlock x:Name="TxtStatus" Text="Bereit"/>
                     </StatusBarItem>

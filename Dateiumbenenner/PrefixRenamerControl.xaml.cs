@@ -65,10 +65,85 @@ namespace Dateiumbenenner
         private static readonly Regex CompanyRegex5 = new(@"([A-ZÄÖÜ][A-Z\-]+(?:\s+[A-Z][A-Z\-]+)*(?:\s+Werk)?)", RegexOptions.Compiled);
         private static readonly Regex CompanyRegex6 = new(@"([A-ZÄÖÜ][\w\-]+(?:[\s\-][A-ZÄÖÜ][\w\-]+)+)", RegexOptions.Compiled);
 
+        // Rechtsform-Erkennung (Fußzeilen enthalten oft "Muster GmbH · Straße · HRB ...")
+        private static readonly Regex LegalFormRegex = new(@"\b(GmbH|AG|KG|UG|OHG|GbR|mbH|e\.\s?V\.|PartG|SE|KGaA)\b", RegexOptions.Compiled);
+
+        // Typische Fußzeilen-Begriffe, die keine Absenderfirma sind (Bank, Register, Steuer, Kontakt)
+        private static readonly Regex FooterNoiseRegex = new(@"\b(Bank|Sparkasse|Volksbank|Raiffeisen|Commerzbank|Postbank|IBAN|BIC|SWIFT|Amtsgericht|Registergericht|Handelsregister|HRB|HRA|Finanzamt|Steuer|USt|UStId|Gesch.ftsf.hr|Vorstand|Aufsichtsrat|Telefon|Telefax|Fax|E-Mail|Internet|Seite|Konto|Bankverbindung|Sitz)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         public PrefixRenamerControl()
         {
             InitializeComponent();
             LvPrefixFiles.ItemsSource = _items;
+        }
+
+        /// <summary>Führt eine Präfix-Aktion aus (für Schaltflächen im Hauptfenster).</summary>
+        public void RunAction(string action)
+        {
+            var e = new RoutedEventArgs();
+            switch (action)
+            {
+                case "SelectAll": BtnSelectAll_Click(this, e); break;
+                case "DeselectAll": BtnDeselectAll_Click(this, e); break;
+                case "UseCompany": BtnUseCompanyName_Click(this, e); break;
+                case "CompanyToSelected": BtnApplyCompanyNameToSelected_Click(this, e); break;
+                case "CompanyToAll": BtnApplyCompanyNameToAll_Click(this, e); break;
+                case "PrefixToSelected": BtnApplyToSelected_Click(this, e); break;
+                case "PrefixToAll": BtnApplyToAll_Click(this, e); break;
+                case "RemoveSegments": BtnRemoveSegmentsFromSelected_Click(this, e); break;
+                case "Rename": BtnRenameFiles_Click(this, e); break;
+            }
+            if (_currentPreviewItem != null) UpdatePreview(_currentPreviewItem);
+        }
+
+        // Externe Felder im Hauptfenster (Details-Bereich)
+        private System.Windows.Controls.ComboBox? _extCompany;
+        private System.Windows.Controls.TextBox? _extPrefix;
+        private TextBlock? _extNewName;
+        private TextBlock? _extSplitInfo;
+
+        /// <summary>Optionale Anzeige von aktuellem Präfix und Suffix im Hauptfenster.</summary>
+        public void AttachSplitInfo(TextBlock splitInfo) => _extSplitInfo = splitInfo;
+
+        /// <summary>Bindet die Präfix-Felder aus dem Hauptfenster an.</summary>
+        public void AttachExternalEditors(System.Windows.Controls.ComboBox company, System.Windows.Controls.TextBox prefix, TextBlock newName)
+        {
+            _extCompany = company; _extPrefix = prefix; _extNewName = newName;
+            company.SelectionChanged += (s, e) => { if (company.SelectedItem is string sel) ExtCompanyCommit(sel); };
+            company.LostFocus += (s, e) => ExtCompanyCommit(company.Text);
+            prefix.TextChanged += (s, e) =>
+            {
+                if (_isUpdatingPreview || _currentPreviewItem == null) return;
+                _currentPreviewItem.NewPrefix = prefix.Text;
+                newName.Text = _currentPreviewItem.NewFileName;
+            };
+        }
+
+        private void ExtCompanyCommit(string? name)
+        {
+            if (_isUpdatingPreview || _currentPreviewItem == null || string.IsNullOrWhiteSpace(name)) return;
+            if (!_currentPreviewItem.CompanyNameCandidates.Contains(name)) _currentPreviewItem.CompanyNameCandidates.Add(name);
+            _currentPreviewItem.SelectedCompanyName = name;
+        }
+
+        private void UpdateExternalEditors(PrefixRenameItem? item)
+        {
+            if (_extCompany == null || _extPrefix == null || _extNewName == null) return;
+            _extCompany.ItemsSource = item?.CompanyNameCandidates.ToList();
+            _extCompany.Text = item?.SelectedCompanyName ?? string.Empty;
+            _extPrefix.Text = item?.NewPrefix ?? string.Empty;
+            _extNewName.Text = item == null || string.IsNullOrEmpty(item.NewPrefix) ? string.Empty : item.NewFileName;
+            if (_extSplitInfo != null)
+                _extSplitInfo.Text = item == null ? "Akt. Präfix: –  |  Suffix: –"
+                    : $"Akt. Präfix: {(string.IsNullOrEmpty(item.CurrentPrefix) ? "(kein)" : item.CurrentPrefix)}  |  Suffix: {item.CurrentSuffix}";
+        }
+
+        /// <summary>Übernimmt Trennzeichen/Segment-Index/Segmente-entfernen aus dem Hauptfenster.</summary>
+        public void SetSplitSettings(string delimiter, string segmentIndex, string removeSegments)
+        {
+            if (TxtDelimiterPrefix.Text != delimiter) TxtDelimiterPrefix.Text = delimiter;
+            if (TxtSegmentIndexPrefix.Text != segmentIndex) TxtSegmentIndexPrefix.Text = segmentIndex;
+            if (TxtRemoveSegments.Text != removeSegments) TxtRemoveSegments.Text = removeSegments;
         }
 
         public void SetMainWindow(MainWindow mainWindow)
@@ -191,7 +266,7 @@ namespace Dateiumbenenner
             return candidates.FirstOrDefault() ?? string.Empty;
         }
 
-        private List<string> ExtractAllCompanyNames(string? fullText)
+        internal List<string> ExtractAllCompanyNames(string? fullText)
         {
             var candidates = new List<string>();
             
@@ -199,14 +274,21 @@ namespace Dateiumbenenner
                 return candidates;
             
             var lines = fullText.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries);
-            
-            // Durchsuche die ersten 20 Zeilen
-            foreach (var line in lines.Take(20))
+
+            // Absender kann im Briefkopf, in der Fußzeile oder irgendwo mit Rechtsform stehen
+            const int headerLines = 20, footerLines = 25;
+            var scanLines = new List<string>();
+            scanLines.AddRange(lines.Take(headerLines));                                   // Briefkopf
+            scanLines.AddRange(lines.Skip(Math.Max(headerLines, lines.Length - footerLines))); // Fußzeile (letzte Seite)
+            scanLines.AddRange(lines.Skip(headerLines).Take(Math.Max(0, lines.Length - headerLines - footerLines))
+                                    .Where(l => LegalFormRegex.IsMatch(l)));               // Mitte: nur Zeilen mit GmbH/AG/...
+
+            foreach (var line in scanLines)
             {
                 var trimmed = line.Trim();
                 if (string.IsNullOrEmpty(trimmed) || trimmed.Length < 3)
                     continue;
-                
+
                 // Versuche verschiedene Regex-Muster (ERWEITERT)
                 foreach (var regex in new[] { CompanyRegex1, CompanyRegex2, CompanyRegex3, CompanyRegex4, CompanyRegex5, CompanyRegex6 })
                 {
@@ -220,7 +302,8 @@ namespace Dateiumbenenner
                             if (name.Length >= 3 && 
                                 !Regex.IsMatch(name, @"^\d+$") &&
                                 !name.Equals("Rechnung", StringComparison.OrdinalIgnoreCase) &&
-                                !name.Equals("Datum", StringComparison.OrdinalIgnoreCase))
+                                !name.Equals("Datum", StringComparison.OrdinalIgnoreCase) &&
+                                !FooterNoiseRegex.IsMatch(name))
                             {
                                 if (!candidates.Contains(name))
                                     candidates.Add(name);
@@ -297,6 +380,7 @@ namespace Dateiumbenenner
             {
                 SplitFileNameBySegment(item, _currentDelimiter, _segmentIndexToSplit);
             }
+            if (_currentPreviewItem != null) UpdatePreview(_currentPreviewItem);
         }
 
         private void BtnUseCompanyName_Click(object sender, RoutedEventArgs e)
@@ -425,6 +509,7 @@ namespace Dateiumbenenner
                 
                 // Vorschau Dateiname
                 TxtPreviewNewFileName.Text = item.NewFileName;
+                UpdateExternalEditors(item);
                 
                 // Textvorschau - lade Dokumentmetadata
                 var meta = _mainWindow?.GetLoadedMetadata()?.FirstOrDefault(m => m.FilePath == item.FilePath);
@@ -644,11 +729,55 @@ namespace Dateiumbenenner
         {
             if (TxtPrefixStatus != null)
                 TxtPrefixStatus.Text = message;
+            if (_mainWindow?.TxtStatus != null)
+                _mainWindow.TxtStatus.Text = message;
         }
 
         private void TxtNewPrefix_TextChanged(object sender, TextChangedEventArgs e)
         {
             // NewPrefix wird durch Binding automatisch aktualisiert
+        }
+
+        /// <summary>Übernimmt einen in der Hauptliste gewählten/korrigierten Firmennamen.</summary>
+        public void SetCompanyName(string filePath, string? name)
+        {
+            var item = _items.FirstOrDefault(i => string.Equals(i.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            if (item == null) return;
+            if (!string.IsNullOrWhiteSpace(name) && !item.CompanyNameCandidates.Contains(name))
+                item.CompanyNameCandidates.Add(name);
+            item.SelectedCompanyName = string.IsNullOrWhiteSpace(name) ? null : name;
+            if (_currentPreviewItem == item) UpdatePreview(item);
+        }
+
+        /// <summary>Übernimmt die Auswahl der Hauptliste (Häkchen + aktuelle Zeile).</summary>
+        public void SyncSelection(IEnumerable<string> filePaths)
+        {
+            var set = new HashSet<string>(filePaths, StringComparer.OrdinalIgnoreCase);
+            foreach (var item in _items)
+                item.IsSelected = set.Contains(item.FilePath);
+            var first = _items.FirstOrDefault(i => i.IsSelected);
+            if (first != null)
+            {
+                LvPrefixFiles.SelectedItem = first;
+                LvPrefixFiles.ScrollIntoView(first);
+                UpdatePreview(first);
+            }
+            else UpdateExternalEditors(null);
+        }
+
+        /// <summary>Setzt für alle markierten Dateien den gewählten Firmennamen als neuen Präfix.</summary>
+        public int ApplyCompanyNameAsPrefixToChecked()
+        {
+            int count = 0;
+            foreach (var item in _items.Where(i => i.IsSelected))
+            {
+                var name = item.SelectedCompanyName ?? item.ExtractedCompanyName;
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                item.NewPrefix = name.Replace(" ", _currentDelimiter);
+                count++;
+            }
+            UpdateStatus($"Firmenname als Präfix für {count} Datei(en) gesetzt.");
+            return count;
         }
     }
 }

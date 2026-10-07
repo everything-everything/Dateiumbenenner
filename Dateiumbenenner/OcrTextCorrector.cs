@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using NHunspell;
+using WeCantSpell.Hunspell;
 
 namespace Dateiumbenenner
 {
@@ -45,11 +45,13 @@ namespace Dateiumbenenner
         private static readonly HashSet<string> _dictionary = new(StringComparer.OrdinalIgnoreCase);
         
         // Hunspell Spell Checker
-        private static readonly List<Hunspell> _spellCheckers = new();
+        private static readonly List<WordList> _spellCheckers = new();
         private static bool _useSpellCheck = false;
 
         private static bool _loaded;
         private static readonly object _lock = new();
+        // Hunspell (WordList) wird zur Sicherheit nur von einem Thread gleichzeitig benutzt
+        private static readonly object _spellLock = new();
 
         public static string Fix(string input, bool applyGenericRules = true)
         {
@@ -106,8 +108,6 @@ namespace Dateiumbenenner
                 _dictionary.Clear();
                 
                 // Alte Spell Checker freigeben
-                foreach (var checker in _spellCheckers)
-                    checker?.Dispose();
                 _spellCheckers.Clear();
                 _useSpellCheck = false;
                 
@@ -216,7 +216,7 @@ namespace Dateiumbenenner
 
                 if (File.Exists(affFile) && File.Exists(dicFile))
                 {
-                    var hunspell = new Hunspell(affFile, dicFile);
+                    var hunspell = WordList.CreateFromFiles(dicFile, affFile);
                     _spellCheckers.Add(hunspell);
                     _useSpellCheck = true;
                 }
@@ -359,10 +359,13 @@ namespace Dateiumbenenner
                 return false;
 
             // Prüfe in allen geladenen Wörterbüchern
-            foreach (var checker in _spellCheckers)
+            lock (_spellLock)
             {
-                if (checker.Spell(word))
-                    return true;
+                foreach (var checker in _spellCheckers)
+                {
+                    if (checker.Check(word))
+                        return true;
+                }
             }
             
             return false;
@@ -376,9 +379,10 @@ namespace Dateiumbenenner
                 return allSuggestions;
 
             // Sammle Vorschläge aus allen Wörterbüchern
+            lock (_spellLock)
             foreach (var checker in _spellCheckers)
             {
-                var suggestions = checker.Suggest(word);
+                var suggestions = checker.Suggest(word).ToList();
                 if (suggestions != null && suggestions.Count > 0)
                 {
                     allSuggestions.AddRange(suggestions);
