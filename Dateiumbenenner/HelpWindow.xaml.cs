@@ -40,6 +40,7 @@ namespace Dateiumbenenner
             InitializeComponent();
             Title = $"Dateiumbenenner {AppVersion} – Hilfe";
             _topics = BuildTopics();
+            AddPluginTopics();
             Show(page switch { Page.Licenses => "lizenzen", Page.About => "ueber", _ => "inhalt" }, addToHistory: false);
         }
 
@@ -196,6 +197,7 @@ Klicken Sie auf ein unterstrichenes Thema, um es anzuzeigen. Mit den Schaltfläc
 # Technische Informationen
 * [[technik|Aufbau und verwendete NuGet-Pakete]]
 * [[signatur|Digitale Signatur und Prüfsummen]]
+* [[plugins|Plugins (Erweiterungen)]]
 
 # Rechtliches
 * [[lizenzen|Lizenzen und Drittanbieter]]
@@ -428,6 +430,56 @@ Siehe auch: [[haftung|Haftungsausschluss]], [[lizenzen|Lizenzen und Drittanbiete
 * [[signatur|Zertifikat]]
 * [[zusammenfuehren|Zusammenführen]]")
         };
+
+        #endregion
+
+        #region Plugin-Hilfe
+
+        /// <summary>Vom Hauptfenster gesetzte Liste der geladenen Plugins.</summary>
+        public static IReadOnlyList<Plugins.LoadedPlugin> LoadedPlugins { get; set; } = Array.Empty<Plugins.LoadedPlugin>();
+
+        private void AddPluginTopics()
+        {
+            var sb = new System.Text.StringBuilder("Plugins erweitern den Dateiumbenenner um zusätzliche Funktionen. Sie werden im Menü \"Plugins\" importiert und aktiviert und liegen im Programmordner unter \"Plugins\". Jedes Plugin bringt seine eigenen Abhängigkeiten mit.\n\n# Geladene Plugins\n");
+            var extra = new List<(string Id, string Title, string Body)>();
+            if (LoadedPlugins.Count == 0) sb.Append("Derzeit ist kein Plugin geladen.\n");
+            foreach (var lp in LoadedPlugins)
+            {
+                var p = lp.Plugin;
+                var first = (string?)null;
+                if (p is Plugins.IPluginHelpProvider hp)
+                {
+                    try
+                    {
+                        foreach (var t in hp.GetHelpTopics())
+                        {
+                            var id = $"plugin:{p.Id}:{t.Id}";
+                            first ??= id;
+                            extra.Add((id, t.Title, t.Body));
+                        }
+                    }
+                    catch { }
+                }
+                var name = first != null ? $"[[{first}|{p.Name}]]" : p.Name;
+                sb.Append($"* {name}, Version {p.Version}{(lp.Enabled ? "" : " (deaktiviert)")} – {p.Description}\n");
+            }
+            // Plugin-interne Verweise auf eigene Themen-IDs umschreiben
+            for (int i = 0; i < extra.Count; i++)
+            {
+                var body = extra[i].Body;
+                foreach (var e in extra)
+                {
+                    var shortId = e.Id[(e.Id.LastIndexOf(':') + 1)..];
+                    var prefix = e.Id[..(e.Id.LastIndexOf(':') + 1)];
+                    if (extra[i].Id.StartsWith(prefix)) body = body.Replace("[[" + shortId + "|", "[[" + e.Id + "|");
+                }
+                extra[i] = (extra[i].Id, extra[i].Title, body);
+            }
+            int idx = _topics.FindIndex(t => t.Id == "lizenzen");
+            if (idx < 0) idx = _topics.Count;
+            _topics.Insert(idx, ("plugins", "Plugins (Erweiterungen)", sb.ToString().TrimEnd()));
+            _topics.InsertRange(idx + 1, extra);
+        }
 
         #endregion
     }

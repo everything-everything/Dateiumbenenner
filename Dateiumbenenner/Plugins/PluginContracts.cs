@@ -42,4 +42,13 @@ namespace Dateiumbenenner.Plugins
         /// <summary>Inhalt der Registerkarte, die beim Aktivieren eingefügt wird.</summary>
         FrameworkElement CreateTabContent();
     }
+
+    /// <summary>Hilfethema eines Plugins. Body nutzt das Hilfeformat (# Überschrift, * Liste, &gt; Festbreite, [[id|Text]] Verweis).</summary>
+    public record PluginHelpTopic(string Id, string Title, string Body);
+
+    /// <summary>Optional: Plugins können eigene Themen zur integrierten Hilfe beisteuern.</summary>
+    public interface IPluginHelpProvider
+    {
+        IEnumerable<PluginHelpTopic> GetHelpTopics();
+    }
 }

@@ -470,6 +470,7 @@ namespace Dateiumbenenner
                 catch (Exception ex) { _pluginManager.Errors.Add($"{p.Plugin.Name}: {ex.Message}"); p.Enabled = false; }
             }
             RebuildPluginMenu();
+            HelpWindow.LoadedPlugins = _pluginManager.Plugins;
             if (_pluginManager.Errors.Count > 0)
                 MessageBoxWpf.Show(string.Join(Environment.NewLine, _pluginManager.Errors), "Plugins", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
