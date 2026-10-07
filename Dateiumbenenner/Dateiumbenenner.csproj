@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -8,10 +8,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <Version>3.11.0</Version>
+    <Version>3.11.1</Version>
     <Authors>everything-everything</Authors>
     <Product>Dateiumbenenner</Product>
-    <Copyright>Copyright (c) 2025 everything-everything</Copyright>
+    <Copyright>Copyright (c) 2026 everything-everything</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/everything-everything/Dateiumbenenner</RepositoryUrl>
   </PropertyGroup>

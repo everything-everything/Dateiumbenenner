@@ -338,7 +338,7 @@ Zu jedem Release gehören:
 Da das Zertifikat selbst ausgestellt ist, meldet Windows es als nicht vertrauenswürdig, solange es nicht manuell importiert wurde. Die Prüfsummen belegen trotzdem, dass die Dateien unverändert sind."),
 
             ("lizenzen", "Lizenzen und Drittanbieter", $@"# Dieses Programm
-Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2025 {GitHubUser}. Den vollständigen Text enthält die Datei LICENSE.
+Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2026 {GitHubUser}. Den vollständigen Text enthält die Datei LICENSE.
 
 # Mitgelieferte Komponenten
 > Microsoft.Web.WebView2   Microsoft BSD-artige Lizenz
@@ -368,7 +368,7 @@ Für Inhalte verlinkter externer Seiten sind ausschließlich deren Betreiber ver
             ("ueber", "Über Dateiumbenenner / Impressum", $@"Dateiumbenenner
 Version {AppVersion}
 
-Copyright (c) 2025 {GitHubUser}
+Copyright (c) 2026 {GitHubUser}
 Veröffentlicht unter der MIT-Lizenz.
 
 # Kontakt
