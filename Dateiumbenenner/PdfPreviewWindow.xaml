@@ -17,6 +17,11 @@
                 <ComboBoxItem Content="WebView2"/>
                 <ComboBoxItem Content="Text"/>
             </ComboBox>
+            <TextBlock Text="Suchen:" VerticalAlignment="Center" Margin="15,0,5,0"/>
+            <TextBox x:Name="TxtSearch" Width="160" VerticalContentAlignment="Center" KeyDown="TxtSearch_KeyDown" ToolTip="Enter = weiter, Umschalt+Enter = zurück. In der PDF-Ansicht: Strg+F"/>
+            <Button Content="◀" Width="28" Margin="3,0,0,0" Click="BtnSearchPrev_Click"/>
+            <Button Content="▶" Width="28" Margin="3,0,0,0" Click="BtnSearchNext_Click"/>
+            <TextBlock x:Name="TxtSearchInfo" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="Gray"/>
             <TextBlock x:Name="TxtFileName" VerticalAlignment="Center" Margin="20,0,0,0" FontWeight="Bold"/>
         </StackPanel>
         
@@ -31,7 +36,10 @@
                          BorderThickness="0"
                          Background="Transparent"
                          FontFamily="Consolas"
-                         FontSize="12"/>
+                         FontSize="12"
+                         IsInactiveSelectionHighlightEnabled="True"
+                                                  SelectionBrush="Yellow"
+                                                  SelectionOpacity="0.5"/>
             </ScrollViewer>
         </Grid>
     </Grid>

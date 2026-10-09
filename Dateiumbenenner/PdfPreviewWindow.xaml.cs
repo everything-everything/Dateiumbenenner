@@ -131,5 +131,60 @@ namespace Dateiumbenenner
         {
             await UpdatePdfPreviewAsync();
         }
+
+        private void TxtSearch_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key != System.Windows.Input.Key.Enter) return;
+            Search((System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) == 0);
+            e.Handled = true;
+        }
+
+        private void BtnSearchNext_Click(object sender, RoutedEventArgs e) => Search(true);
+        private void BtnSearchPrev_Click(object sender, RoutedEventArgs e) => Search(false);
+
+        /// <summary>Sucht in der Text-Ansicht; schaltet bei Bedarf von der PDF-Ansicht auf Text um.</summary>
+        private void Search(bool forward)
+        {
+            var term = TxtSearch.Text;
+            if (string.IsNullOrEmpty(term)) { TxtSearchInfo.Text = string.Empty; return; }
+            if (PdfTextScroll.Visibility != Visibility.Visible)
+            {
+                CmbPdfPreviewMode.SelectedIndex = 2;
+                ShowPdfAsText();
+                PdfWebView.Visibility = Visibility.Collapsed;
+            }
+            var box = TxtPdfFallback;
+            var text = box.Text ?? string.Empty;
+            int pos;
+            if (forward)
+            {
+                int start = box.SelectionLength > 0 ? box.SelectionStart + 1 : box.CaretIndex;
+                pos = start < text.Length ? text.IndexOf(term, start, StringComparison.CurrentCultureIgnoreCase) : -1;
+                if (pos < 0) pos = text.IndexOf(term, StringComparison.CurrentCultureIgnoreCase);
+            }
+            else
+            {
+                int start = box.SelectionStart - 1;
+                pos = start >= 0 ? text.LastIndexOf(term, start, StringComparison.CurrentCultureIgnoreCase) : -1;
+                if (pos < 0) pos = text.LastIndexOf(term, StringComparison.CurrentCultureIgnoreCase);
+            }
+            if (pos < 0) { TxtSearchInfo.Text = "Nicht gefunden"; return; }
+            int count = 0, idx = 0, current = 0;
+            while ((idx = text.IndexOf(term, idx, StringComparison.CurrentCultureIgnoreCase)) >= 0)
+            {
+                count++;
+                if (idx == pos) current = count;
+                idx += term.Length;
+            }
+            TxtSearchInfo.Text = $"{current} / {count}";
+            box.Select(pos, term.Length);
+            box.UpdateLayout();
+            var rect = box.GetRectFromCharacterIndex(pos);
+            if (!rect.IsEmpty)
+            {
+                var top = box.TranslatePoint(rect.TopLeft, PdfTextScroll).Y + PdfTextScroll.VerticalOffset;
+                PdfTextScroll.ScrollToVerticalOffset(Math.Max(0, top - PdfTextScroll.ViewportHeight / 3));
+            }
+        }
     }
 }

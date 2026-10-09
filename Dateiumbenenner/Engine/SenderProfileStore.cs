@@ -39,9 +39,16 @@ namespace Dateiumbenenner.Engine
         public SenderProfileStore(string file)
         {
             _file = file;
+            _ambiguousFile = Path.ChangeExtension(file, null) + "_ambiguous.json";
             try { _profiles = File.Exists(file) ? JsonSerializer.Deserialize<List<SenderProfile>>(File.ReadAllText(file)) ?? new() : new(); }
             catch { _profiles = new(); }
+            try { _ambiguous = File.Exists(_ambiguousFile) ? new HashSet<string>(JsonSerializer.Deserialize<List<string>>(File.ReadAllText(_ambiguousFile)) ?? new(), StringComparer.OrdinalIgnoreCase) : new(StringComparer.OrdinalIgnoreCase); }
+            catch { _ambiguous = new(StringComparer.OrdinalIgnoreCase); }
         }
+
+        private readonly string _ambiguousFile;
+        /// <summary>Merkmale, die bei mehreren Firmen vorkamen (z. B. eigene Firma, Empfänger) – werden nicht mehr verwendet.</summary>
+        private readonly HashSet<string> _ambiguous;
 
         public IReadOnlyList<SenderProfile> Profiles { get { lock (_lock) return _profiles.ToList(); } }
 
@@ -77,7 +84,7 @@ namespace Dateiumbenenner.Engine
                     double score = 0;
                     foreach (var f in fingerprints)
                     {
-                        if (!p.Fingerprints.Contains(f)) continue;
+                        if (_ambiguous.Contains(f) || !p.Fingerprints.Contains(f)) continue;
                         score += f.StartsWith("UST:") || f.StartsWith("IBAN:") || f.StartsWith("STNR:") ? 3
                                : f.StartsWith("TEL:") || f.StartsWith("WEB:") || f.StartsWith("MAIL:") ? 2 : 1;
                     }
@@ -95,10 +102,21 @@ namespace Dateiumbenenner.Engine
             if (company.Length < 2 || fingerprints.Count == 0) return;
             lock (_lock)
             {
-                // Merkmale, die bisher einer ANDEREN Firma zugeordnet waren, dort entfernen (Korrektur)
-                foreach (var other in _profiles.Where(p => !p.Company.Equals(company, StringComparison.OrdinalIgnoreCase)))
-                    other.Fingerprints.ExceptWith(fingerprints);
-                _profiles.RemoveAll(p => p.Fingerprints.Count == 0);
+                // Merkmale, die bereits einer ANDEREN Firma gehören, stammen meist von der eigenen Firma
+                // oder dem Empfänger. Nicht verschieben, sondern als mehrdeutig sperren.
+                fingerprints = new HashSet<string>(fingerprints, StringComparer.OrdinalIgnoreCase);
+                fingerprints.ExceptWith(_ambiguous);
+                var conflicts = _profiles.Where(p => !p.Company.Equals(company, StringComparison.OrdinalIgnoreCase))
+                                         .SelectMany(p => p.Fingerprints.Where(fingerprints.Contains)).ToList();
+                if (conflicts.Count > 0)
+                {
+                    _ambiguous.UnionWith(conflicts);
+                    foreach (var p in _profiles) p.Fingerprints.ExceptWith(conflicts);
+                    fingerprints.ExceptWith(conflicts);
+                    _profiles.RemoveAll(p => p.Fingerprints.Count == 0);
+                    SaveAmbiguous();
+                }
+                if (fingerprints.Count == 0) { Save(); return; }
 
                 var prof = _profiles.FirstOrDefault(p => p.Company.Equals(company, StringComparison.OrdinalIgnoreCase));
                 if (prof == null) { prof = new SenderProfile { Company = company }; _profiles.Add(prof); }
@@ -110,6 +128,12 @@ namespace Dateiumbenenner.Engine
                 prof.LastUsed = DateTime.Now;
                 Save();
             }
+        }
+
+        private void SaveAmbiguous()
+        {
+            try { File.WriteAllText(_ambiguousFile, JsonSerializer.Serialize(_ambiguous.OrderBy(s => s).ToList(), new JsonSerializerOptions { WriteIndented = true })); }
+            catch { }
         }
 
         private void Save()

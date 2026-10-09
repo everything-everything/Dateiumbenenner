@@ -109,8 +109,10 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    <TextBox x:Name="TxtFilter" Margin="0,0,0,5" TextChanged="TxtFilter_TextChanged"/>
-                    <ListView x:Name="LvFiles" Grid.Row="1" SelectionMode="Extended" SelectionChanged="LvFiles_SelectionChanged">
+                    <TextBox x:Name="TxtFilter" Margin="0,0,0,5" TextChanged="TxtFilter_TextChanged" ToolTip="In der Liste suchen: Dateiname, Firma, Typ, Rechnungs-/Belegnummer, Datum"/>
+                    <ListView x:Name="LvFiles" Grid.Row="1" SelectionMode="Extended" SelectionChanged="LvFiles_SelectionChanged"
+                                                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                                  VirtualizingPanel.IsVirtualizingWhenGrouping="True" ScrollViewer.CanContentScroll="True">
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <EventSetter Event="PreviewGotKeyboardFocus" Handler="LvFilesItem_PreviewGotKeyboardFocus"/>
@@ -128,16 +130,11 @@
                                 </GridViewColumn>
                                 <GridViewColumn Width="170">
                                     <GridViewColumn.Header>
-                                        <GridViewColumnHeader Tag="CompanyName" Content="Firma (wählbar)"/>
+                                        <GridViewColumnHeader Tag="CompanyName" Content="Firma"/>
                                     </GridViewColumn.Header>
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <ComboBox ItemsSource="{Binding CompanyCandidates}"
-                                                      Text="{Binding CompanyName, UpdateSourceTrigger=LostFocus}"
-                                                      IsEditable="True" MinWidth="150" MaxDropDownHeight="200"
-                                                      ToolTip="Erkannten Firmennamen wählen oder korrigieren (wird für den Präfix verwendet)."/>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
+                                    <GridViewColumn.DisplayMemberBinding>
+                                        <Binding Path="CompanyName"/>
+                                    </GridViewColumn.DisplayMemberBinding>
                                 </GridViewColumn>
                                 <GridViewColumn Width="90">
                                     <GridViewColumn.Header>

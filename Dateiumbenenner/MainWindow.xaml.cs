@@ -241,6 +241,8 @@ namespace Dateiumbenenner
 
         public MainWindow()
         {
+            ListViewSorter.Register();
+            ListViewSearch.Register();
             InitializeComponent();
             if (LvFiles != null)
             {
@@ -265,7 +267,11 @@ namespace Dateiumbenenner
                 prefixTab?.AttachExternalEditors(CmbMainCompany, TxtMainNewPrefix, TxtMainPrefixNewName);
                 prefixTab?.AttachSplitInfo(TxtMainSplitInfo);
                 if (TxtMainNewPrefix != null) TxtMainNewPrefix.TextChanged += (_, _) => { if (_currentMeta != null) RefreshNewNamePreview(_currentMeta); };
-                if (CmbMainCompany != null) CmbMainCompany.SelectionChanged += (_, _) => { if (_currentMeta != null) RefreshNewNamePreview(_currentMeta); };
+                if (CmbMainCompany != null)
+                {
+                    CmbMainCompany.SelectionChanged += (_, _) => { if (_currentMeta != null) { if (CmbMainCompany.SelectedItem is string s && !string.IsNullOrWhiteSpace(s)) _currentMeta.CompanyName = s; RefreshNewNamePreview(_currentMeta); } };
+                    CmbMainCompany.LostFocus += (_, _) => { var t = CmbMainCompany.Text?.Trim(); if (_currentMeta != null && !string.IsNullOrWhiteSpace(t) && t != _currentMeta.CompanyName) { _currentMeta.CompanyName = t; RefreshNewNamePreview(_currentMeta); } };
+                }
                 InitPlugins();
                 var txtSteps = FindName("TxtDocTypeNumberSteps") as System.Windows.Controls.TextBox;
                 if (txtSteps != null && string.IsNullOrEmpty(txtSteps.Text)) txtSteps.Text = _docTypeNumberSteps.ToString();
@@ -338,15 +344,24 @@ namespace Dateiumbenenner
             _isBulkLoading=true;
             var progress=new Progress<int>(n=>{ if(LoadingProgress!=null && total>0) LoadingProgress.Value=n*100.0/total; });
             // Parallel: PDF-Text lesen + Regex-Auswertung auf mehreren Kernen (Objekte sind noch nicht in der UI-Liste)
-            var options=new ParallelOptions{ MaxDegreeOfParallelism=Math.Max(2,Environment.ProcessorCount-1) };
-            await Parallel.ForEachAsync(metas, options, async (meta,_)=>{ await LoadMetadataAsync(meta); ((IProgress<int>)progress).Report(Interlocked.Increment(ref processed)); });
+            // Hälfte der Kerne: Oberfläche bleibt beim Laden bedienbar
+            var options=new ParallelOptions{ MaxDegreeOfParallelism=Math.Max(2,Environment.ProcessorCount/2) };
+            var companiesByMeta=new List<string>?[metas.Count];
+            var indexed=metas.Select((m,i)=>(m,i)).ToList();
+            await Parallel.ForEachAsync(indexed, options, async (x,_)=>{
+                await LoadMetadataAsync(x.m);
+                // Firmenerkennung ebenfalls parallel (vorher seriell auf dem UI-Thread -> Hänger)
+                try{ companiesByMeta[x.i]=ExtractCompanyNames(x.m.FullText, x.m.FilePath); } catch{ }
+                ((IProgress<int>)progress).Report(Interlocked.Increment(ref processed)); });
             // Wurde inzwischen neu geladen (z. B. Sortierung/A-Modus umgeschaltet), dieses Ergebnis verwerfen
             if(loadVersion!=_loadVersion) return;
             // UI-Thread: Nummern zuordnen und Liste in Originalreihenfolge in einem Durchgang füllen
-            foreach(var meta in metas){ AutoAssignNumbers(meta); try{ meta.CompanyCandidates.Clear(); foreach(var c in ExtractCompanyNames(meta.FullText, meta.FilePath)) meta.CompanyCandidates.Add(c); meta.CompanyName=meta.CompanyCandidates.FirstOrDefault(); } catch{ } meta.PropertyChanged-=Meta_CompanyChanged; meta.PropertyChanged+=Meta_CompanyChanged; _items.Add(meta); }
+            var boundSource=LvFiles.ItemsSource; LvFiles.ItemsSource=null;
+            for(int mi=0; mi<metas.Count; mi++){ var meta=metas[mi]; AutoAssignNumbers(meta); try{ meta.CompanyCandidates.Clear(); foreach(var c in companiesByMeta[mi] ?? new List<string>()) meta.CompanyCandidates.Add(c); meta.CompanyName=meta.CompanyCandidates.FirstOrDefault(); } catch{ } meta.PropertyChanged-=Meta_CompanyChanged; meta.PropertyChanged+=Meta_CompanyChanged; _items.Add(meta); }
+            LvFiles.ItemsSource=boundSource??_items;
             // Präfix-Bereich
             try{ PrefixRenamerTab?.LoadFilesFromMain(metas); } catch{ }
-            _isBulkLoading=false; LvFiles.Items.Refresh();
+            _isBulkLoading=false;
             if(LoadingProgress!=null) LoadingProgress.Visibility=Visibility.Collapsed;
             UpdateStandardStatus();
             OfferTemplates(metas);
@@ -414,11 +429,18 @@ namespace Dateiumbenenner
                 {
                     meta.FullText=await Task.Run(()=>
                     {
+                        if (PdfTextCache.TryGet(meta.FilePath, out var cachedText, out var cachedPages))
+                        {
+                            meta.PageCount=cachedPages;
+                            return cachedText;
+                        }
                         using var doc=UglyToad.PdfPig.PdfDocument.Open(meta.FilePath);
                         meta.PageCount=doc.NumberOfPages;
                         var sb=new System.Text.StringBuilder();
                         foreach(var page in doc.GetPages()) sb.AppendLine(page.Text);
-                        return sb.ToString();
+                        var text=sb.ToString();
+                        PdfTextCache.Store(meta.FilePath, text, meta.PageCount);
+                        return text;
                     });
                 }
                 else
@@ -442,16 +464,74 @@ namespace Dateiumbenenner
         public List<string> ExtractCompanyNames(string? fullText, string? pdfPath = null)
         {
             var list = CompanyMatcher.Improve(PrefixRenamerTab?.ExtractAllCompanyNames(fullText) ?? new List<string>(), fullText);
+            list = PreferLegalFormNames(list, fullText);
+            list.RemoveAll(Dateiumbenenner.Engine.CompanyExclusions.IsExcluded);
+            // Eigene Firma ist Empfänger/Aussteller – nie als fremder Absender vorschlagen
+            var own = Dateiumbenenner.Engine.OwnCompany.Current;
+            list.RemoveAll(own.Matches);
+            // Nur eigene oder keine Adresse erkannt → eigener/interner Beleg
+            if (list.Count == 0 && own.HasName) return new List<string> { own.Name };
+            // Firmenname in der Nähe
+            list = Engine.RankCompaniesByAddress(list, fullText, pdfPath);
+            // Namen mit Rechtsform bleiben vor Briefkopf-Fragmenten (z. B. "i DIE GARAGE S"); Reihenfolge innerhalb bleibt
+            list = list.Where(HasLegalForm).Concat(list.Where(c => !HasLegalForm(c))).ToList();
             // Gelerntes Absender-Profil (USt-ID, IBAN, Telefon ...) hat Vorrang
             // pdfPath: gleichnamige Layout-TXT/PDF wird für die Adressbewertung genutzt
             var profile = Engine.IdentifySender(fullText, pdfPath);
-            if (profile != null && !Dateiumbenenner.Engine.CompanyExclusions.IsExcluded(profile.Company))
+            if (profile != null && !Dateiumbenenner.Engine.CompanyExclusions.IsExcluded(profile.Company) && !own.Matches(profile.Company))
             {
                 list.RemoveAll(c => string.Equals(c, profile.Company, StringComparison.OrdinalIgnoreCase));
-                list.Insert(0, profile.Company);
+                // Profil-Name steht nicht im Beleg (z. B. falsch gelerntes Merkmal): nur als Alternative anbieten
+                if (list.Count > 0 && !CompanyMatcher.AppearsInText(profile.Company, fullText)) list.Add(profile.Company);
+                // Kurzform wie "DFH" nicht vor vollständigen Namen mit Rechtsform ("DFH Haus GmbH") setzen
+                else if (list.Count > 0 && HasLegalForm(list[0]) && !HasLegalForm(profile.Company)) list.Insert(1, profile.Company);
+                else list.Insert(0, profile.Company);
             }
-            list.RemoveAll(Dateiumbenenner.Engine.CompanyExclusions.IsExcluded);
             return list;
+        }
+
+        // Name (1-5 Wörter) direkt vor einer Rechtsform; Beginn am Zeilenanfang oder nach ':', '|', ';', ',' bzw. Tab/Mehrfach-Leerzeichen
+        private static readonly System.Text.RegularExpressions.Regex LegalFormNameRegex = new(
+            @"(?:^|[:|;,]\s*|\t|\s{2,})((?:[\p{L}\d][\p{L}\d&.'\-]*\s+){0,4}?[\p{L}\d][\p{L}\d&.'\-]*\s+(?:GmbH\s*&\s*Co\.?\s*KG|GmbH|GMBH|AG|KG|UG|OHG|GbR|SE|e\.\s?V\.))(?=$|[\s,|;.)])",
+            System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        private static readonly System.Text.RegularExpressions.Regex LegalFormEndRegex = new(
+            @"\s(GmbH(\s*&\s*Co\.?\s*KG)?|GMBH|AG|KG|UG|OHG|GbR|SE|e\.\s?V\.)\.?$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        private static bool HasLegalForm(string c) => LegalFormEndRegex.IsMatch(c.Trim());
+
+        private static readonly HashSet<string> LeadingFillWords = new(StringComparer.OrdinalIgnoreCase)
+        { "i", "an", "von", "die", "der", "das", "den", "dem", "und", "firma", "fa", "fa.", "bei", "für", "empfänger", "absender", "lieferant" };
+
+        /// <summary>Firmennamen mit Rechtsform (z. B. "ZAPF GmbH", "ean50 GmbH", "X GmbH &amp; Co. KG") aus dem Text nach vorne;
+        /// Kurzformen davon ("ZAPF", "DFH") und bekannte Firmen, die nicht im Text stehen, nach hinten.</summary>
+        private static List<string> PreferLegalFormNames(List<string> list, string? fullText)
+        {
+            if (string.IsNullOrWhiteSpace(fullText)) return list;
+            var legal = new List<string>();
+            foreach (System.Text.RegularExpressions.Match m in LegalFormNameRegex.Matches(fullText))
+            {
+                var words = m.Groups[1].Value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ToList();
+                while (words.Count > 2 && LeadingFillWords.Contains(words[0].TrimEnd(':'))) words.RemoveAt(0);
+                var name = string.Join(" ", words);
+                if (name.Length < 5 || Dateiumbenenner.Engine.DocumentEngine.Plz.IsPlaceName(words[0])) continue;
+                if (System.Text.RegularExpressions.Regex.IsMatch(name, @"\b(Bank|Sparkasse|Volksbank|Amtsgericht|Registergericht|HRB|IBAN|BIC)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
+                if (!legal.Any(l => l.Equals(name, StringComparison.OrdinalIgnoreCase))) legal.Add(name);
+            }
+            if (legal.Count == 0) return list;
+
+            bool IsShortFormOfLegal(string c) => legal.Any(l => !l.Equals(c, StringComparison.OrdinalIgnoreCase)
+                && CompanyMatcher.Normalize(l).StartsWith(CompanyMatcher.Normalize(c), StringComparison.Ordinal) && CompanyMatcher.Normalize(c).Length >= 2);
+
+            var inText = new List<string>();
+            var notInText = new List<string>();
+            foreach (var c in list)
+            {
+                if (legal.Any(l => l.Equals(c, StringComparison.OrdinalIgnoreCase)) || IsShortFormOfLegal(c)) continue;
+                (CompanyMatcher.AppearsInText(c, fullText) ? inText : notInText).Add(c);
+            }
+            var shortForms = list.Where(c => !legal.Any(l => l.Equals(c, StringComparison.OrdinalIgnoreCase)) && IsShortFormOfLegal(c));
+            return legal.Concat(inText).Concat(shortForms).Concat(notInText).ToList();
         }
 
         public Dateiumbenenner.Engine.IDocumentEngine Engine { get; } = new Dateiumbenenner.Engine.DocumentEngine();
@@ -504,7 +584,10 @@ namespace Dateiumbenenner
             {
                 var tab = new TabItem { Header = p.Plugin.Name, Content = p.Plugin.CreateTabContent() };
                 _pluginTabs[p.Plugin.Id] = tab;
-                MainTabs.Items.Add(tab);
+                // "PDF Zusammenführen" bleibt immer der letzte Tab
+                var mergeTab = MainTabs.Items.OfType<TabItem>().FirstOrDefault(t => (t.Header as string) == "PDF Zusammenführen");
+                if (mergeTab != null) MainTabs.Items.Insert(MainTabs.Items.IndexOf(mergeTab), tab);
+                else MainTabs.Items.Add(tab);
             }
             catch (Exception ex)
             {
@@ -757,7 +840,8 @@ namespace Dateiumbenenner
             if (!_isBulkLoading && !_propagatingCompany && src == _currentMeta)
             {
                 CompanyMatcher.Learn(src.CompanyName);
-                if (!string.IsNullOrWhiteSpace(src.CompanyName)) Engine.ConfirmSender(src.FullText, src.CompanyName!);
+                if (!string.IsNullOrWhiteSpace(src.CompanyName) && src.FullText?.Contains(src.CompanyName!, StringComparison.OrdinalIgnoreCase) == true)
+                    Engine.ConfirmSender(src.FullText, src.CompanyName!);
                 Dispatcher.BeginInvoke(new Action(() => OfferTemplates(new[] { src })), System.Windows.Threading.DispatcherPriority.Background);
             }
             if (_propagatingCompany || string.IsNullOrWhiteSpace(src.CompanyName)) return;
@@ -770,9 +854,13 @@ namespace Dateiumbenenner
             if (src.CompanyName != name) return; // inzwischen erneut geändert
             // 1) Weitere markierte Einträge
             var selected = LvFiles.SelectedItems.OfType<DocumentMetadata>().Where(m => m != src && m.CompanyName != name).ToList();
-            // 2) Einträge, bei denen dieselbe Firma ebenfalls erkannt wurde
+            // 2) Einträge mit vergleichbarer Auswahlliste: die neue Firma muss enthalten sein
+            //    und der dort aktuell gewählte Eintrag muss in der Liste der Quelle vorkommen
+            //    (sonst handelt es sich um einen anderen Absender, z. B. eigene Firma/Empfänger).
             var sameCompany = _items.Where(m => m != src && m.CompanyName != name && !selected.Contains(m)
-                                             && m.CompanyCandidates.Any(c => string.Equals(c, name, StringComparison.OrdinalIgnoreCase))).ToList();
+                                             && m.CompanyCandidates.Any(c => SameCompany(c, name))
+                                             && (string.IsNullOrWhiteSpace(m.CompanyName) || src.CompanyCandidates.Any(c => SameCompany(c, m.CompanyName!)))
+                                             && CompanyMatcher.ListOverlap(src.CompanyCandidates, m.CompanyCandidates) >= CompanyMatcher.ListThreshold).ToList();
             if (selected.Count == 0 && sameCompany.Count == 0) return;
 
             var targets = new List<DocumentMetadata>();
@@ -792,11 +880,24 @@ namespace Dateiumbenenner
                     if (!m.CompanyCandidates.Contains(name)) m.CompanyCandidates.Add(name);
                     m.CompanyName = name;
                     ResetAddress(m);
-                    Engine.ConfirmSender(m.FullText, name);
+                    // Nur lernen, wenn die Firma im Dokument tatsächlich vorkommt
+                    if (m.FullText?.Contains(name, StringComparison.OrdinalIgnoreCase) == true) Engine.ConfirmSender(m.FullText, name);
                 }
             }
             finally { _propagatingCompany = false; }
             TxtStatus.Text = $"Firmenname „{name}“ auf {targets.Count + 1} Einträge übernommen.";
+        }
+
+        private static bool SameCompany(string a, string b) =>
+            string.Equals(a, b, StringComparison.OrdinalIgnoreCase) ||
+            CompanyMatcher.Similarity(CompanyMatcher.Normalize(a), CompanyMatcher.Normalize(b)) >= CompanyMatcher.Threshold;
+
+        /// <summary>Anteil der Auswahlmöglichkeiten, die in beiden Listen (gleich oder ähnlich) vorkommen.</summary>
+        private static double CandidateOverlap(IList<string> a, IList<string> b)
+        {
+            if (a.Count == 0 || b.Count == 0) return 0;
+            var small = a.Count <= b.Count ? a : b; var large = small == a ? b : a;
+            return (double)small.Count(x => large.Any(y => SameCompany(x, y))) / small.Count;
         }
 
         /// <summary>Firma geändert: Adresse (Dokument/DB) für die neue Firma neu ermitteln.</summary>
@@ -879,7 +980,7 @@ namespace Dateiumbenenner
         {
             if (!AutoTemplates) return;
             var hits = metas.Select(m => (m, t: Dateiumbenenner.Engine.DocTemplateStore.Get(m.CompanyName, m.DocumentType)))
-                            .Where(x => x.t != null).ToList();
+                            .Where(x => x.t != null && CompanyMatcher.AppearsInText(x.m.CompanyName, x.m.FullText)).ToList();
             if (hits.Count == 0) return;
             var text = hits.Count == 1
                 ? $"Für „{hits[0].m.CompanyName} – {hits[0].m.DocumentType}“ gibt es eine gespeicherte Vorlage.\n\nEigenschaften übernehmen?"
@@ -1363,7 +1464,7 @@ namespace Dateiumbenenner
         private void ToggleSizeUnit_Click(object sender,RoutedEventArgs e){ DocumentMetadata.UseMegaBytes=!DocumentMetadata.UseMegaBytes; foreach(var it in _items) it.RefreshSizeDisplay(); UpdateStandardStatus(); }
         private async void BtnAddToMerge_Click(object sender,RoutedEventArgs e){ var pdfMergeTab=PdfMergeTab; if(pdfMergeTab==null){ MessageBoxWpf.Show("Merge-Tab fehlt."); return; } var list=GetSelectedFiles(); if(list.Count==0){ MessageBoxWpf.Show("Keine PDF gew�hlt."); return; } foreach(var f in list) await pdfMergeTab.AddExternalFile(f); TxtStatus.Text=$"{list.Count} hinzugef�gt"; }
         private void ChkNaturalSort_Changed(object sender,RoutedEventArgs e){ _useNaturalSort=ChkNaturalSort.IsChecked==true; if(Directory.Exists(TxtFolder.Text)) _=LoadFolderAsync(TxtFolder.Text); }
-        private void TxtFilter_TextChanged(object sender,TextChangedEventArgs e){ var ft=TxtFilter.Text; if(string.IsNullOrWhiteSpace(ft)) LvFiles.ItemsSource=_items; else LvFiles.ItemsSource=_items.Where(i=> i.FileName.Contains(ft,StringComparison.OrdinalIgnoreCase) || (i.InvoiceNumber?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false) || (i.DocumentNumber?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false)).ToList(); }
+        private void TxtFilter_TextChanged(object sender,TextChangedEventArgs e){ var ft=TxtFilter.Text; if(string.IsNullOrWhiteSpace(ft)) LvFiles.ItemsSource=_items; else LvFiles.ItemsSource=_items.Where(i=> i.FileName.Contains(ft,StringComparison.OrdinalIgnoreCase) || (i.InvoiceNumber?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false) || (i.DocumentNumber?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false) || (i.CompanyName?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false) || (i.DocumentType?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false) || (Convert.ToString(i.Date)?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false)).ToList(); }
         private void CmbDocType_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DocTypeManuallySet=true; UpdateMetadataFromSelections(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); } }
         private void EditableCombo_DropDownClosed(object sender,EventArgs e){ if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } }
         private void EditableCombo_KeyDown(object sender,System.Windows.Input.KeyEventArgs e){ if(e.Key==System.Windows.Input.Key.Enter){ if(sender is SWC.ComboBox combo){ combo.IsDropDownOpen=false; if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } } } }

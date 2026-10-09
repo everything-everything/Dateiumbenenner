@@ -31,6 +31,7 @@ namespace Dateiumbenenner.Engine
             }
             catch { map.Clear(); }
             _map = map;
+            _placeWords = null;
         }
 
         /// <summary>Lädt DE.zip von GeoNames, ersetzt DE.txt und liefert die Anzahl der PLZ.</summary>
@@ -83,6 +84,29 @@ namespace Dateiumbenenner.Engine
 
         /// <summary>Anzahl geladener PLZ (für Statusanzeige).</summary>
         public int Count => _map.Count;
+
+        private static readonly char[] PlaceSeparators = { ' ', '-', '/', '(', ')', '.', ',' };
+        private HashSet<string>? _placeWords;
+
+        /// <summary>true, wenn der Text ein Ortsname oder nur aus Ortsbestandteilen besteht (z. B. "Schwäbisch", "Schwäbisch Hall").</summary>
+        public bool IsPlaceName(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text) || !IsLoaded) return false;
+            var words = _placeWords;
+            if (words == null)
+            {
+                words = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var city in _map.Values.SelectMany(v => v))
+                {
+                    words.Add(Fold(city));
+                    foreach (var w in city.Split(PlaceSeparators, StringSplitOptions.RemoveEmptyEntries))
+                        if (w.Length >= 3) words.Add(Fold(w));
+                }
+                _placeWords = words;
+            }
+            var parts = text.Split(PlaceSeparators, StringSplitOptions.RemoveEmptyEntries);
+            return words.Contains(Fold(text)) || (parts.Length > 0 && parts.All(p => words.Contains(Fold(p))));
+        }
 
         /// <summary>true, wenn PLZ bekannt ist (oder kein Verzeichnis geladen).</summary>
         public bool IsValid(string zip) => !IsLoaded || _map.ContainsKey(zip);

@@ -18,6 +18,10 @@ namespace Dateiumbenenner.Engine
         /// <summary>Mindestanzahl Wörter, ab der die Textebene als brauchbar gilt.</summary>
         private const int MinWords = 15;
 
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Path, int MaxPages), (DateTime Stamp, string? Text)> _cache = new();
+        private const int MaxCacheEntries = 10000;
+
+        /// <summary>Ergebnis je PDF zwischenspeichern – ExtractAddress wird pro Beleg mehrfach aufgerufen.</summary>
         public static string? ReadLayoutText(string? pdfPath, int maxPages = 2)
         {
             try
@@ -25,11 +29,31 @@ namespace Dateiumbenenner.Engine
                 if (string.IsNullOrEmpty(pdfPath) || !File.Exists(pdfPath)
                     || !pdfPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) return null;
 
+                var stamp = File.GetLastWriteTimeUtc(pdfPath);
+                var key = (pdfPath.ToUpperInvariant(), maxPages);
+                if (_cache.TryGetValue(key, out var hit) && hit.Stamp == stamp) return hit.Text;
+                var text = ReadLayoutTextCore(pdfPath, maxPages);
+                if (_cache.Count >= MaxCacheEntries) _cache.Clear();
+                _cache[key] = (stamp, text);
+                return text;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string? ReadLayoutTextCore(string pdfPath, int maxPages)
+        {
+            try
+            {
                 using var doc = PdfDocument.Open(pdfPath);
                 var sb = new StringBuilder();
                 int wordCount = 0;
-                foreach (var page in doc.GetPages().Take(maxPages))
+                int pageCount = Math.Min(maxPages, doc.NumberOfPages);
+                for (int p = 1; p <= pageCount; p++)
                 {
+                    var page = doc.GetPage(p);
                     var words = page.GetWords().Where(w => !string.IsNullOrWhiteSpace(w.Text)).ToList();
                     wordCount += words.Count;
                     foreach (var line in GroupLines(words))

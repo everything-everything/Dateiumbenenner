@@ -51,6 +51,49 @@ namespace Dateiumbenenner.Engine
         }
     }
 
+    /// <summary>Eigene Firmenadresse (Daten\own_company.json). Belege ohne fremde Adresse gelten als eigene/interne Belege.</summary>
+    public class OwnCompany
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Street { get; set; } = string.Empty;
+        public string Zip { get; set; } = string.Empty;
+        public string City { get; set; } = string.Empty;
+
+        private static OwnCompany? _current;
+        private static readonly object Sync = new();
+        public static string FilePath => Path.Combine(Plugins.PluginManager.BaseDirectory, "own_company.json");
+
+        public static OwnCompany Current
+        {
+            get
+            {
+                lock (Sync)
+                {
+                    if (_current != null) return _current;
+                    try { if (File.Exists(FilePath)) _current = JsonSerializer.Deserialize<OwnCompany>(File.ReadAllText(FilePath)); } catch { }
+                    return _current ??= new OwnCompany();
+                }
+            }
+        }
+
+        public static void Save(OwnCompany value)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }));
+            lock (Sync) _current = value;
+        }
+
+        public bool HasName => !string.IsNullOrWhiteSpace(Name);
+
+        /// <summary>True, wenn der Kandidat der eigenen Firma entspricht (gleich oder OCR-ähnlich).</summary>
+        public bool Matches(string? candidate)
+        {
+            if (!HasName || string.IsNullOrWhiteSpace(candidate)) return false;
+            if (candidate.Contains(Name, StringComparison.OrdinalIgnoreCase) || Name.Contains(candidate, StringComparison.OrdinalIgnoreCase) && candidate.Length >= 4) return true;
+            return CompanyMatcher.Similarity(CompanyMatcher.Normalize(candidate), CompanyMatcher.Normalize(Name)) >= CompanyMatcher.Threshold;
+        }
+    }
+
     /// <summary>Dateinamen-Eigenschaften je Firma + Dokumenttyp (Daten\doc_templates.json).</summary>
     public class DocTemplate
     {

@@ -303,7 +303,8 @@ namespace Dateiumbenenner
                                 !Regex.IsMatch(name, @"^\d+$") &&
                                 !name.Equals("Rechnung", StringComparison.OrdinalIgnoreCase) &&
                                 !name.Equals("Datum", StringComparison.OrdinalIgnoreCase) &&
-                                !FooterNoiseRegex.IsMatch(name))
+                                !FooterNoiseRegex.IsMatch(name) &&
+                                !Engine.DocumentEngine.Plz.IsPlaceName(name))
                             {
                                 if (!candidates.Contains(name))
                                     candidates.Add(name);

@@ -53,6 +53,9 @@ namespace Dateiumbenenner.Engine
         /// <summary>Benutzerbestätigung zurückmelden – die Engine lernt daraus.</summary>
         void ConfirmSender(string? text, string company, string? street = null, string? zip = null, string? city = null);
 
+        /// <summary>Firmenkandidaten nach Nähe zur erkannten Absenderstraße/-PLZ sortieren (nächster zuerst).</summary>
+        List<string> RankCompaniesByAddress(IEnumerable<string> candidates, string? text, string? pdfPath = null);
+
         /// <summary>PLZ der eigenen Firma (Empfänger) – werden bei der Absenderadresse ausgeschlossen.</summary>
         IReadOnlyCollection<string> OwnZips { get; }
         void AddOwnZip(string zip);
@@ -66,7 +69,7 @@ namespace Dateiumbenenner.Engine
         private readonly SenderProfileStore _profiles = new(System.IO.Path.Combine(
             Dateiumbenenner.Plugins.PluginManager.BaseDirectory, "sender_profiles.json"));
 
-        private static readonly PlzDirectory Plz = new();
+        public static readonly PlzDirectory Plz = new();
         /// <summary>PLZ-Verzeichnis neu laden; liefert Anzahl der PLZ.</summary>
         public static int ReloadPlz() { Plz.Reload(); return Plz.Count; }
         public static int PlzCount => Plz.Count;
@@ -108,6 +111,48 @@ namespace Dateiumbenenner.Engine
             CompanyMatcher.Learn(company);
             var fp = SenderProfileStore.ExtractFingerprints(text, street, zip);
             _profiles.Learn(company, fp, street, zip, city);
+        }
+
+        public List<string> RankCompaniesByAddress(IEnumerable<string> candidates, string? text, string? pdfPath = null)
+        {
+            var list = candidates.ToList();
+            if (list.Count < 2 || string.IsNullOrEmpty(text)) return list;
+            AddressResult addr;
+            _suppressDebug = true;
+            try { addr = ExtractAddress(text, null, pdfPath); }
+            finally { _suppressDebug = false; }
+            var street = addr.Street.Value; var zip = addr.Zip.Value;
+            if (string.IsNullOrEmpty(street) && string.IsNullOrEmpty(zip)) return list;
+
+            var raw = ReadSiblingTxt(pdfPath);
+            var lines = AddressTextNormalizer.Prepare(HasLayout(raw) ? raw! : text);
+            var streetKey = string.IsNullOrEmpty(street) ? null : StreetKey(street);
+            var anchors = new List<int>();
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var l = lines[i];
+                if (zip != null && l.Contains(zip)) { anchors.Add(i); continue; }
+                if (streetKey != null) foreach (Match s in StreetRegex.Matches(l)) if (StreetKey(FormatStreet(s)) == streetKey) { anchors.Add(i); break; }
+            }
+            if (anchors.Count == 0) return list;
+
+            double Score(string c, int order)
+            {
+                int best = int.MaxValue;
+                for (int i = 0; i < lines.Count; i++)
+                    if (lines[i].Contains(c, StringComparison.OrdinalIgnoreCase))
+                        foreach (var a in anchors)
+                        {
+                            int d = a - i;                         // Firma steht über der Adresse; darunter folgen nur Ort/Empfänger
+                            if (d > 0 && d <= 6 && d < best) best = d;
+                        }
+                // nahe Kandidaten vorziehen, sonst ursprüngliche Reihenfolge
+                return best == int.MaxValue ? 100 + order : best;
+            }
+            int Count(string c) => lines.Count(l => l.Contains(c, StringComparison.OrdinalIgnoreCase));
+            // bei gleichem Abstand: im Briefkopf mehrfach genannter Name (Logo + Absenderzeile) gewinnt
+            return list.Select((c, i) => (c, s: Score(c, i), n: Count(c)))
+                       .OrderBy(x => x.s).ThenByDescending(x => x.n).Select(x => x.c).ToList();
         }
 
         // ---------- Betrag ----------
@@ -252,6 +297,9 @@ namespace Dateiumbenenner.Engine
                     score += PositionScore(i, lines[i], before);
                     if (RecipientMarkerRegex.IsMatch(lines[i])) score -= 5;   // "Herrn ... D-73525 ..."
                     bool own; lock (_ownZips) own = _ownZips.Contains(zip);
+                    var oc = OwnCompany.Current;
+                    if (!own && oc.Zip.Trim() == zip)
+                        own = string.IsNullOrWhiteSpace(oc.Street) || !sm.Success || StreetKey(FormatStreet(sm)) == StreetKey(oc.Street);
                     if (own) score -= 10;                                      // eigene Firma = Empfänger
 
                     if (sm.Success && recipientStreets.Contains(StreetKey(FormatStreet(sm)))) score -= 10;
