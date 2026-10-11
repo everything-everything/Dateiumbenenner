@@ -318,6 +318,14 @@ Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
 > System.Drawing.Common           10.0.12         Grafikfunktionen
 > System.Net.Http                 4.3.4           HTTP-Zugriffe
 > System.Text.RegularExpressions  4.3.1           Mustererkennung
+> Microsoft.Data.Sqlite           8.0.11          interne Dokumentdatenbank je Profil
+> SQLitePCLRaw.bundle_e_sqlite3   2.1.6           SQLite-Anbindung (transitiv)
+
+# IniGenerator-Plugin (separat)
+> MySqlConnector                  2.6.2           MySQL/MariaDB-Zugriff
+> System.Security.Cryptography.ProtectedData 10.0.12  Passwortschutz (DPAPI)
+> Microsoft.Extensions.Logging.Abstractions 8.0.2      transitiv
+> Microsoft.Extensions.DependencyInjection.Abstractions 8.0.2  transitiv
 
 # Ohne Zusatzpaket (in Windows bzw. .NET enthalten)
 * Windows.Data.Pdf – Rendern von PDF-Seiten beim Rasterisieren
@@ -349,8 +357,27 @@ Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2026 
 > System.Drawing.Common    MIT (.NET Foundation)
 > System.Net.Http          MIT (.NET Foundation)
 > System.Text.RegularExpr. MIT (.NET Foundation)
+> Microsoft.Data.Sqlite    MIT (.NET Foundation)
+> SQLitePCLRaw             Apache License 2.0 (Eric Sink)
+> SQLite (e_sqlite3)       Public Domain
+
+# IniGenerator-Plugin
+> MySqlConnector           MIT
+> ProtectedData            MIT (.NET Foundation)
+> Microsoft.Extensions.Logging.Abstractions             MIT (.NET Foundation)
+> Microsoft.Extensions.DependencyInjection.Abstractions MIT (.NET Foundation)
 
 WeCantSpell.Hunspell wird unverändert als eigenständige DLL eingebunden (LGPL-konform).
+
+# Microsoft.Web.WebView2 – Lizenztext
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+* Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+* The name of Microsoft Corporation, or the names of its contributors may not be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS ""AS IS"" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # Nicht enthalten (separat zu beziehen)
 * Hunspell-Wörterbücher – GPL/LGPL/MPL; Download per Skript, siehe [[ocr|OCR-Korrektur]]
