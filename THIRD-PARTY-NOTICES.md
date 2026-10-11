@@ -20,6 +20,8 @@ Dateiumbenenner (MIT) verwendet folgende Komponenten. Diese werden per NuGet bez
 |---|---|---|---|
 | MySqlConnector | 2.6.2 | MIT | https://github.com/mysql-net/MySqlConnector |
 | System.Security.Cryptography.ProtectedData | 10.0.12 | MIT | https://github.com/dotnet/runtime |
+| Microsoft.Extensions.Logging.Abstractions (transitiv über MySqlConnector) | 8.0.2 | MIT | https://github.com/dotnet/runtime |
+| Microsoft.Extensions.DependencyInjection.Abstractions (transitiv über MySqlConnector) | 8.0.2 | MIT | https://github.com/dotnet/runtime |
 
 ## Hinweise
 
