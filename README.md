@@ -9,6 +9,17 @@ Version 3.12 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen
 - PDF-Vorschau (WebView2)
 - OCR-Korrektur (Hunspell), PDF-Komprimierung
 
+NuGet-Pakete und Lizenzen
+Paket	Version	Lizenz
+Microsoft.Data.Sqlite	8.0.11	MIT
+SQLitePCLRaw.bundle_e_sqlite3 (transitiv)	2.1.6	Apache-2.0
+Microsoft.Web.WebView2	1.0.4258.31	Microsoft WebView2 SDK License (BSD-artig)
+UglyToad.PdfPig	1.7.0-custom-5	Apache-2.0
+WeCantSpell.Hunspell	7.0.1	MPL-1.1 / GPL-2.0 / LGPL-2.1 (hier LGPL)
+System.Drawing.Common	10.0.12	MIT
+System.Net.Http	4.3.4	MIT
+System.Text.RegularExpressions	4.3.1	MIT
+
 ## Systemanforderungen
 - Windows 10 (1809+) / 11, x64
 - .NET 8 Desktop Runtime
