@@ -19,10 +19,10 @@ namespace Dateiumbenenner.Plugins
     {
         private class PluginSettings { public List<string> Enabled { get; set; } = new(); }
 
-        // Portabel: alle Daten im Unterordner "Daten" neben der EXE
-        public static string BaseDirectory => Path.Combine(AppContext.BaseDirectory, "Daten");
+        // Portabel: alle Daten im Unterordner "Daten" neben der EXE (bzw. Unterordner des aktiven Profils)
+        public static string BaseDirectory => ProfileManager.ActiveDirectory;
         public static string PluginDirectory => Path.Combine(AppContext.BaseDirectory, "Plugins");
-        private static string SettingsFile => Path.Combine(BaseDirectory, "plugins.json");
+        private static string SettingsFile => Path.Combine(ProfileManager.RootDirectory, "plugins.json");
 
         public List<LoadedPlugin> Plugins { get; } = new();
         public List<string> Errors { get; } = new();
@@ -149,7 +149,7 @@ namespace Dateiumbenenner.Plugins
 
         public void SaveSettings()
         {
-            Directory.CreateDirectory(BaseDirectory);
+            Directory.CreateDirectory(ProfileManager.RootDirectory);
             var settings = new PluginSettings { Enabled = Plugins.Where(p => p.Enabled).Select(p => p.Plugin.Id).ToList() };
             File.WriteAllText(SettingsFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
         }

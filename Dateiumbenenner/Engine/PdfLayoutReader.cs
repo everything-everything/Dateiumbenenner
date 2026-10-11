@@ -43,6 +43,63 @@ namespace Dateiumbenenner.Engine
             }
         }
 
+        /// <summary>Seitenformat und Zeilen mit Position (relativ 0..1, Y von oben) der ersten Seite.</summary>
+        public sealed class PageLayout
+        {
+            public bool Landscape { get; init; }
+            public List<(string Text, double X, double Y)> Lines { get; } = new();
+
+            /// <summary>Zone im 3x3-Raster: z. B. "oben links", "unten mitte"; null, wenn Text nicht gefunden.</summary>
+            public (int Col, int Row)? FindZone(string text)
+            {
+                foreach (var l in Lines)
+                    if (l.Text.Contains(text, StringComparison.OrdinalIgnoreCase))
+                        return (Math.Min(2, (int)(l.X * 3)), Math.Min(2, (int)(l.Y * 3)));
+                return null;
+            }
+
+            public static string ZoneName((int Col, int Row) z)
+                => new[] { "oben", "mitte", "unten" }[z.Row] + " " + new[] { "links", "mitte", "rechts" }[z.Col];
+        }
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Stamp, PageLayout? Layout)> _layoutCache = new();
+
+        public static PageLayout? ReadPageLayout(string? pdfPath)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(pdfPath) || !File.Exists(pdfPath)
+                    || !pdfPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) return null;
+                var stamp = File.GetLastWriteTimeUtc(pdfPath);
+                var key = pdfPath.ToUpperInvariant();
+                if (_layoutCache.TryGetValue(key, out var hit) && hit.Stamp == stamp) return hit.Layout;
+                PageLayout? result = null;
+                using (var doc = PdfDocument.Open(pdfPath))
+                {
+                    if (doc.NumberOfPages > 0)
+                    {
+                        var page = doc.GetPage(1);
+                        double w = page.Width, h = page.Height;
+                        if (page.Rotation.Value % 180 != 0) (w, h) = (h, w);
+                        result = new PageLayout { Landscape = w > h };
+                        var words = page.GetWords().Where(x => !string.IsNullOrWhiteSpace(x.Text)).ToList();
+                        foreach (var line in GroupLines(words))
+                        {
+                            var first = line.OrderBy(x => x.BoundingBox.Left).First();
+                            result.Lines.Add((BuildLine(line),
+                                Math.Clamp(first.BoundingBox.Left / Math.Max(1, page.Width), 0, 1),
+                                Math.Clamp(1 - first.BoundingBox.Bottom / Math.Max(1, page.Height), 0, 1)));
+                        }
+                        if (words.Count < MinWords) result.Lines.Clear();
+                    }
+                }
+                if (_layoutCache.Count >= MaxCacheEntries) _layoutCache.Clear();
+                _layoutCache[key] = (stamp, result);
+                return result;
+            }
+            catch { return null; }
+        }
+
         private static string? ReadLayoutTextCore(string pdfPath, int maxPages)
         {
             try
@@ -83,6 +140,29 @@ namespace Dateiumbenenner.Engine
                 else target.Add(w);
             }
             return lines;
+        }
+
+        /// <summary>
+        /// Seitentext wie page.Text; enthält die Seite gedrehten (senkrechten) Text, werden diese Wörter
+        /// je Drehrichtung in Leserichtung zu einer Zeile zusammengefasst ("folgende und Firma DFH Haus GmbH,").
+        /// </summary>
+        public static string PageText(Page page)
+        {
+            var words = page.GetWords().Where(w => !string.IsNullOrWhiteSpace(w.Text)).ToList();
+            var rotated = words.Where(w => w.TextOrientation is TextOrientation.Rotate90 or TextOrientation.Rotate270).ToList();
+            if (rotated.Count == 0) return page.Text;
+            var sb = new StringBuilder();
+            foreach (var line in GroupLines(words.Except(rotated).ToList()))
+                sb.AppendLine(BuildLine(line));
+            // Rotate90: von unten nach oben lesen, Rotate270: von oben nach unten; Spalten nach X trennen
+            foreach (var g in rotated.GroupBy(w => (w.TextOrientation, Col: Math.Round(w.BoundingBox.Centroid.X / 6))))
+            {
+                var ordered = g.Key.TextOrientation == TextOrientation.Rotate90
+                    ? g.OrderBy(w => w.BoundingBox.Centroid.Y)
+                    : g.OrderByDescending(w => w.BoundingBox.Centroid.Y);
+                sb.AppendLine(string.Join(" ", ordered.Select(w => w.Text)));
+            }
+            return sb.ToString();
         }
 
         /// <summary>Wörter einer Zeile von links nach rechts; großer Abstand = Spaltengrenze (Tab).</summary>

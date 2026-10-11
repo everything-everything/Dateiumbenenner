@@ -116,6 +116,73 @@ namespace Dateiumbenenner.Engine
         public bool Enabled { get; set; } = true;
     }
 
+    /// <summary>Gelerntes Nummernformat je Firma + Belegtyp (Bezeichnung und Aufbau, z. B. "999-AAA").</summary>
+    public class NumberPattern
+    {
+        public string Label { get; set; } = "";
+        public string Shape { get; set; } = "";
+        public int Count { get; set; }
+    }
+
+    public static class NumberPatternStore
+    {
+        private static Dictionary<string, NumberPattern>? _map;
+        private static readonly object Sync = new();
+
+        public static string FilePath => Path.Combine(Plugins.PluginManager.BaseDirectory, "number_patterns.json");
+
+        /// <summary>Ziffer -> 9, Buchstabe -> A, Leerzeichen entfallen, Trennzeichen bleiben.</summary>
+        public static string Shape(string value)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in value)
+                if (char.IsDigit(c)) sb.Append('9');
+                else if (char.IsLetter(c)) sb.Append('A');
+                else if (!char.IsWhiteSpace(c)) sb.Append(c);
+            return sb.ToString();
+        }
+
+        private static Dictionary<string, NumberPattern> Map
+        {
+            get
+            {
+                if (_map != null) return _map;
+                try
+                {
+                    if (File.Exists(FilePath))
+                        _map = JsonSerializer.Deserialize<Dictionary<string, NumberPattern>>(File.ReadAllText(FilePath));
+                }
+                catch { }
+                return _map ??= new Dictionary<string, NumberPattern>();
+            }
+        }
+
+        public static NumberPattern? Get(string? company, string? docType)
+        {
+            var k = DocTemplateStore.Key(company, docType);
+            if (k == null) return null;
+            lock (Sync) return Map.TryGetValue(k, out var p) ? p : null;
+        }
+
+        public static void Learn(string? company, string? docType, string? label, string? value)
+        {
+            var k = DocTemplateStore.Key(company, docType);
+            if (k == null || string.IsNullOrWhiteSpace(value)) return;
+            var shape = Shape(value);
+            lock (Sync)
+            {
+                if (Map.TryGetValue(k, out var p) && p.Shape == shape && p.Label == (label ?? "")) p.Count++;
+                else Map[k] = new NumberPattern { Label = label ?? "", Shape = shape, Count = 1 };
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                    File.WriteAllText(FilePath, JsonSerializer.Serialize(Map, new JsonSerializerOptions { WriteIndented = true }));
+                }
+                catch { }
+            }
+        }
+    }
+
     public static class DocTemplateStore
     {
         private static Dictionary<string, DocTemplate>? _map;

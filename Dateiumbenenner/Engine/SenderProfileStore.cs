@@ -35,6 +35,7 @@ namespace Dateiumbenenner.Engine
         private static readonly Regex PhoneRx = new(@"(?:Tel|Telefon|Fon|Fax|Telefax)\.?\s*:?\s*((?:\+49|0)[\d\s/\-()]{6,20}\d)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex MailRx = new(@"@([a-z0-9\-]+\.[a-z]{2,})", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex WebRx = new(@"\bwww\.([a-z0-9\-]+\.[a-z]{2,})", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex HrRx = new(@"\bHR\s?([AB])\s*[:.]?\s*(\d{3,7})\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public SenderProfileStore(string file)
         {
@@ -64,6 +65,7 @@ namespace Dateiumbenenner.Engine
             foreach (Match m in PhoneRx.Matches(text)) { var d = Regex.Replace(m.Groups[1].Value, @"\D", ""); if (d.Length >= 7) set.Add("TEL:" + d); }
             foreach (Match m in MailRx.Matches(text)) { var dom = m.Groups[1].Value.ToLowerInvariant(); if (!IsGenericMail(dom)) set.Add("MAIL:" + dom); }
             foreach (Match m in WebRx.Matches(text)) set.Add("WEB:" + m.Groups[1].Value.ToLowerInvariant());
+            foreach (Match m in HrRx.Matches(text)) set.Add("HR:" + m.Groups[1].Value.ToUpperInvariant() + m.Groups[2].Value);
             if (!string.IsNullOrEmpty(street) && !string.IsNullOrEmpty(zip))
                 set.Add("ADR:" + zip + "|" + Regex.Replace(street.ToUpperInvariant(), @"[^A-Z0-9]", ""));
             return set;
@@ -85,7 +87,7 @@ namespace Dateiumbenenner.Engine
                     foreach (var f in fingerprints)
                     {
                         if (_ambiguous.Contains(f) || !p.Fingerprints.Contains(f)) continue;
-                        score += f.StartsWith("UST:") || f.StartsWith("IBAN:") || f.StartsWith("STNR:") ? 3
+                        score += f.StartsWith("UST:") || f.StartsWith("IBAN:") || f.StartsWith("STNR:") || f.StartsWith("HR:") ? 3
                                : f.StartsWith("TEL:") || f.StartsWith("WEB:") || f.StartsWith("MAIL:") ? 2 : 1;
                     }
                     if (score > bestScore) { bestScore = score; best = p; }

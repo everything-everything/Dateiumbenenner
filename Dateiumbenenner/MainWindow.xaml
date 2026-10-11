@@ -24,6 +24,7 @@
             <Separator/>
             <MenuItem Header="_Einstellungen..." Click="MenuSettings_Click"/>
         </MenuItem>
+        <MenuItem x:Name="MenuProfiles" Header="P_rofil" SubmenuOpened="MenuProfiles_Opened"/>
         <MenuItem x:Name="MenuPlugins" Header="_Plugins">
             <MenuItem Header="Plugin _importieren..." Click="MenuPluginImport_Click"/>
             <MenuItem Header="Plugin-_Ordner öffnen" Click="MenuPluginFolder_Click"/>
@@ -81,6 +82,10 @@
                         <CheckBox x:Name="ChkNaturalSort" Content="Natürliche Dateinamensortierung (_ = -)" Margin="20,0,0,0" VerticalAlignment="Center" Checked="ChkNaturalSort_Changed" Unchecked="ChkNaturalSort_Changed"/>
                         <!-- NEU: OCR Korrektur Umschalter -->
                         <CheckBox x:Name="ChkOcrCorrection" Content="OCR Korrektur" Margin="20,0,0,0" VerticalAlignment="Center" Checked="ChkOcrCorrection_Changed" Unchecked="ChkOcrCorrection_Changed"/>
+                        <TextBlock Text="Zeilenbreite:" Margin="10,0,4,0" VerticalAlignment="Center"/>
+                        <TextBox x:Name="TxtLineWidth" Width="40" VerticalAlignment="Center" LostFocus="TxtLineWidth_LostFocus" KeyDown="TxtLineWidth_KeyDown" ToolTip="OCR-Zeilen bis zu dieser Zeichenzahl zusammenfassen (alle Belege). 0 = Originalzeilen. Gilt auch für die Erkennung."/>
+                        <TextBlock Text="diesen Beleg:" Margin="8,0,4,0" VerticalAlignment="Center"/>
+                        <TextBox x:Name="TxtLineWidthFile" Width="40" VerticalAlignment="Center" LostFocus="TxtLineWidth_LostFocus" KeyDown="TxtLineWidth_KeyDown" ToolTip="Zeilenbreite nur für den ausgewählten Beleg (leer = wie alle Belege)."/>
                     </StackPanel>
 
                     <!-- Dritte Zeile: Präfix-Aktionen (aus dem Präfix-Bereich verschoben) -->
@@ -110,9 +115,10 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <TextBox x:Name="TxtFilter" Margin="0,0,0,5" TextChanged="TxtFilter_TextChanged" ToolTip="In der Liste suchen: Dateiname, Firma, Typ, Rechnungs-/Belegnummer, Datum"/>
-                    <ListView x:Name="LvFiles" Grid.Row="1" SelectionMode="Extended" SelectionChanged="LvFiles_SelectionChanged"
+                    <ListView x:Name="LvFiles" Grid.Row="1" SelectionMode="Extended" SelectionChanged="LvFiles_SelectionChanged" AlternationCount="1000000"
                                                   VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                                                   VirtualizingPanel.IsVirtualizingWhenGrouping="True" ScrollViewer.CanContentScroll="True">
+                        <ListView.Resources><local:RowNumberConverter x:Key="RowNumber"/></ListView.Resources>
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <EventSetter Event="PreviewGotKeyboardFocus" Handler="LvFilesItem_PreviewGotKeyboardFocus"/>
@@ -120,6 +126,13 @@
                         </ListView.ItemContainerStyle>
                         <ListView.View>
                             <GridView>
+                                <GridViewColumn Header="Nr" Width="45">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding (ItemsControl.AlternationIndex), RelativeSource={RelativeSource AncestorType=ListViewItem}, Converter={StaticResource RowNumber}}" HorizontalAlignment="Right"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
                                 <GridViewColumn Width="180">
                                     <GridViewColumn.Header>
                                         <GridViewColumnHeader Tag="FileName" Content="Datei"/>
@@ -243,7 +256,8 @@
                             <!-- Präfix (Firmenname) - aus dem Präfix-Bereich hierher verlagert -->
                             <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,10,0,5">
                                 <TextBlock Text="Firma:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                                <ComboBox x:Name="CmbMainCompany" IsEditable="True" Width="170" Margin="0,0,10,0" ToolTip="Firmenname auswählen oder eingeben"/>
+                                <ComboBox x:Name="CmbMainCompany" IsEditable="True" Width="170" Margin="0,0,4,0" ToolTip="Firmenname auswählen oder eingeben"/>
+                                                                <Button Content="Namen übertragen" Padding="6,0" Margin="0,0,10,0" Click="BtnMainTransferName_Click" ToolTip="Firmennamen auf weitere Dateien übertragen (Auswahl in Übersicht)"/>
                                 <TextBlock Text="Neuer Präfix:" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox x:Name="TxtMainNewPrefix" Width="130" Margin="0,0,10,0" VerticalContentAlignment="Center"/>
                                 <TextBlock x:Name="TxtMainPrefixNewName" VerticalAlignment="Center" FontWeight="Bold" Foreground="Green" ToolTip="Neuer Dateiname nach Präfix-Umbenennung"/>

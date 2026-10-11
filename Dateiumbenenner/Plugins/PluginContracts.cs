@@ -21,6 +21,16 @@ namespace Dateiumbenenner.Plugins
         event System.EventHandler? OcrCorrectionChanged;
         /// <summary>Plugins können eine Adressquelle (z. B. Datenbank) als Fallback anmelden.</summary>
         void RegisterAddressProvider(IAddressProvider provider);
+        /// <summary>Aktuelle Dateiliste der Registerkarte Umbenennen (bereits ausgewertet).</summary>
+        IReadOnlyList<DocumentMetadata> Documents { get; }
+        /// <summary>Ordner der Registerkarte Umbenennen.</summary>
+        string? CurrentFolder { get; }
+        /// <summary>Plugin-eigene Daten zu einer Datei aus der Profil-Datenbank (null = nichts gespeichert oder Datei geändert).</summary>
+        string? LoadPluginData(string pluginId, string filePath);
+        /// <summary>Plugin-eigene Daten zu einer Datei in der Profil-Datenbank speichern.</summary>
+        void SavePluginData(string pluginId, string filePath, string data);
+        /// <summary>Name des aktiven Profils.</summary>
+        string ActiveProfile { get; }
     }
 
     /// <summary>Liefert eine Firmenadresse (Fallback, wenn das Dokument keine Adresse liefert).</summary>

@@ -10,6 +10,16 @@ Dateiumbenenner (MIT) verwendet folgende Komponenten. Diese werden per NuGet bez
 | System.Drawing.Common | 10.0.12 | MIT | https://github.com/dotnet/runtime |
 | System.Net.Http | 4.3.4 | MIT | https://github.com/dotnet/runtime |
 | System.Text.RegularExpressions | 4.3.1 | MIT | https://github.com/dotnet/runtime |
+| Microsoft.Data.Sqlite | 8.0.11 | MIT | https://github.com/dotnet/efcore |
+| SQLitePCLRaw (bundle_e_sqlite3, transitiv) | 2.1.6 | Apache-2.0 | https://github.com/ericsink/SQLitePCL.raw |
+| SQLite (e_sqlite3, nativ) | 3.x | Public Domain | https://sqlite.org/copyright.html |
+
+### IniGenerator-Plugin (separates Repository)
+
+| Paket | Version | Lizenz | Link |
+|---|---|---|---|
+| MySqlConnector | 2.6.2 | MIT | https://github.com/mysql-net/MySqlConnector |
+| System.Security.Cryptography.ProtectedData | 10.0.12 | MIT | https://github.com/dotnet/runtime |
 
 ## Hinweise
 

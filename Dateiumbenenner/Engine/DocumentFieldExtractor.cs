@@ -15,7 +15,7 @@ namespace Dateiumbenenner.Engine
         // ---------- Nummer ----------
         // Bezeichnung + optional Wert in derselben Zeile
         private static readonly Regex NumberLabel = new(
-            @"(?<label>Rechnungs?|Beleg|Gutschrifts?|Lieferschein|Dokument|Auftrags?|Kunden|Steuer|USt\.?\s*-?\s*ID|Bestell|Kassen)\s*-?\s*(?:Nr\.?|nummer|No\.?)\s*[:.]?\s*(?<value>[A-Z0-9OIl][A-Z0-9OIl\-/]{2,})?",
+            @"(?<label>Rechnungs?|Rg|Re|Invoice|Beleg|Gutschrifts?|Lieferschein|Dokument|Document|Auftrags?|Order|Kunden|Customer|Steuer|USt\.?\s*-?\s*ID|Bestell|Kassen)\.?\s*-?\s*(?:Nr\.?|nummer|No\.?|Number|#)\s*[:.#]?\s*(?<value>[A-Z0-9OIl][A-Z0-9OIl\-/]{2,})?",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // "Nr. 12345" ohne Bezeichnung
@@ -28,7 +28,9 @@ namespace Dateiumbenenner.Engine
         private static double LabelWeight(string label)
         {
             label = label.ToLowerInvariant();
-            if (label.StartsWith("rechnung")) return 5;
+            if (label.StartsWith("rechnung") || label is "rg" or "re" || label.StartsWith("invoice")) return 5;
+            if (label.StartsWith("document")) return 3;
+            if (label.StartsWith("auftrag") || label.StartsWith("order")) return 1.5;   // nur Ersatz, wenn keine Rechnungs-Nr. da
             if (label.StartsWith("gutschrift")) return 5;
             if (label.StartsWith("beleg")) return 3;
             if (label.StartsWith("dokument")) return 3;
@@ -43,6 +45,31 @@ namespace Dateiumbenenner.Engine
             int digits = v.Count(char.IsDigit);
             if (digits < v.Length / 2) return v;
             return v.Replace('O', '0').Replace('o', '0').Replace('I', '1').Replace('l', '1');
+        }
+
+        private static readonly Regex StopWord = new(@"^(vom|von|am|Datum|Date|Seite|Page|Kunden\w*|Rechnung\w*|Auftrag\w*|USt\w*)$|^\d{1,2}\.\d{1,2}\.\d{2,4}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>Liest eine Nummer ab Position, auch mit Trennzeichen ("123-EDE |2 d32", "123 332 134 / 23 d").
+        /// Ende bei Spaltenlücke (2+ Leerzeichen), Datum oder Stoppwort.</summary>
+        internal static string? ReadValue(string line, int start)
+        {
+            if (start < 0 || start >= line.Length) return null;
+            var rest = line.Substring(start);
+            int gap = Regex.Match(rest, @"\s{2,}").Index;
+            if (gap > 0) rest = rest.Substring(0, gap);
+            var tokens = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var keep = new List<string>();
+            foreach (var t in tokens)
+            {
+                if (StopWord.IsMatch(t)) break;
+                bool sep = t.Trim('-', '/', '|', ':', '.').Length == 0;
+                bool code = t.Any(char.IsDigit) || (t.Length <= 3 && t.All(char.IsLetterOrDigit) && keep.Count > 0);
+                if (!sep && !code && !t.Contains('-') && !t.Contains('|')) break;
+                keep.Add(t);
+                if (keep.Count >= 8) break;
+            }
+            while (keep.Count > 0 && keep[^1].Trim('-', '/', '|', ':', '.').Length == 0) keep.RemoveAt(keep.Count - 1);
+            return keep.Count == 0 ? null : string.Join(" ", keep);
         }
 
         public static Field ExtractNumber(string? text)
@@ -71,8 +98,10 @@ namespace Dateiumbenenner.Engine
                             if (tm.Success) { value = tm.Groups["value"].Value; score -= 0.5; }
                         }
                     }
+                    if (!string.IsNullOrEmpty(m.Groups["value"].Value))
+                        value = ReadValue(lines[i], m.Groups["value"].Index) ?? value;
                     if (string.IsNullOrEmpty(value) || !value.Any(char.IsDigit)) continue;
-                    value = FixDigits(value.Trim('-', '/'));
+                    value = FixDigits(value.Trim('-', '/', '|', ':', '.'));
                     if (i < 30) score += 0.5;                     // Kopfbereich
                     field.Add(value, score, m.Groups["label"].Value + "-Nr.");
                 }
@@ -82,7 +111,8 @@ namespace Dateiumbenenner.Engine
                     // Bezeichnung direkt davor? -> schon oben behandelt bzw. ausgeschlossen
                     var before = lines[i].Substring(0, m.Index).TrimEnd();
                     if (Regex.IsMatch(before, @"[A-Za-zäöü]-?$")) continue;
-                    field.Add(FixDigits(m.Groups["value"].Value), 1.0, "Nr.");
+                    var pv = ReadValue(lines[i], m.Groups["value"].Index) ?? m.Groups["value"].Value;
+                    field.Add(FixDigits(pv.Trim('-', '/', '|', ':', '.')), 1.0, "Nr.");
                 }
             }
             return field;
