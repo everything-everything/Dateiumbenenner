@@ -20,6 +20,10 @@ System.Drawing.Common	10.0.12	MIT
 System.Net.Http	4.3.4	MIT
 System.Text.RegularExpressions	4.3.1	MIT
 
+Dateiumbenenner selbst steht unter MIT-Lizenz. Details: THIRD-PARTY-NOTICES.md.
+
+
+
 ## Systemanforderungen
 - Windows 10 (1809+) / 11, x64
 - .NET 8 Desktop Runtime
