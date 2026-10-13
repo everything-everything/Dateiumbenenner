@@ -1,0 +1,369 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+
+namespace Dateiumbenenner.Engine
+{
+    public enum NumberRuleKind { Maske, Merkmale }
+
+    /// <summary>
+    /// Nummernregel je Firma + Belegart ("*" = alle). Maske: $ = Ziffer, ? = Buchstabe, # = Ziffer oder Buchstabe,
+    /// * = beliebiges Zeichen, Leerzeichen = Leerzeichen, sonstige Zeichen w\u00F6rtlich.
+    /// Merkmale: ungef\u00E4hre L\u00E4nge und erlaubte Zeichenklassen.
+    /// </summary>
+    public class NumberRule
+    {
+        public string Company { get; set; } = "*";
+        public string DocType { get; set; } = "*";
+        public int Priority { get; set; } = 10;
+        public NumberRuleKind Kind { get; set; } = NumberRuleKind.Maske;
+        public string? Mask { get; set; }
+        public int? MinLength { get; set; }
+        public int? MaxLength { get; set; }
+        public bool AllowDigits { get; set; } = true;
+        public bool AllowLetters { get; set; }
+        public bool AllowSpace { get; set; }
+        public bool AllowSymbols { get; set; }
+        public string? Prefix { get; set; }
+        /// <summary>Automatisch aus manueller Auswahl gelernt (niedrige Priorit\u00E4t).</summary>
+        public bool Learned { get; set; }
+        /// <summary>Gew\u00E4hlte Beispielnummer (daraus wird die Maske \u00FCbersetzt).</summary>
+        public string? Example { get; set; }
+        /// <summary>Bisher erkannte Nummern zur Auswahl (nur Dialog).</summary>
+        [JsonIgnore] public List<string> Examples { get; set; } = new();
+    }
+
+    public static class NumberRuleStore
+    {
+        private static List<NumberRule>? _rules;
+        private static readonly object Sync = new();
+        private const int MaxLearnedPriority = 5;
+
+        public static string FilePath => Path.Combine(Plugins.PluginManager.BaseDirectory, "number_rules.json");
+
+        private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
+
+        public static List<NumberRule> Rules
+        {
+            get
+            {
+                lock (Sync)
+                {
+                    if (_rules != null) return _rules;
+                    try
+                    {
+                        if (File.Exists(FilePath))
+                            _rules = JsonSerializer.Deserialize<List<NumberRule>>(SecureStorage.ReadAllText(FilePath), JsonOptions);
+                    }
+                    catch { }
+                    return _rules ??= new List<NumberRule>();
+                }
+            }
+        }
+
+        public static void Save(IEnumerable<NumberRule> rules)
+        {
+            var list = rules.Where(r => r != null).ToList();
+            lock (Sync)
+            {
+                _rules = list;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                    SecureStorage.WriteAllText(FilePath, JsonSerializer.Serialize(list, JsonOptions));
+                }
+                catch { }
+            }
+        }
+
+        private static bool Eq(string? a, string? b) => string.Equals(a?.Trim(), b?.Trim(), StringComparison.OrdinalIgnoreCase);
+        private static bool IsAny(string? s) => string.IsNullOrWhiteSpace(s) || s.Trim() == "*";
+
+        /// <summary>Passende Regeln mit Gewichtung nach Genauigkeit (Firma+Belegart 1.0, nur eins 0.8 bzw. 0.7, beides * 0.5).</summary>
+        public static List<(NumberRule Rule, double Specificity)> RulesFor(string? company, string? docType)
+        {
+            var dt = DocTypeStore.Canonical(docType);
+            var result = new List<(NumberRule, double)>();
+            foreach (var r in Rules.ToList())
+            {
+                bool anyC = IsAny(r.Company), anyD = IsAny(r.DocType);
+                if (!anyC && !Eq(r.Company, company)) continue;
+                if (!anyD && !Eq(DocTypeStore.Canonical(r.DocType), dt)) continue;
+                double spec = !anyC && !anyD ? 1.0 : !anyC ? 0.8 : !anyD ? 0.7 : 0.5;
+                result.Add((r, spec));
+            }
+            return result;
+        }
+
+        /// <summary>Bewertung eines Wertes (0 = passt zu keiner Regel). H\u00F6chstpriorisierte Regel dominiert.</summary>
+        public static double Score(string? company, string? docType, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return 0;
+            double best = 0;
+            foreach (var (r, spec) in RulesFor(company, docType))
+                best = Math.Max(best, Match(r, value.Trim()) * r.Priority * spec);
+            return best;
+        }
+
+        /// <summary>\u00C4hnlichkeit 0..1. Exakter Masken-Treffer = 1, Abweichungen (l\u00E4nger/k\u00FCrzer/andere Zeichen) werden abgestuft.</summary>
+        public static double Match(NumberRule rule, string value)
+        {
+            double f;
+            if (rule.Kind == NumberRuleKind.Maske)
+            {
+                if (string.IsNullOrEmpty(rule.Mask)) return 0;
+                int dist = Distance(rule.Mask, value);
+                if (dist == 0) f = 1.0;
+                else
+                {
+                    double sim = 1.0 - (double)dist / Math.Max(rule.Mask.Length, value.Length);
+                    f = sim < 0.5 ? 0 : sim * sim * 0.8;
+                }
+            }
+            else
+            {
+                int len = value.Length, min = rule.MinLength ?? 0, max = rule.MaxLength ?? int.MaxValue;
+                int off = len < min ? min - len : len > max ? len - max : 0;
+                double lenF = Math.Max(0, 1.0 - 0.15 * off);
+                int bad = value.Count(c => !Allowed(rule, c));
+                double clsF = bad == 0 ? 1.0 : Math.Max(0, 0.5 - 0.1 * (bad - 1));
+                bool hasDigit = !rule.AllowDigits || value.Any(char.IsDigit);
+                f = lenF * clsF * (hasDigit ? 1.0 : 0.5);
+            }
+            if (!string.IsNullOrEmpty(rule.Prefix) && !value.StartsWith(rule.Prefix, StringComparison.OrdinalIgnoreCase)) f *= 0.7;
+            return f;
+        }
+
+        private static bool Allowed(NumberRule r, char c) =>
+            char.IsDigit(c) ? r.AllowDigits : char.IsLetter(c) ? r.AllowLetters : char.IsWhiteSpace(c) ? r.AllowSpace : r.AllowSymbols;
+
+        private static bool Fits(char m, char c) => m switch
+        {
+            '$' => char.IsDigit(c),
+            '?' => char.IsLetter(c),
+            '#' => char.IsLetterOrDigit(c),
+            '*' => true,
+            ' ' => char.IsWhiteSpace(c),
+            _ => char.ToUpperInvariant(m) == char.ToUpperInvariant(c)
+        };
+
+        /// <summary>Editierdistanz zwischen Maske und Wert (Ersetzen/Einf\u00FCgen/L\u00F6schen je 1).</summary>
+        private static int Distance(string mask, string value)
+        {
+            var d = new int[mask.Length + 1, value.Length + 1];
+            for (int i = 0; i <= mask.Length; i++) d[i, 0] = i;
+            for (int j = 0; j <= value.Length; j++) d[0, j] = j;
+            for (int i = 1; i <= mask.Length; i++)
+                for (int j = 1; j <= value.Length; j++)
+                    d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + (Fits(mask[i - 1], value[j - 1]) ? 0 : 1));
+            return d[mask.Length, value.Length];
+        }
+
+        /// <summary>Maske -> Regex (ohne Anker).</summary>
+        public static string MaskToRegex(string mask)
+        {
+            var sb = new StringBuilder();
+            foreach (var m in mask)
+                sb.Append(m switch
+                {
+                    '$' => @"\d",
+                    '?' => @"\p{L}",
+                    '#' => @"[\p{L}\d]",
+                    '*' => @"\S",
+                    ' ' => @"\s",
+                    _ => Regex.Escape(m.ToString())
+                });
+            return sb.ToString();
+        }
+
+        /// <summary>Maske aus einem Beispielwert (Ziffer -> $, Buchstabe -> ?, Rest w\u00F6rtlich).</summary>
+        public static string MaskFromValue(string value)
+        {
+            var sb = new StringBuilder();
+            foreach (var c in value.Trim())
+                sb.Append(char.IsDigit(c) ? '$' : char.IsLetter(c) ? '?' : char.IsWhiteSpace(c) ? ' ' : c);
+            return sb.ToString();
+        }
+
+        /// <summary>Nummern-Kandidaten erg\u00E4nzen (Masken-Treffer im Text, Schl\u00FCsselw\u00F6rter der Belegart) und nach Regeln bewerten.</summary>
+        public static void Apply(Field number, string? company, string? docType, string? text)
+        {
+            var rules = RulesFor(company, docType);
+            if (!string.IsNullOrEmpty(text))
+            {
+                foreach (var (r, spec) in rules.Where(x => x.Rule.Kind == NumberRuleKind.Maske && !string.IsNullOrEmpty(x.Rule.Mask))
+                             .OrderByDescending(x => x.Rule.Priority * x.Specificity))
+                {
+                    try
+                    {
+                        // Vorgegebenes Muster zuerst: exakte Textstellen vor allen anderen Kandidaten
+                        foreach (Match m in Regex.Matches(text, @"(?<![\p{L}\d])" + MaskToRegex(r.Mask!) + @"(?![\p{L}\d])", RegexOptions.IgnoreCase))
+                            number.Add(m.Value, 100 + r.Priority * spec, "Muster " + r.Mask);
+                    }
+                    catch { }
+                }
+                var def = DocTypeStore.Get(docType);
+                if (def != null)
+                    foreach (var kw in def.NumberKeywords.Where(k => !string.IsNullOrWhiteSpace(k)))
+                    {
+                        try
+                        {
+                            var rx = new Regex(@"(?<!\p{L})" + Regex.Escape(kw.Trim()) + @"\.?\s*(?:-?\s*(?:Nr\.?|Nummer|No\.?)\s*)?[:#]?\s*([\p{L}\d][\p{L}\d\-/]{2,})", RegexOptions.IgnoreCase);
+                            foreach (Match m in rx.Matches(text))
+                                if (m.Groups[1].Value.Any(char.IsDigit)) number.Add(m.Groups[1].Value, 3, kw.Trim());
+                        }
+                        catch { }
+                    }
+            }
+            if (rules.Count == 0) return;
+            foreach (var c in number.Candidates.ToList())
+            {
+                double bonus = Score(company, docType, c.Value);
+                if (bonus > 0) number.Add(c.Value, c.Score + bonus, c.Source);
+            }
+        }
+
+        /// <summary>Bester Wert aus Kandidaten und Text nach Regeln (null, wenn keine Regel passt).</summary>
+        public static string? Best(string? company, string? docType, IEnumerable<string?> candidates, string? text)
+        {
+            if (RulesFor(company, docType).Count == 0) return null;
+            var f = new Field();
+            int n = 0;
+            foreach (var c in candidates) f.Add(c, Math.Max(0, 1 - 0.01 * n++), "Kandidat");
+            Apply(f, company, docType, text);
+            var best = f.Candidates.Select(c => (c.Value, S: Score(company, docType, c.Value), T: c.Score)).Where(x => x.S > 0).OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault();
+            return best.Value;
+        }
+
+        /// <summary>Manuelle Masken-Regel setzen/entfernen (z. B. aus dem INI-Plugin).</summary>
+        public static void SetManualMask(string? company, string? docType, string? mask)
+        {
+            if (string.IsNullOrWhiteSpace(company) || string.IsNullOrWhiteSpace(docType)) return;
+            var list = Rules.ToList();
+            list.RemoveAll(r => !r.Learned && r.Kind == NumberRuleKind.Maske && Eq(r.Company, company) && Eq(r.DocType, docType));
+            if (!string.IsNullOrWhiteSpace(mask))
+                list.Add(new NumberRule { Company = company.Trim(), DocType = DocTypeStore.Canonical(docType) ?? docType.Trim(), Mask = mask.Trim(), Priority = 10 });
+            Save(list);
+        }
+
+        /// <summary>Aus manueller Auswahl lernen: gelernte Regel anlegen bzw. verst\u00E4rken (max. Priorit\u00E4t 5).</summary>
+        public static void Learn(string? company, string? docType, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(company) || string.IsNullOrWhiteSpace(docType) || string.IsNullOrWhiteSpace(value)) return;
+            var mask = MaskFromValue(value);
+            var list = Rules.ToList();
+            var r = list.FirstOrDefault(x => x.Learned && Eq(x.Company, company) && Eq(x.DocType, DocTypeStore.Canonical(docType)) && x.Mask == mask);
+            if (r != null) r.Priority = Math.Min(MaxLearnedPriority, r.Priority + 1);
+            else list.Add(new NumberRule { Company = company.Trim(), DocType = DocTypeStore.Canonical(docType) ?? docType.Trim(), Mask = mask, Priority = 1, Learned = true });
+            Save(list);
+        }
+    }
+
+    /// <summary>Belegart mit Umschreibungen (z. B. "Sendeinformation" -> Lieferschein) und Schl\u00FCsselw\u00F6rtern f\u00FCr die Nummer.</summary>
+    public class DocTypeDefinition
+    {
+        public string Name { get; set; } = "";
+        public List<string> Synonyms { get; set; } = new();
+        public List<string> NumberKeywords { get; set; } = new();
+    }
+
+    public static class DocTypeStore
+    {
+        private static List<DocTypeDefinition>? _items;
+        private static readonly object Sync = new();
+
+        public static string FilePath => Path.Combine(Plugins.PluginManager.BaseDirectory, "doc_types.json");
+
+        private static List<DocTypeDefinition> Defaults() => new()
+        {
+            new() { Name = "Rechnung", NumberKeywords = { "Rechnungsnummer", "Rechnungsnr", "Rechnung" } },
+            new() { Name = "Sammelrechnung", NumberKeywords = { "Rechnungsnummer", "Rechnungsnr" } },
+            new() { Name = "Stornorechnung", NumberKeywords = { "Stornorechnung", "Rechnungsnummer" } },
+            new() { Name = "Gutschrift", NumberKeywords = { "Gutschriftsnummer", "Gutschriftsnr", "Gutschrift" } },
+            new() { Name = "Barverkauf", NumberKeywords = { "Barverkauf", "Rechnungsnummer" } },
+            new() { Name = "Beleg", NumberKeywords = { "Belegnummer", "Belegnr", "Beleg" } },
+            new() { Name = "Angebot", NumberKeywords = { "Angebotsnummer", "Angebotsnr", "Angebot" } },
+            new() { Name = "Lieferschein", Synonyms = { "Sendeinformation", "Versandmitteilung", "Lieferavis" }, NumberKeywords = { "Lieferscheinnummer", "Lieferschein", "Liefernr", "Sendungsnummer" } },
+            new() { Name = "Bestellung", NumberKeywords = { "Bestellnummer", "Bestellung" } },
+            new() { Name = "Mahnung", NumberKeywords = { "Mahnungsnummer", "Mahnung" } },
+        };
+
+        public static List<DocTypeDefinition> Items
+        {
+            get
+            {
+                lock (Sync)
+                {
+                    if (_items != null) return _items;
+                    try
+                    {
+                        if (File.Exists(FilePath))
+                            _items = JsonSerializer.Deserialize<List<DocTypeDefinition>>(SecureStorage.ReadAllText(FilePath));
+                    }
+                    catch { }
+                    if (_items == null || _items.Count == 0) _items = Defaults();
+                    return _items;
+                }
+            }
+        }
+
+        public static List<string> Names => Items.Select(d => d.Name).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
+
+        public static void Save(IEnumerable<DocTypeDefinition> items)
+        {
+            var list = items.Where(d => !string.IsNullOrWhiteSpace(d.Name)).ToList();
+            lock (Sync)
+            {
+                _items = list;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                    SecureStorage.WriteAllText(FilePath, JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true }));
+                }
+                catch { }
+            }
+        }
+
+        public static DocTypeDefinition? Get(string? nameOrSynonym)
+        {
+            if (string.IsNullOrWhiteSpace(nameOrSynonym)) return null;
+            var t = nameOrSynonym.Trim();
+            return Items.FirstOrDefault(d => d.Name.Equals(t, StringComparison.OrdinalIgnoreCase))
+                ?? Items.FirstOrDefault(d => d.Synonyms.Any(s => s.Trim().Equals(t, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        /// <summary>Umschreibung -> festgelegte Belegart (unbekannte Werte bleiben unver\u00E4ndert).</summary>
+        public static string? Canonical(string? t) => Get(t)?.Name ?? t?.Trim();
+
+        /// <summary>Belegarten-Bewertung aus Namen und Umschreibungen (Kopfbereich und kurze Zeilen z\u00E4hlen mehr).</summary>
+        public static void AddScores(string[] lines, Dictionary<string, double> scores, ISet<string> builtIn)
+        {
+            var terms = new List<(string Type, Regex Rx)>();
+            foreach (var d in Items)
+            {
+                if (string.IsNullOrWhiteSpace(d.Name)) continue;
+                var words = d.Synonyms.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+                if (!builtIn.Contains(d.Name)) words.Add(d.Name);
+                foreach (var w in words)
+                    terms.Add((d.Name, new Regex(@"(?<!\p{L})" + Regex.Escape(w.Trim()) + @"(?!\p{L})", RegexOptions.IgnoreCase)));
+            }
+            if (terms.Count == 0) return;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                double pos = i < 30 ? 1.5 : 0.5;
+                foreach (var (type, rx) in terms)
+                {
+                    int count = rx.Matches(lines[i]).Count;
+                    if (count == 0) continue;
+                    double s = 4 * pos * (lines[i].Trim().Length < 40 ? 1.0 : 0.5);
+                    scores[type] = scores.GetValueOrDefault(type) + s * count;
+                }
+            }
+        }
+    }
+}

@@ -202,7 +202,8 @@ namespace Dateiumbenenner.Engine
                     scores[type] = scores.GetValueOrDefault(type) + s * count;
                 }
             }
-            foreach (var kv in scores) field.Add(kv.Key, kv.Value, "Schlüsselwort");
+            DocTypeStore.AddScores(lines, scores, new HashSet<string>(TypeRules.Select(r => r.Item1), StringComparer.OrdinalIgnoreCase));
+            foreach (var kv in scores) field.Add(DocTypeStore.Canonical(kv.Key), kv.Value, "Schl\u00FCsselwort");
             return field;
         }
     }

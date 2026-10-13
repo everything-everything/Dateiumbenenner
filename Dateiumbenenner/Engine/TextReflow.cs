@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -33,7 +33,7 @@ namespace Dateiumbenenner.Engine
                 {
                     if (_width == null)
                     {
-                        try { _width = File.Exists(GlobalFile) && int.TryParse(File.ReadAllText(GlobalFile).Trim(), out var w) ? Math.Max(0, w) : DefaultWidth; }
+                        try { _width = File.Exists(GlobalFile) && int.TryParse(Dateiumbenenner.Engine.SecureStorage.ReadAllText(GlobalFile).Trim(), out var w) ? Math.Max(0, w) : DefaultWidth; }
                         catch { _width = DefaultWidth; }
                     }
                     return _width.Value;
@@ -44,7 +44,7 @@ namespace Dateiumbenenner.Engine
                 lock (_lock)
                 {
                     _width = Math.Max(0, value);
-                    try { Directory.CreateDirectory(Path.GetDirectoryName(GlobalFile)!); File.WriteAllText(GlobalFile, _width.Value.ToString()); } catch { }
+                    try { Directory.CreateDirectory(Path.GetDirectoryName(GlobalFile)!); Dateiumbenenner.Engine.SecureStorage.WriteAllText(GlobalFile, _width.Value.ToString()); } catch { }
                 }
             }
         }
@@ -54,7 +54,7 @@ namespace Dateiumbenenner.Engine
             get
             {
                 if (_perFile != null) return _perFile;
-                try { _perFile = File.Exists(FilesFile) ? JsonSerializer.Deserialize<Dictionary<string, int>>(File.ReadAllText(FilesFile)) : null; } catch { }
+                try { _perFile = File.Exists(FilesFile) ? JsonSerializer.Deserialize<Dictionary<string, int>>(Dateiumbenenner.Engine.SecureStorage.ReadAllText(FilesFile)) : null; } catch { }
                 _perFile = new Dictionary<string, int>(_perFile ?? new(), StringComparer.OrdinalIgnoreCase);
                 return _perFile;
             }
@@ -74,7 +74,7 @@ namespace Dateiumbenenner.Engine
             {
                 var key = Path.GetFileName(path);
                 if (width == null) PerFile.Remove(key); else PerFile[key] = Math.Max(0, width.Value);
-                try { Directory.CreateDirectory(Path.GetDirectoryName(FilesFile)!); File.WriteAllText(FilesFile, JsonSerializer.Serialize(PerFile)); } catch { }
+                try { Directory.CreateDirectory(Path.GetDirectoryName(FilesFile)!); Dateiumbenenner.Engine.SecureStorage.WriteAllText(FilesFile, JsonSerializer.Serialize(PerFile)); } catch { }
             }
         }
 

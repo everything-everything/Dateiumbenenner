@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -26,7 +26,7 @@ namespace Dateiumbenenner.Engine
             try
             {
                 if (File.Exists(FilePath))
-                    return File.ReadAllLines(FilePath).Select(l => l.Trim()).Where(l => l.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    return Dateiumbenenner.Engine.SecureStorage.ReadAllLines(FilePath).Select(l => l.Trim()).Where(l => l.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             }
             catch { }
             return Defaults.ToList();
@@ -36,7 +36,7 @@ namespace Dateiumbenenner.Engine
         {
             var list = items.Select(l => l.Trim()).Where(l => l.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllLines(FilePath, list);
+            Dateiumbenenner.Engine.SecureStorage.WriteAllLines(FilePath, list);
             lock (Sync) _items = list;
         }
 
@@ -70,7 +70,7 @@ namespace Dateiumbenenner.Engine
                 lock (Sync)
                 {
                     if (_current != null) return _current;
-                    try { if (File.Exists(FilePath)) _current = JsonSerializer.Deserialize<OwnCompany>(File.ReadAllText(FilePath)); } catch { }
+                    try { if (File.Exists(FilePath)) _current = JsonSerializer.Deserialize<OwnCompany>(Dateiumbenenner.Engine.SecureStorage.ReadAllText(FilePath)); } catch { }
                     return _current ??= new OwnCompany();
                 }
             }
@@ -79,7 +79,7 @@ namespace Dateiumbenenner.Engine
         public static void Save(OwnCompany value)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }));
+            Dateiumbenenner.Engine.SecureStorage.WriteAllText(FilePath, JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }));
             lock (Sync) _current = value;
         }
 
@@ -150,7 +150,7 @@ namespace Dateiumbenenner.Engine
                 try
                 {
                     if (File.Exists(FilePath))
-                        _map = JsonSerializer.Deserialize<Dictionary<string, NumberPattern>>(File.ReadAllText(FilePath));
+                        _map = JsonSerializer.Deserialize<Dictionary<string, NumberPattern>>(Dateiumbenenner.Engine.SecureStorage.ReadAllText(FilePath));
                 }
                 catch { }
                 return _map ??= new Dictionary<string, NumberPattern>();
@@ -176,7 +176,7 @@ namespace Dateiumbenenner.Engine
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-                    File.WriteAllText(FilePath, JsonSerializer.Serialize(Map, new JsonSerializerOptions { WriteIndented = true }));
+                    Dateiumbenenner.Engine.SecureStorage.WriteAllText(FilePath, JsonSerializer.Serialize(Map, new JsonSerializerOptions { WriteIndented = true }));
                 }
                 catch { }
             }
@@ -202,7 +202,7 @@ namespace Dateiumbenenner.Engine
                 try
                 {
                     if (File.Exists(FilePath))
-                        _map = JsonSerializer.Deserialize<Dictionary<string, DocTemplate>>(File.ReadAllText(FilePath));
+                        _map = JsonSerializer.Deserialize<Dictionary<string, DocTemplate>>(Dateiumbenenner.Engine.SecureStorage.ReadAllText(FilePath));
                 }
                 catch { }
                 return _map ??= new Dictionary<string, DocTemplate>();
@@ -226,7 +226,7 @@ namespace Dateiumbenenner.Engine
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-                    File.WriteAllText(FilePath, JsonSerializer.Serialize(Map, new JsonSerializerOptions { WriteIndented = true }));
+                    Dateiumbenenner.Engine.SecureStorage.WriteAllText(FilePath, JsonSerializer.Serialize(Map, new JsonSerializerOptions { WriteIndented = true }));
                 }
                 catch { }
             }

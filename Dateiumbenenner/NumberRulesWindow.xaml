@@ -1,0 +1,84 @@
+<Window x:Class="Dateiumbenenner.NumberRulesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Belegarten &amp; Nummernmuster" Height="560" Width="1000"
+        WindowStartupLocation="CenterOwner">
+    <DockPanel Margin="10">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button Content="Speichern &amp; Belegnummern neu ermitteln" Padding="10,3" Margin="0,0,8,0" Click="BtnSaveRecalc_Click"/>
+            <Button Content="Speichern" Padding="10,3" Margin="0,0,8,0" IsDefault="True" Click="BtnSave_Click"/>
+            <Button Content="Abbrechen" Padding="10,3" IsCancel="True"/>
+        </StackPanel>
+        <TabControl>
+            <TabItem Header="Nummernmuster">
+                <DockPanel Margin="5">
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="Gray"
+                               Text="Maske: $ = Ziffer, ? = Buchstabe, # = Ziffer oder Buchstabe, * = beliebiges Zeichen, Leerzeichen = Leerzeichen, sonst w&#246;rtlich (z. B. RE-$$$$$$ oder ???$$$$ $$$?). Merkmale: ungef&#228;hre L&#228;nge und erlaubte Zeichen. Firma/Belegart * = alle. H&#246;here Priorit&#228;t gewinnt; Abweichungen (l&#228;nger/k&#252;rzer) werden schw&#228;cher bewertet."/>
+                    <Border DockPanel.Dock="Bottom" BorderBrush="LightGray" BorderThickness="1" Padding="6" Margin="0,6,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Test &#8211; Firma:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <TextBox x:Name="TxtTestCompany" Width="150" TextChanged="Test_Changed"/>
+                            <TextBlock Text="Belegart:" VerticalAlignment="Center" Margin="10,0,4,0"/>
+                            <TextBox x:Name="TxtTestDocType" Width="120" TextChanged="Test_Changed"/>
+                            <TextBlock Text="Nummer:" VerticalAlignment="Center" Margin="10,0,4,0"/>
+                            <TextBox x:Name="TxtTestValue" Width="150" TextChanged="Test_Changed"/>
+                            <TextBlock x:Name="TxtTestResult" VerticalAlignment="Center" Margin="10,0,0,0" FontWeight="Bold"/>
+                        </StackPanel>
+                    </Border>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Regel hinzuf&#252;gen" Padding="8,2" Margin="0,0,6,0" Click="BtnAddRule_Click"/>
+                        <Button Content="Vorschl&#228;ge f&#252;r Firma" Padding="8,2" Margin="0,0,6,0" Click="BtnSuggest_Click" ToolTip="Je Belegart eine Regel f&#252;r die unten eingetragene Firma anlegen (Maske aus bisher erkannten Nummern)"/>
+                        <Button Content="Markierte l&#246;schen" Padding="8,2" Margin="0,0,6,0" Click="BtnDeleteRule_Click"/>
+                        <Button Content="Gelernte Regeln l&#246;schen" Padding="8,2" Click="BtnDeleteLearned_Click"/>
+                    </StackPanel>
+                    <DockPanel DockPanel.Dock="Left" Width="200" Margin="0,0,6,0">
+                        <TextBox x:Name="TxtCompanyFilter" DockPanel.Dock="Top" Margin="0,0,0,4" ToolTip="Firmen filtern" TextChanged="TxtCompanyFilter_TextChanged"/>
+                        <ListBox x:Name="LstCompanies" SelectionChanged="LstCompanies_SelectionChanged"/>
+                    </DockPanel>
+                    <DataGrid x:Name="GridRules" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column" CellEditEnding="GridRules_CellEditEnding">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Firma" Binding="{Binding Company, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
+                            <DataGridTextColumn Header="Belegart" Binding="{Binding DocType, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
+                            <DataGridTextColumn Header="Priorit&#228;t" Binding="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
+                            <DataGridComboBoxColumn x:Name="ColKind" Header="Art" SelectedItemBinding="{Binding Kind}" Width="80"/>
+                            <DataGridTemplateColumn Header="Beispielnummer (w&#228;hlen/eingeben)" Width="170">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox IsEditable="True" ItemsSource="{Binding Examples}" Text="{Binding Example, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                  SelectionChanged="Example_Changed" LostFocus="Example_LostFocus"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Maske" Binding="{Binding Mask, UpdateSourceTrigger=PropertyChanged}" Width="120" FontFamily="Consolas"/>
+                            <DataGridTextColumn Header="L&#228;nge min" Binding="{Binding MinLength, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="65"/>
+                            <DataGridTextColumn Header="L&#228;nge max" Binding="{Binding MaxLength, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="65"/>
+                            <DataGridCheckBoxColumn Header="Ziffern" Binding="{Binding AllowDigits, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
+                            <DataGridCheckBoxColumn Header="Buchst." Binding="{Binding AllowLetters, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
+                            <DataGridCheckBoxColumn Header="Leerz." Binding="{Binding AllowSpace, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
+                            <DataGridCheckBoxColumn Header="Zeichen" Binding="{Binding AllowSymbols, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                            <DataGridTextColumn Header="Pr&#228;fix" Binding="{Binding Prefix, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
+                            <DataGridCheckBoxColumn Header="Gelernt" Binding="{Binding Learned}" Width="55"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+            <TabItem Header="Belegarten">
+                <DockPanel Margin="5">
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="Gray"
+                               Text="Eigene Belegarten festlegen. Umschreibungen werden bei der Erkennung der Belegart zugeordnet (z. B. Sendeinformation &#8594; Lieferschein). Nummer-Schl&#252;sselw&#246;rter: Begriffe, hinter denen die Belegnummer steht. Mehrere Eintr&#228;ge mit ; trennen."/>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Belegart hinzuf&#252;gen" Padding="8,2" Margin="0,0,6,0" Click="BtnAddDocType_Click"/>
+                        <Button Content="Markierte l&#246;schen" Padding="8,2" Click="BtnDeleteDocType_Click"/>
+                    </StackPanel>
+                    <DataGrid x:Name="GridDocTypes" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Belegart" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
+                            <DataGridTextColumn Header="Umschreibungen (;-getrennt)" Binding="{Binding Synonyms, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            <DataGridTextColumn Header="Nummer-Schl&#252;sselw&#246;rter (;-getrennt)" Binding="{Binding Keywords, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

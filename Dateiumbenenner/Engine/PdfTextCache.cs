@@ -61,7 +61,7 @@ namespace Dateiumbenenner
             {
                 var file = GetCacheFile(pdfPath, out var stamp);
                 if (file == null || !File.Exists(file)) return false;
-                using var reader = new StreamReader(file, Encoding.UTF8);
+                using var reader = new StringReader(Dateiumbenenner.Engine.SecureStorage.ReadAllText(file));
                 if (reader.ReadLine() != Header) return false;
                 if (reader.ReadLine() != stamp) return false;
                 if (!int.TryParse(reader.ReadLine(), out pageCount)) return false;
@@ -81,9 +81,7 @@ namespace Dateiumbenenner
                 var file = GetCacheFile(pdfPath, out var stamp);
                 if (file == null) return;
                 Directory.CreateDirectory(CacheDir);
-                var tmp = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                File.WriteAllText(tmp, $"{Header}\n{stamp}\n{pageCount}\n{text}", Encoding.UTF8);
-                File.Move(tmp, file, true);
+                Dateiumbenenner.Engine.SecureStorage.WriteAllText(file, $"{Header}\n{stamp}\n{pageCount}\n{text}");
             }
             catch
             {

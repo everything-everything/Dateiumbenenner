@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -26,7 +26,7 @@ namespace Dateiumbenenner
                 double v = 0.82;
                 try
                 {
-                    if (File.Exists(ThresholdFile) && double.TryParse(File.ReadAllText(ThresholdFile).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var p) && p >= 50 && p <= 100)
+                    if (File.Exists(ThresholdFile) && double.TryParse(Dateiumbenenner.Engine.SecureStorage.ReadAllText(ThresholdFile).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var p) && p >= 50 && p <= 100)
                         v = p / 100.0;
                 }
                 catch { }
@@ -38,7 +38,7 @@ namespace Dateiumbenenner
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(ThresholdFile)!);
-                    File.WriteAllText(ThresholdFile, Math.Round(_threshold.Value * 100).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    Dateiumbenenner.Engine.SecureStorage.WriteAllText(ThresholdFile, Math.Round(_threshold.Value * 100).ToString(System.Globalization.CultureInfo.InvariantCulture));
                 }
                 catch { }
             }
@@ -55,7 +55,7 @@ namespace Dateiumbenenner
                 double v = 0.5;
                 try
                 {
-                    if (File.Exists(ListThresholdFile) && double.TryParse(File.ReadAllText(ListThresholdFile).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var p) && p >= 0 && p <= 100)
+                    if (File.Exists(ListThresholdFile) && double.TryParse(Dateiumbenenner.Engine.SecureStorage.ReadAllText(ListThresholdFile).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var p) && p >= 0 && p <= 100)
                         v = p / 100.0;
                 }
                 catch { }
@@ -67,7 +67,7 @@ namespace Dateiumbenenner
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(ListThresholdFile)!);
-                    File.WriteAllText(ListThresholdFile, Math.Round(_listThreshold.Value * 100).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    Dateiumbenenner.Engine.SecureStorage.WriteAllText(ListThresholdFile, Math.Round(_listThreshold.Value * 100).ToString(System.Globalization.CultureInfo.InvariantCulture));
                 }
                 catch { }
             }
@@ -101,7 +101,7 @@ namespace Dateiumbenenner
                 lock (_lock)
                 {
                     if (_known != null) return _known;
-                    try { _known = File.Exists(StoreFile) ? JsonSerializer.Deserialize<List<string>>(File.ReadAllText(StoreFile)) ?? new() : new(); }
+                    try { _known = File.Exists(StoreFile) ? JsonSerializer.Deserialize<List<string>>(Dateiumbenenner.Engine.SecureStorage.ReadAllText(StoreFile)) ?? new() : new(); }
                     catch { _known = new(); }
                     return _known;
                 }
@@ -122,7 +122,7 @@ namespace Dateiumbenenner
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(StoreFile)!);
-                    File.WriteAllText(StoreFile, JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true }));
+                    Dateiumbenenner.Engine.SecureStorage.WriteAllText(StoreFile, JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true }));
                 }
                 catch { }
             }

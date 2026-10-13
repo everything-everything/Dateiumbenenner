@@ -31,6 +31,17 @@ namespace Dateiumbenenner.Plugins
         void SavePluginData(string pluginId, string filePath, string data);
         /// <summary>Name des aktiven Profils.</summary>
         string ActiveProfile { get; }
+        /// <summary>Sitzungswert (z. B. zuletzt geladener Ordner) aus dem aktiven Profil lesen.</summary>
+        string? LoadSessionValue(string key);
+        /// <summary>Sitzungswert im aktiven Profil speichern (null = löschen).</summary>
+        void SaveSessionValue(string key, string? value);
+    }
+
+    /// <summary>Optional: Plugins, deren Zustand beim Programmstart wiederhergestellt werden kann.</summary>
+    public interface IPluginSessionRestore
+    {
+        bool HasSavedSession { get; }
+        Task RestoreSessionAsync();
     }
 
     /// <summary>Liefert eine Firmenadresse (Fallback, wenn das Dokument keine Adresse liefert).</summary>

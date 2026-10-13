@@ -1,7 +1,7 @@
 <Window x:Class="Dateiumbenenner.HelpWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Dateiumbenenner-Hilfe" Height="600" Width="680" MinWidth="420" MinHeight="300"
+        Height="650" Width="980" MinWidth="600"
         WindowStartupLocation="CenterOwner" Background="#ECE9D8"
         FontFamily="Tahoma" FontSize="11" UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display">
@@ -81,8 +81,40 @@
             </Border>
         </Border>
 
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240" MinWidth="150"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <!-- Navigationsbereich: Inhalt / Index / Suchen -->
+            <TabControl x:Name="NavTabs" Margin="3,3,0,3">
+                <TabItem Header="Inhalt">
+                    <ListBox x:Name="LstContents" DisplayMemberPath="Title" SelectionChanged="LstContents_SelectionChanged"/>
+                </TabItem>
+                <TabItem x:Name="TabIndexPage" Header="Index">
+                    <DockPanel Margin="3">
+                        <TextBlock DockPanel.Dock="Top" Text="Zu suchendes Schlüsselwort:" Margin="0,0,0,2"/>
+                        <TextBox x:Name="TxtIndexFilter" DockPanel.Dock="Top" Margin="0,0,0,4" TextChanged="TxtIndexFilter_TextChanged" PreviewKeyDown="TxtIndexFilter_PreviewKeyDown"/>
+                        <Button DockPanel.Dock="Bottom" Content="_Anzeigen" HorizontalAlignment="Right" Margin="0,4,0,0" Padding="10,1" Click="BtnIndexShow_Click"/>
+                        <ListBox x:Name="LstIndex" DisplayMemberPath="Keyword" MouseDoubleClick="BtnIndexShow_Click"/>
+                    </DockPanel>
+                </TabItem>
+                <TabItem x:Name="TabSearch" Header="Suchen">
+                    <DockPanel Margin="3">
+                        <TextBlock DockPanel.Dock="Top" Text="Suchbegriffe (alle Wörter):" Margin="0,0,0,2"/>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                            <Button DockPanel.Dock="Right" Content="_Suchen" Margin="4,0,0,0" Padding="8,1" Click="BtnSearch_Click"/>
+                            <TextBox x:Name="TxtSearch" PreviewKeyDown="TxtSearch_PreviewKeyDown"/>
+                        </DockPanel>
+                        <TextBlock x:Name="TxtSearchInfo" DockPanel.Dock="Top" Foreground="Gray" Margin="0,0,0,2"/>
+                        <ListBox x:Name="LstSearch" DisplayMemberPath="Title" SelectionChanged="LstSearch_SelectionChanged"/>
+                    </DockPanel>
+                </TabItem>
+            </TabControl>
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="#ECE9D8"/>
         <!-- Themenbereich mit vertieftem Rahmen -->
-        <Border Margin="3" BorderBrush="#7F9DB9" BorderThickness="1">
+        <Border Grid.Column="2" Margin="3" BorderBrush="#7F9DB9" BorderThickness="1">
             <Border>
                 <Border>
                     <DockPanel Background="White">
@@ -103,5 +135,6 @@
                 </Border>
             </Border>
         </Border>
+        </Grid>
     </DockPanel>
 </Window>

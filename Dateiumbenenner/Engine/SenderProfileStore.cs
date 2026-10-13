@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -41,9 +41,9 @@ namespace Dateiumbenenner.Engine
         {
             _file = file;
             _ambiguousFile = Path.ChangeExtension(file, null) + "_ambiguous.json";
-            try { _profiles = File.Exists(file) ? JsonSerializer.Deserialize<List<SenderProfile>>(File.ReadAllText(file)) ?? new() : new(); }
+            try { _profiles = File.Exists(file) ? JsonSerializer.Deserialize<List<SenderProfile>>(Dateiumbenenner.Engine.SecureStorage.ReadAllText(file)) ?? new() : new(); }
             catch { _profiles = new(); }
-            try { _ambiguous = File.Exists(_ambiguousFile) ? new HashSet<string>(JsonSerializer.Deserialize<List<string>>(File.ReadAllText(_ambiguousFile)) ?? new(), StringComparer.OrdinalIgnoreCase) : new(StringComparer.OrdinalIgnoreCase); }
+            try { _ambiguous = File.Exists(_ambiguousFile) ? new HashSet<string>(JsonSerializer.Deserialize<List<string>>(Dateiumbenenner.Engine.SecureStorage.ReadAllText(_ambiguousFile)) ?? new(), StringComparer.OrdinalIgnoreCase) : new(StringComparer.OrdinalIgnoreCase); }
             catch { _ambiguous = new(StringComparer.OrdinalIgnoreCase); }
         }
 
@@ -134,7 +134,7 @@ namespace Dateiumbenenner.Engine
 
         private void SaveAmbiguous()
         {
-            try { File.WriteAllText(_ambiguousFile, JsonSerializer.Serialize(_ambiguous.OrderBy(s => s).ToList(), new JsonSerializerOptions { WriteIndented = true })); }
+            try { Dateiumbenenner.Engine.SecureStorage.WriteAllText(_ambiguousFile, JsonSerializer.Serialize(_ambiguous.OrderBy(s => s).ToList(), new JsonSerializerOptions { WriteIndented = true })); }
             catch { }
         }
 
@@ -143,7 +143,7 @@ namespace Dateiumbenenner.Engine
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(_file)!);
-                File.WriteAllText(_file, JsonSerializer.Serialize(_profiles, new JsonSerializerOptions { WriteIndented = true }));
+                Dateiumbenenner.Engine.SecureStorage.WriteAllText(_file, JsonSerializer.Serialize(_profiles, new JsonSerializerOptions { WriteIndented = true }));
             }
             catch { }
         }

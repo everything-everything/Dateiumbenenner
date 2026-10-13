@@ -1,0 +1,149 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Windows-XP-Stil (Luna), passend zum Hilfefenster. Gilt programmweit als Standardstil. -->
+    <SolidColorBrush x:Key="XpFace" Color="#ECE9D8"/>
+    <SolidColorBrush x:Key="XpBorder" Color="#7F9DB9"/>
+    <SolidColorBrush x:Key="XpButtonBorder" Color="#003C74"/>
+    <SolidColorBrush x:Key="XpHot" Color="#E69B00"/>
+
+    <LinearGradientBrush x:Key="XpButtonFace" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FFFFFF" Offset="0"/>
+        <GradientStop Color="#F4F3EE" Offset="0.6"/>
+        <GradientStop Color="#D6D0C5" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="XpBar" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FAF9F5" Offset="0"/>
+        <GradientStop Color="#E5E2D5" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="XpHeader" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FFFFFF" Offset="0"/>
+        <GradientStop Color="#EBEADB" Offset="0.8"/>
+        <GradientStop Color="#D6D3C6" Offset="1"/>
+    </LinearGradientBrush>
+
+    <!-- Schaltflächen -->
+    <Style TargetType="Button">
+        <Setter Property="Foreground" Value="Black"/>
+        <Setter Property="Background" Value="{StaticResource XpButtonFace}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource XpButtonBorder}"/>
+        <Setter Property="Padding" Value="8,2"/>
+        <Setter Property="MinHeight" Value="23"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Outer" CornerRadius="3" BorderThickness="1" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                        <ContentPresenter x:Name="Cp" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Outer" Property="BorderBrush" Value="{StaticResource XpHot}"/>
+                        </Trigger>
+                        <Trigger Property="IsDefaulted" Value="True">
+                            <Setter TargetName="Outer" Property="BorderThickness" Value="2"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Outer" Property="Background" Value="#E3E2DA"/>
+                            <Setter TargetName="Cp" Property="Margin" Value="1,1,0,0"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Outer" Property="BorderBrush" Value="#C9C7BA"/>
+                            <Setter TargetName="Outer" Property="Background" Value="#F5F4EA"/>
+                            <Setter Property="Foreground" Value="#ACA899"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Menü und Leisten -->
+    <Style TargetType="Menu">
+        <Setter Property="Background" Value="{StaticResource XpFace}"/>
+        <Setter Property="FontFamily" Value="Tahoma"/>
+    </Style>
+    <Style TargetType="ToolBar">
+        <Setter Property="Background" Value="{StaticResource XpBar}"/>
+    </Style>
+    <Style TargetType="StatusBar">
+        <Setter Property="Background" Value="{StaticResource XpFace}"/>
+        <Setter Property="BorderBrush" Value="#ACA899"/>
+        <Setter Property="BorderThickness" Value="0,1,0,0"/>
+    </Style>
+
+    <!-- Registerkarten (XP: orange Oberkante bei Auswahl/Hover) -->
+    <Style TargetType="TabControl">
+        <Setter Property="Background" Value="#FCFCFE"/>
+        <Setter Property="BorderBrush" Value="#919B9C"/>
+    </Style>
+    <Style TargetType="TabItem">
+        <Setter Property="Foreground" Value="Black"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabItem">
+                    <Grid x:Name="Root" Margin="0,2,0,0">
+                        <Border x:Name="Bd" Background="{StaticResource XpHeader}" BorderBrush="#919B9C"
+                                BorderThickness="1,1,1,0" CornerRadius="3,3,0,0" Padding="10,3" Margin="0,0,1,0">
+                            <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
+                        </Border>
+                        <Border x:Name="Hot" Height="3" VerticalAlignment="Top" CornerRadius="3,3,0,0" Margin="0,0,1,0"
+                                Background="#FFC83C" Visibility="Collapsed"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Hot" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Hot" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="Hot" Property="Background" Value="#E68B2C"/>
+                            <Setter TargetName="Bd" Property="Background" Value="#FCFCFE"/>
+                            <Setter TargetName="Root" Property="Margin" Value="-2,0,-2,-1"/>
+                            <Setter Property="Panel.ZIndex" Value="1"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="#ACA899"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Eingabefelder und Listen mit blauem XP-Rahmen -->
+    <Style TargetType="TextBox">
+        <Setter Property="BorderBrush" Value="{StaticResource XpBorder}"/>
+    </Style>
+    <Style TargetType="PasswordBox">
+        <Setter Property="BorderBrush" Value="{StaticResource XpBorder}"/>
+    </Style>
+    <Style TargetType="ListBox">
+        <Setter Property="BorderBrush" Value="{StaticResource XpBorder}"/>
+    </Style>
+    <Style TargetType="ListView">
+        <Setter Property="BorderBrush" Value="{StaticResource XpBorder}"/>
+    </Style>
+    <Style TargetType="DataGrid">
+        <Setter Property="BorderBrush" Value="{StaticResource XpBorder}"/>
+        <Setter Property="HorizontalGridLinesBrush" Value="#E5E2D5"/>
+        <Setter Property="VerticalGridLinesBrush" Value="#E5E2D5"/>
+    </Style>
+    <Style TargetType="GroupBox">
+        <Setter Property="BorderBrush" Value="#D0D0BF"/>
+        <Setter Property="Foreground" Value="#0046D5"/>
+    </Style>
+
+    <!-- Spaltenköpfe wie im XP-Explorer -->
+    <Style TargetType="GridViewColumnHeader">
+        <Setter Property="Background" Value="{StaticResource XpHeader}"/>
+        <Setter Property="BorderBrush" Value="#D6D3C6"/>
+        <Setter Property="Foreground" Value="Black"/>
+        <Setter Property="Padding" Value="5,3"/>
+    </Style>
+    <Style TargetType="DataGridColumnHeader">
+        <Setter Property="Background" Value="{StaticResource XpHeader}"/>
+        <Setter Property="BorderBrush" Value="#D6D3C6"/>
+        <Setter Property="BorderThickness" Value="0,0,1,1"/>
+        <Setter Property="Padding" Value="5,3"/>
+    </Style>
+</ResourceDictionary>

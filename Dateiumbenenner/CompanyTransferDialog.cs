@@ -44,10 +44,10 @@ namespace Dateiumbenenner
                     var matches = new List<string>();
                     foreach (var i in g)
                     {
-                        var c = (i.CompanyName ?? "").Trim();
-                        if (c.Length > 0 && isSimilar(c)) matches.Add("Aktuell: " + c);
-                        foreach (var k in i.CompanyCandidates.Where(k => !string.IsNullOrWhiteSpace(k) && isSimilar(k)))
+                        // Regel: die gewählte Firma muss in den erkannten Firmennamen oder im Belegtext stehen
+                        foreach (var k in i.CompanyCandidates.Where(k => !string.IsNullOrWhiteSpace(k) && isSimilar(k) && CompanyMatcher.AppearsInText(k, i.FullText)))
                             matches.Add("Liste: " + k.Trim());
+                        if (CompanyMatcher.AppearsInText(target, i.FullText)) matches.Add("Text: " + target);
                     }
                     var grp = new Group
                     {
@@ -58,7 +58,7 @@ namespace Dateiumbenenner
                         Files = string.Join(" | ", g.Select(i => i.FileName)),
                     };
                     grp.Items.AddRange(g);
-                    grp.Selected = matches.Count > 0;
+                    grp.Selected = g.All(i => CompanyMatcher.AppearsInText(target, i.FullText));
                     return grp;
                 })
                 .OrderByDescending(g => g.Selected).ThenByDescending(g => g.Count).ThenBy(g => g.Name));

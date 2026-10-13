@@ -7,6 +7,13 @@
             <Button Content="OK" Width="80" IsDefault="True" Click="BtnOk_Click" Margin="0,0,6,0"/>
             <Button Content="Abbrechen" Width="80" IsCancel="True"/>
         </StackPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Erscheinungsbild:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <ComboBox x:Name="CmbTheme" Width="200">
+                <ComboBoxItem Content="Standard (Windows)" Tag="Standard"/>
+                <ComboBoxItem Content="Windows XP (Luna)" Tag="WindowsXp"/>
+            </ComboBox>
+        </StackPanel>
         <CheckBox x:Name="ChkDebug" DockPanel.Dock="Top" Content="Debug-Dateien schreiben (Daten\debug)" Margin="0,0,0,10"/>
         <CheckBox x:Name="ChkAskTemplates" DockPanel.Dock="Top" Content="Vorlagen (Firma + Dokumenttyp) automatisch anbieten" Margin="0,0,0,10"/>
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10"

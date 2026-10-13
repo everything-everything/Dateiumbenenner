@@ -10,6 +10,7 @@ namespace Dateiumbenenner
         {
             InitializeComponent();
             ChkDebug.IsChecked = DocumentEngine.DebugEnabled;
+            CmbTheme.SelectedIndex = ThemeManager.Current == ThemeManager.Theme.WindowsXp ? 1 : 0;
             ChkAskTemplates.IsChecked = askTemplates;
             TxtExclusions.Text = string.Join(Environment.NewLine, CompanyExclusions.Items);
             var own = OwnCompany.Current;
@@ -47,6 +48,7 @@ namespace Dateiumbenenner
                 System.Windows.MessageBox.Show("Ausschlüsse konnten nicht gespeichert werden:\n" + ex.Message, "Einstellungen");
                 return;
             }
+            ThemeManager.Apply(CmbTheme.SelectedIndex == 1 ? ThemeManager.Theme.WindowsXp : ThemeManager.Theme.Standard);
             DialogResult = true;
         }
     }

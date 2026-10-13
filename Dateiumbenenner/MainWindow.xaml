@@ -22,9 +22,22 @@
             <Separator/>
             <MenuItem Header="_PLZ-Verzeichnis (DE) aktualisieren" Click="MenuPlzUpdate_Click"/>
             <Separator/>
+            <MenuItem x:Name="MenuClearOnExit" Header="Datenbank und _Lerndaten beim Schließen leeren" IsCheckable="True" Click="MenuClearOnExit_Click" ToolTip="Beim Beenden werden Dokument-Datenbank und gelernte Daten des aktiven Profils gelöscht. Einstellungen bleiben erhalten."/>
+            <MenuItem Header="Datenbank und Lerndaten _jetzt leeren..." Click="MenuClearNow_Click"/>
+            <MenuItem x:Name="MenuPassword" Header="_Passwortschutz (Verschlüsselung)" SubmenuOpened="MenuPassword_Opened">
+                <MenuItem x:Name="MenuPwSet" Header="Passwort _einrichten..." Click="MenuPwSet_Click"/>
+                <MenuItem x:Name="MenuPwChange" Header="Passwort ä_ndern..." Click="MenuPwChange_Click"/>
+                <MenuItem x:Name="MenuPwRemove" Header="Passwortschutz _entfernen..." Click="MenuPwRemove_Click"/>
+            </MenuItem>
+            <Separator/>
             <MenuItem Header="_Einstellungen..." Click="MenuSettings_Click"/>
+            <MenuItem Header="Belegarten &amp; _Nummernmuster..." Click="MenuNumberRules_Click"/>
+            <MenuItem Header="Belegnummern neu _ermitteln" Click="MenuRecalcNumbers_Click"/>
         </MenuItem>
-        <MenuItem x:Name="MenuProfiles" Header="P_rofil" SubmenuOpened="MenuProfiles_Opened"/>
+        <MenuItem x:Name="MenuProfiles" Header="P_rofil" SubmenuOpened="MenuProfiles_Opened">
+            <MenuItem Header="Profil _w&#228;hlen"/>
+            <MenuItem Header="_Neues Profil festlegen..."/>
+        </MenuItem>
         <MenuItem x:Name="MenuPlugins" Header="_Plugins">
             <MenuItem Header="Plugin _importieren..." Click="MenuPluginImport_Click"/>
             <MenuItem Header="Plugin-_Ordner öffnen" Click="MenuPluginFolder_Click"/>
@@ -68,7 +81,12 @@
 
                     <!-- Erste Zeile: Ordner wählen Button + Pfad -->
                     <Button x:Name="BtnSelectFolder" Grid.Row="0" Grid.Column="0" Content="Ordner wählen" Width="145" HorizontalAlignment="Left" Click="BtnSelectFolder_Click"/>
-                    <TextBox x:Name="TxtFolder" Grid.Row="0" Grid.Column="2" Margin="0" IsReadOnly="True" HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+                    <DockPanel Grid.Row="0" Grid.Column="2">
+                        <CheckBox x:Name="ChkWatchFolder" DockPanel.Dock="Right" Content="Ordner überwachen" VerticalAlignment="Center" Margin="8,0,0,0" Checked="ChkWatchFolder_Changed" Unchecked="ChkWatchFolder_Changed" ToolTip="Liste automatisch anpassen, wenn Dateien im Ordner hinzukommen, verschoben oder gelöscht werden (auf Netzlaufwerken ggf. unzuverlässig – dann Aktualisieren verwenden)"/>
+                        <Button x:Name="BtnMoveCopy" DockPanel.Dock="Right" Content="Markierte verschieben / kopieren" Padding="8,0" Margin="8,0,0,0" Click="BtnMoveCopy_Click" ToolTip="Markierte Dateien (inkl. gleichnamiger .txt/.ini/.xml) verschieben oder kopieren"/>
+                        <Button x:Name="BtnRefreshFolder" DockPanel.Dock="Right" Content="Aktualisieren" Padding="8,0" Margin="8,0,0,0" Click="BtnRefreshFolder_Click" ToolTip="Ordner neu einlesen (F5). Bereits ausgewertete Belege kommen aus der Datenbank."/>
+                        <TextBox x:Name="TxtFolder" Margin="0" IsReadOnly="True" HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+                    </DockPanel>
 
                     <!-- Zweite Zeile: Umbenennen-Buttons + Sortierungsoption -->
                     <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,5,0,0">
@@ -257,8 +275,9 @@
                             <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,10,0,5">
                                 <TextBlock Text="Firma:" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <ComboBox x:Name="CmbMainCompany" IsEditable="True" Width="170" Margin="0,0,4,0" ToolTip="Firmenname auswählen oder eingeben"/>
-                                                                <Button Content="Namen übertragen" Padding="6,0" Margin="0,0,10,0" Click="BtnMainTransferName_Click" ToolTip="Firmennamen auf weitere Dateien übertragen (Auswahl in Übersicht)"/>
-                                <TextBlock Text="Neuer Präfix:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <Button Content="&#220;bertragen&#8230;" Padding="6,0" Margin="0,0,4,0" Click="BtnMainTransferName_Click" ToolTip="Firmennamen auf weitere Dateien &#252;bertragen (Auswahl in &#220;bersicht)"/>
+                                <Button Content="Aus INI Erzeugen übernehmen" Padding="6,0" Margin="0,0,10,0" Click="BtnMainFromIni_Click" ToolTip="Firma, Dokumenttyp, Nummer und Datum aus der Registerkarte INI Erzeugen (zuletzt erzeugte INI) für die markierten bzw. alle Dateien übernehmen"/>
+                                <TextBlock Text="Neuer Pr&#228;fix:" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox x:Name="TxtMainNewPrefix" Width="130" Margin="0,0,10,0" VerticalContentAlignment="Center"/>
                                 <TextBlock x:Name="TxtMainPrefixNewName" VerticalAlignment="Center" FontWeight="Bold" Foreground="Green" ToolTip="Neuer Dateiname nach Präfix-Umbenennung"/>
                                 <TextBlock x:Name="TxtMainSplitInfo" Text="Akt. Präfix: –  |  Suffix: –" VerticalAlignment="Center" Foreground="Gray" Margin="10,0,0,0" ToolTip="Aufteilung des aktuellen Dateinamens nach Trennzeichen/Segment-Index"/>

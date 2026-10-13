@@ -17,7 +17,7 @@ namespace Dateiumbenenner
     {
         public const string FileName = "dokumente.db";
         /// <summary>Erhöhen, wenn sich die Erkennungslogik ändert – dann werden alle Dateien neu ausgewertet.</summary>
-        public const int ExtractorVersion = 1;
+        public const int ExtractorVersion = 2;
 
         private static readonly object Sync = new();
         private static string? _connString;
@@ -52,7 +52,43 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
         {
             var c = new SqliteConnection(_connString);
             c.Open();
+            ApplyKey(c, Dateiumbenenner.Engine.SecureStorage.DatabaseKey);
             return c;
+        }
+
+        private static void ApplyKey(SqliteConnection c, string? hexKey)
+        {
+            if (hexKey == null) return;
+            using var k = c.CreateCommand();
+            k.CommandText = $"PRAGMA key = \"{hexKey}\";";
+            k.ExecuteNonQuery();
+        }
+
+        /// <summary>Wandelt eine Datenbankdatei zwischen unverschlüsselt und verschlüsselt (SQLCipher) um.</summary>
+        internal static void Rekey(string dbPath, byte[]? from, byte[]? to)
+        {
+            string? Hex(byte[]? k) => k == null ? null : "x'" + Convert.ToHexString(k) + "'";
+            var tmp = dbPath + ".neu";
+            if (File.Exists(tmp)) File.Delete(tmp);
+            var cs = new SqliteConnectionStringBuilder { DataSource = dbPath, Pooling = false }.ToString();
+            using (var c = new SqliteConnection(cs))
+            {
+                c.Open();
+                ApplyKey(c, Hex(from));
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                cmd.ExecuteNonQuery();
+                cmd.CommandText = $"ATTACH DATABASE $f AS target KEY \"{Hex(to) ?? ""}\";";
+                cmd.Parameters.AddWithValue("$f", tmp);
+                cmd.ExecuteNonQuery();
+                cmd.Parameters.Clear();
+                cmd.CommandText = "SELECT sqlcipher_export('target'); DETACH DATABASE target;";
+                cmd.ExecuteNonQuery();
+            }
+            File.Move(tmp, dbPath, true);
+            foreach (var ext in new[] { "-wal", "-shm" }) if (File.Exists(dbPath + ext)) File.Delete(dbPath + ext);
+            _connString = null;
+            _fts = null;
         }
 
         /// <summary>Gespeicherter Zustand einer Datei.</summary>
@@ -113,7 +149,9 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
             upToDate = false;
             try
             {
-                var hash = Stamp(path, out var size, out var ticks);
+                var fi = new FileInfo(path);
+                long size = fi.Length, ticks = fi.LastWriteTimeUtc.Ticks;
+                string? hash = null;
                 lock (Sync)
                 {
                     _ = ConnectionString;
@@ -126,11 +164,15 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
                         if (r.Read())
                         {
                             var rec = JsonSerializer.Deserialize<Record>(r.GetString(5));
-                            upToDate = r.GetInt64(0) == size && r.GetString(2) == hash
-                                && r.GetString(3) == settingsKey && r.GetInt32(4) == ExtractorVersion;
+                            bool same = r.GetInt64(0) == size && r.GetString(3) == settingsKey && r.GetInt32(4) == ExtractorVersion;
+                            // Schnellpfad: Größe + Änderungszeit gleich -> kein Lesen der Datei nötig
+                            if (same && r.GetInt64(1) == ticks) { upToDate = true; return rec; }
+                            hash ??= PartialHash(path, size);
+                            upToDate = same && r.GetString(2) == hash;
                             return rec;
                         }
                     }
+                    hash ??= PartialHash(path, size);
                     // Datei verschoben/umbenannt: gleicher Inhalt unter anderem Pfad
                     cmd.CommandText = "SELECT SettingsKey, ExtractorVersion, Data FROM Documents WHERE ContentHash=$h AND Size=$s ORDER BY Updated DESC LIMIT 1";
                     cmd.Parameters.Clear();
@@ -171,6 +213,14 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                     cmd.Parameters.AddWithValue("$d", JsonSerializer.Serialize(rec));
                     cmd.Parameters.AddWithValue("$u", DateTime.UtcNow.ToString("O"));
                     cmd.ExecuteNonQuery();
+                    if (EnsureFts(c))
+                    {
+                        using var f = c.CreateCommand();
+                        f.CommandText = "DELETE FROM DocText WHERE Path=$p; INSERT INTO DocText(Path,Text) VALUES($p,$t)";
+                        f.Parameters.AddWithValue("$p", Path.GetFullPath(path));
+                        f.Parameters.AddWithValue("$t", SearchText(rec));
+                        f.ExecuteNonQuery();
+                    }
                 }
             }
             catch
@@ -178,7 +228,75 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
             }
         }
 
-        /// <summary>Plugin-Daten lesen; nur gültig, solange die Datei unverändert ist.</summary>
+        private static bool? _fts;
+        private static string SearchText(Record rec) => string.Join("\n", rec.CompanyName, rec.FullText);
+
+        /// <summary>Volltextindex (FTS5, Trigramm = Teilwortsuche) anlegen und einmalig aus vorhandenen Datensätzen füllen.</summary>
+        private static bool EnsureFts(SqliteConnection c)
+        {
+            if (_fts.HasValue) return _fts.Value;
+            try
+            {
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT count(*) FROM sqlite_master WHERE name='DocText'";
+                bool exists = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+                if (!exists)
+                {
+                    cmd.CommandText = "CREATE VIRTUAL TABLE DocText USING fts5(Path UNINDEXED, Text, tokenize='trigram case_sensitive 0')";
+                    cmd.ExecuteNonQuery();
+                    var rows = new List<(string, string)>();
+                    cmd.CommandText = "SELECT Path, Data FROM Documents";
+                    using (var r = cmd.ExecuteReader())
+                        while (r.Read())
+                        {
+                            var rec = JsonSerializer.Deserialize<Record>(r.GetString(1));
+                            if (rec != null) rows.Add((r.GetString(0), SearchText(rec)));
+                        }
+                    using var tx = c.BeginTransaction();
+                    using var ins = c.CreateCommand();
+                    ins.Transaction = tx;
+                    ins.CommandText = "INSERT INTO DocText(Path,Text) VALUES($p,$t)";
+                    var pp = ins.Parameters.Add("$p", SqliteType.Text);
+                    var pt = ins.Parameters.Add("$t", SqliteType.Text);
+                    foreach (var (p, t) in rows) { pp.Value = p; pt.Value = t; ins.ExecuteNonQuery(); }
+                    tx.Commit();
+                }
+                _fts = true;
+            }
+            catch
+            {
+                _fts = false;
+            }
+            return _fts.Value;
+        }
+
+        /// <summary>Pfade aller Belege, deren Text den Suchbegriff enthält (mind. 3 Zeichen). null = Index nicht verfügbar.</summary>
+        public static HashSet<string>? SearchFullText(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 3) return null;
+            try
+            {
+                lock (Sync)
+                {
+                    _ = ConnectionString;
+                    using var c = Open();
+                    if (!EnsureFts(c)) return null;
+                    using var cmd = c.CreateCommand();
+                    cmd.CommandText = "SELECT Path FROM DocText WHERE DocText MATCH $q";
+                    cmd.Parameters.AddWithValue("$q", "Text:\"" + query.Trim().Replace("\"", "\"\"") + "\"");
+                    var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read()) set.Add(r.GetString(0));
+                    return set;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Plugin-Daten lesen
         public static string? LoadPluginData(string pluginId, string path)
         {
             try
@@ -264,6 +382,11 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Data=$d,Updated=
                     cmd.Parameters.AddWithValue("$o", Path.GetFullPath(oldPath));
                     cmd.Parameters.AddWithValue("$n", Path.GetFullPath(newPath));
                     cmd.ExecuteNonQuery();
+                    if (EnsureFts(c))
+                    {
+                        cmd.CommandText = "DELETE FROM DocText WHERE Path=$n; UPDATE DocText SET Path=$n WHERE Path=$o";
+                        cmd.ExecuteNonQuery();
+                    }
                 }
             }
             catch
@@ -295,6 +418,7 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Data=$d,Updated=
                         del.CommandText = "DELETE FROM Documents WHERE Path=$p";
                         del.Parameters.AddWithValue("$p", p);
                         del.ExecuteNonQuery();
+                        if (EnsureFts(c)) { del.CommandText = "DELETE FROM DocText WHERE Path=$p"; del.ExecuteNonQuery(); }
                     }
                     tx.Commit();
                     return gone.Count;

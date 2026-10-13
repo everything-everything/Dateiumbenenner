@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -78,7 +78,7 @@ namespace Dateiumbenenner.Engine
         private readonly HashSet<string> _ownZips = LoadOwnZips();
         private static HashSet<string> LoadOwnZips()
         {
-            try { return System.IO.File.Exists(OwnZipFile) ? new HashSet<string>(System.IO.File.ReadAllLines(OwnZipFile).Select(l => l.Trim()).Where(l => l.Length == 5)) : new(); }
+            try { return System.IO.File.Exists(OwnZipFile) ? new HashSet<string>(Dateiumbenenner.Engine.SecureStorage.ReadAllLines(OwnZipFile).Select(l => l.Trim()).Where(l => l.Length == 5)) : new(); }
             catch { return new(); }
         }
         public IReadOnlyCollection<string> OwnZips { get { lock (_ownZips) return _ownZips.ToList(); } }
@@ -89,7 +89,7 @@ namespace Dateiumbenenner.Engine
             lock (_ownZips)
             {
                 if (!_ownZips.Add(zip)) return;
-                try { System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(OwnZipFile)!); System.IO.File.WriteAllLines(OwnZipFile, _ownZips); } catch { }
+                try { System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(OwnZipFile)!); Dateiumbenenner.Engine.SecureStorage.WriteAllLines(OwnZipFile, _ownZips); } catch { }
             }
         }
 
@@ -354,8 +354,8 @@ namespace Dateiumbenenner.Engine
                 var dir = System.IO.Path.Combine(Dateiumbenenner.Plugins.PluginManager.BaseDirectory, "debug");
                 System.IO.Directory.CreateDirectory(dir);
                 var name = System.IO.Path.GetFileNameWithoutExtension(pdfPath) ?? "unbekannt";
-                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, $"address_{name}.txt"), sb.ToString());
-                System.IO.File.WriteAllText(System.IO.Path.Combine(
+                Dateiumbenenner.Engine.SecureStorage.WriteAllText(System.IO.Path.Combine(dir, $"address_{name}.txt"), sb.ToString());
+                Dateiumbenenner.Engine.SecureStorage.WriteAllText(System.IO.Path.Combine(
                     Dateiumbenenner.Plugins.PluginManager.BaseDirectory, "address_debug.txt"), sb.ToString());
             }
             catch { }

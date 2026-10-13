@@ -253,12 +253,13 @@ namespace Dateiumbenenner
             }
             if (CmbDocType != null)
             {
-                CmbDocType.ItemsSource = new List<string> { "Rechnung", "Sammelrechnung", "Stornorechnung", "Gutschrift", "Barverkauf", "Beleg", "Angebot", "Lieferschein", "Bestellung", "Mahnung" };
+                CmbDocType.ItemsSource = Dateiumbenenner.Engine.DocTypeStore.Names;
                 CmbDocType.IsEditable = true;
             }
             this.Loaded += (s, e) =>
             {
                 MenuAMode.IsChecked = AMode;
+                MenuClearOnExit.IsChecked = Dateiumbenenner.Engine.DataReset.ClearOnExit;
                 _enableOcrCorrection = File.Exists(OcrFile);
                 MenuOcrCorrection.IsChecked = _enableOcrCorrection;
                 ChkOcrCorrection.IsChecked = _enableOcrCorrection;
@@ -278,6 +279,7 @@ namespace Dateiumbenenner
                 InitPlugins();
                 var txtSteps = FindName("TxtDocTypeNumberSteps") as System.Windows.Controls.TextBox;
                 if (txtSteps != null && string.IsNullOrEmpty(txtSteps.Text)) txtSteps.Text = _docTypeNumberSteps.ToString();
+                _ = AskRestoreSessionAsync();
             };
         }
 
@@ -363,16 +365,18 @@ namespace Dateiumbenenner
         {
             if (e.OriginalSource != MenuProfiles) return;
             MenuProfiles.Items.Clear();
+            var choose = new MenuItem { Header = "Profil _w\u00e4hlen" };
             foreach (var p in ProfileManager.GetProfiles())
             {
                 var mi = new MenuItem { Header = p, IsCheckable = true, IsChecked = p.Equals(ProfileManager.ActiveProfile, StringComparison.OrdinalIgnoreCase) };
                 mi.Click += (_, _) => SwitchProfile(p);
-                MenuProfiles.Items.Add(mi);
+                choose.Items.Add(mi);
             }
-            MenuProfiles.Items.Add(new Separator());
-            var create = new MenuItem { Header = "_Neues Profil..." };
+            MenuProfiles.Items.Add(choose);
+            var create = new MenuItem { Header = "_Neues Profil festlegen..." };
             create.Click += (_, _) => CreateProfile();
             MenuProfiles.Items.Add(create);
+            MenuProfiles.Items.Add(new Separator());
             var folder = new MenuItem { Header = "Profil-_Ordner öffnen" };
             folder.Click += (_, _) => { try { System.Diagnostics.Process.Start("explorer.exe", ProfileManager.ActiveDirectory); } catch { } };
             MenuProfiles.Items.Add(folder);
@@ -407,25 +411,160 @@ namespace Dateiumbenenner
         }
 
         private void MenuExit_Click(object sender, RoutedEventArgs e) => Close();
+
+        private void MenuClearOnExit_Click(object sender, RoutedEventArgs e) => Dateiumbenenner.Engine.DataReset.ClearOnExit = MenuClearOnExit.IsChecked;
+
+        private void MenuClearNow_Click(object sender, RoutedEventArgs e)
+        {
+            if (MessageBoxWpf.Show("Dokument-Datenbank und gelernte Daten (Firmen, Absenderprofile, Nummernformate, Dateinamen-Vorlagen) des aktiven Profils jetzt löschen?\n\nEinstellungen bleiben erhalten. Das Programm wird danach neu gestartet.",
+                    "Daten leeren", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
+            _clearNow = true;
+            var exe = Environment.ProcessPath;
+            Close();
+            if (exe != null) System.Diagnostics.Process.Start(exe);
+        }
+
+        private bool _clearNow;
+
+        private void MenuPassword_Opened(object sender, RoutedEventArgs e)
+        {
+            bool on = Dateiumbenenner.Engine.SecureStorage.IsEnabled;
+            MenuPwSet.IsEnabled = !on;
+            MenuPwChange.IsEnabled = on;
+            MenuPwRemove.IsEnabled = on;
+        }
+
+        private void RestartAfterSecurityChange(string message)
+        {
+            MessageBoxWpf.Show(message + "\n\nDas Programm wird neu gestartet.", "Passwortschutz", MessageBoxButton.OK, MessageBoxImage.Information);
+            var exe = Environment.ProcessPath;
+            if (exe != null) System.Diagnostics.Process.Start(exe);
+            System.Windows.Application.Current.Shutdown();
+        }
+
+        private void MenuPwSet_Click(object sender, RoutedEventArgs e)
+        {
+            if (MessageBoxWpf.Show("Alle Profile werden jetzt verschlüsselt. Bitte vorher eine Sicherung des Ordners „Daten“ anlegen.\n\nFortfahren?",
+                    "Passwortschutz", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
+            var dlg = new PasswordDialog(PasswordDialog.Mode.Set) { Owner = this };
+            if (dlg.ShowDialog() != true) return;
+            System.Windows.Clipboard.SetText(dlg.RecoveryCode ?? "");
+            RestartAfterSecurityChange($"Passwortschutz ist eingerichtet.\n\nWiederherstellungsschlüssel (bitte notieren und sicher aufbewahren – er wird nur jetzt angezeigt und wurde in die Zwischenablage kopiert):\n\n{dlg.RecoveryCode}\n\nOhne Passwort und ohne diesen Schlüssel sind die Daten nicht wiederherstellbar.");
+        }
+
+        private void MenuPwChange_Click(object sender, RoutedEventArgs e)
+        {
+            if (new PasswordDialog(PasswordDialog.Mode.Change) { Owner = this }.ShowDialog() == true)
+                MessageBoxWpf.Show("Passwort geändert.", "Passwortschutz");
+        }
+
+        private void MenuPwRemove_Click(object sender, RoutedEventArgs e)
+        {
+            if (new PasswordDialog(PasswordDialog.Mode.Remove) { Owner = this }.ShowDialog() == true)
+                RestartAfterSecurityChange("Passwortschutz entfernt, alle Daten sind wieder unverschlüsselt.");
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            base.OnClosed(e);
+            if (_clearNow || Dateiumbenenner.Engine.DataReset.ClearOnExit) Dateiumbenenner.Engine.DataReset.Clear();
+        }
         private void MenuHelp_Click(object sender, RoutedEventArgs e) => new HelpWindow(HelpWindow.Page.Help) { Owner = this }.ShowDialog();
         private void MenuLicenses_Click(object sender, RoutedEventArgs e) => new HelpWindow(HelpWindow.Page.Licenses) { Owner = this }.ShowDialog();
         private void MenuAbout_Click(object sender, RoutedEventArgs e) => new HelpWindow(HelpWindow.Page.About) { Owner = this }.ShowDialog();
 
         private async void BtnSelectFolder_Click(object sender,RoutedEventArgs e){ var dlg=new System.Windows.Forms.FolderBrowserDialog{ ClientGuid=new Guid("3B8E6E2A-5C1D-4F7A-9E21-6A1F2C9D0B02") }; if(dlg.ShowDialog()==System.Windows.Forms.DialogResult.OK){ TxtFolder.Text=dlg.SelectedPath; await LoadFolderAsync(dlg.SelectedPath); } }
         private int _loadVersion;
+        private async void BtnRefreshFolder_Click(object sender,RoutedEventArgs e)=>await RefreshFolderAsync();
+
+        private async void BtnMoveCopy_Click(object sender, RoutedEventArgs e)
+        {
+            var sel = LvFiles.SelectedItems.OfType<DocumentMetadata>().ToList();
+            if (sel.Count == 0) { MessageBoxWpf.Show("Bitte zuerst Dateien in der Liste markieren.", "Markierte verschieben / kopieren"); return; }
+            var r = MessageBoxWpf.Show($"{sel.Count:N0} markierte Datei(en):\n\nJa = Verschieben\nNein = Kopieren", "Markierte verschieben / kopieren", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (r == MessageBoxResult.Cancel) return;
+            bool move = r == MessageBoxResult.Yes;
+            var dlg = new System.Windows.Forms.FolderBrowserDialog { Description = move ? "Zielordner zum Verschieben" : "Zielordner zum Kopieren", UseDescriptionForTitle = true, ClientGuid = new Guid("7C4D2E91-0A3B-4F6E-8D15-2B9E6C1F4A73") };
+            if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+            var target = dlg.SelectedPath;
+            if (!string.IsNullOrEmpty(TxtFolder.Text) && string.Equals(Path.GetFullPath(target).TrimEnd('\\'), Path.GetFullPath(TxtFolder.Text).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+            { TxtStatus.Text = "Zielordner ist der aktuelle Ordner."; return; }
+            var paths = sel.Select(m => m.FilePath).ToList();
+            int total = paths.Count;
+            var progress = new Progress<int>(n => TxtStatus.Text = $"{(move ? "Verschiebe" : "Kopiere")} {n:N0} / {total:N0}...");
+            var (done, errors) = await Task.Run(() => Dateiumbenenner.Engine.FileTransfer.Run(paths, target, move, progress));
+            if (move)
+            {
+                var set = new HashSet<string>(done, StringComparer.OrdinalIgnoreCase);
+                foreach (var m in _items.Where(m => set.Contains(m.FilePath)).ToList()) _items.Remove(m);
+            }
+            TxtStatus.Text = $"{done.Count:N0} Datei(en) {(move ? "verschoben" : "kopiert")} nach {target}." + (errors.Count > 0 ? $" {errors.Count} Fehler." : "");
+            if (errors.Count > 0)
+                MessageBoxWpf.Show(string.Join("\n", errors.Take(20)) + (errors.Count > 20 ? $"\n... und {errors.Count - 20} weitere" : ""), "Fehler beim " + (move ? "Verschieben" : "Kopieren"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        protected override async void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e){ base.OnPreviewKeyDown(e); if(e.Key==System.Windows.Input.Key.F5 && !e.Handled){ e.Handled=true; await RefreshFolderAsync(); } }
+
+        /// <summary>Ordner neu laden; ausgewählte Datei bleibt (falls noch vorhanden) ausgewählt.</summary>
+        private async Task RefreshFolderAsync(){
+            var folder=TxtFolder.Text; if(string.IsNullOrEmpty(folder)||!Directory.Exists(folder)){ TxtStatus.Text="Kein Ordner gewählt."; return; }
+            var sel=_currentMeta?.FilePath;
+            await LoadFolderAsync(folder);
+            if(sel!=null){ var m=_items.FirstOrDefault(i=>string.Equals(i.FilePath,sel,StringComparison.OrdinalIgnoreCase)); if(m!=null){ LvFiles.SelectedItem=m; LvFiles.ScrollIntoView(m); } }
+        }
+
+        private FileSystemWatcher? _watcher; private System.Windows.Threading.DispatcherTimer? _watchTimer;
+        private void ChkWatchFolder_Changed(object sender,RoutedEventArgs e)=>SetupWatcher();
+        private void SetupWatcher(){
+            _watcher?.Dispose(); _watcher=null;
+            var folder=TxtFolder?.Text;
+            if(ChkWatchFolder?.IsChecked!=true || string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return;
+            try{
+                _watcher=new FileSystemWatcher(folder){ IncludeSubdirectories=false, InternalBufferSize=64*1024, NotifyFilter=NotifyFilters.FileName|NotifyFilters.LastWrite|NotifyFilters.Size };
+                FileSystemEventHandler h=(s,ev)=>OnFolderChanged(); _watcher.Created+=h; _watcher.Deleted+=h; _watcher.Changed+=h; _watcher.Renamed+=(s,ev)=>OnFolderChanged(); _watcher.Error+=(s,ev)=>OnFolderChanged();
+                _watcher.EnableRaisingEvents=true;
+            }catch(Exception ex){ TxtStatus.Text="Ordnerüberwachung nicht möglich: "+ex.Message; }
+        }
+        private void OnFolderChanged()=>Dispatcher.BeginInvoke(()=>{
+            if(_watchTimer==null){ _watchTimer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromSeconds(1.5)}; _watchTimer.Tick+=async(s,e)=>{ _watchTimer.Stop(); if(_isBulkLoading){ _watchTimer.Start(); return; } await SyncFolderAsync(); }; }
+            _watchTimer.Stop(); _watchTimer.Start();
+        });
+        /// <summary>Nur Differenzen abgleichen: fehlende Dateien entfernen, bei neuen Dateien neu laden (DB liefert bekannte Belege sofort).</summary>
+        private async Task SyncFolderAsync(){
+            var folder=TxtFolder.Text; if(string.IsNullOrEmpty(folder)||!Directory.Exists(folder)) return;
+            var exts=AMode? new[]{".pdf"} : new[]{".pdf",".txt",".csv"};
+            var known=_items.Select(i=>i.FilePath).ToList();
+            var (gone,added)=await Task.Run(()=>{ var now=new HashSet<string>(Directory.EnumerateFiles(folder).Where(f=>exts.Contains(Path.GetExtension(f).ToLowerInvariant())),StringComparer.OrdinalIgnoreCase); var k=new HashSet<string>(known,StringComparer.OrdinalIgnoreCase); return (known.Where(p=>!now.Contains(p)).ToHashSet(StringComparer.OrdinalIgnoreCase), now.Count(p=>!k.Contains(p))); });
+            if(added>0){ TxtStatus.Text=$"{added:N0} neue Datei(en) erkannt – Liste wird aktualisiert..."; await RefreshFolderAsync(); return; }
+            if(gone.Count==0) return;
+            foreach(var m in _items.Where(i=>gone.Contains(i.FilePath)).ToList()) _items.Remove(m);
+            TxtStatus.Text=$"{gone.Count:N0} Datei(en) aus dem Ordner entfernt/verschoben – Liste angepasst ({_items.Count:N0} Dateien).";
+        }
+
         private async Task LoadFolderAsync(string folder)
         {
             int loadVersion=++_loadVersion;
-            _items.Clear(); TxtStatus.Text="Dateien werden eingelesen...";
-            if(LoadingProgress!=null){ LoadingProgress.Visibility=Visibility.Visible; LoadingProgress.Value=0; }
+            SaveSessionValue(SessionMainFolderKey, folder);
+            _items.Clear();
+            if(LoadingProgress!=null){ LoadingProgress.Visibility=Visibility.Visible; LoadingProgress.IsIndeterminate=true; }
             bool aMode=AMode;
             var exts=aMode? new[]{".pdf"} : new[]{".pdf",".txt",".csv"};
-            var files=Directory.EnumerateFiles(folder).Where(f=>exts.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
-            files=_useNaturalSort? files.OrderBy(f=>Path.GetFileName(f),_naturalComparer).ToList(): files.OrderBy(f=>f).ToList();
-            var metas=files.Select(f=>{ var meta=new DocumentMetadata{ FilePath=f, FileSizeBytes=new FileInfo(f).Length, Dpi=Path.GetExtension(f).Equals(".pdf",StringComparison.OrdinalIgnoreCase)?72:null, SavedDelimiter=null, SavedSegmentIndex=2, SavedInsertValueIndex=0, DelimiterAutoDetected=true, UseDelimiterPosition=true }; if(aMode){ var txt=Path.ChangeExtension(f,".txt"); if(File.Exists(txt)) meta.TextSourcePath=txt; } return meta; }).ToList();
+            var naturalSort=_useNaturalSort;
+            var metas=await Task.Run(()=>{
+                var fis=new DirectoryInfo(folder).EnumerateFiles().Where(f=>exts.Contains(f.Extension.ToLowerInvariant())).ToList();
+                fis=naturalSort? fis.OrderBy(f=>f.Name,_naturalComparer).ToList(): fis.OrderBy(f=>f.FullName).ToList();
+                HashSet<string>? txts=null;
+                if(aMode) txts=new HashSet<string>(Directory.EnumerateFiles(folder,"*.txt"),StringComparer.OrdinalIgnoreCase);
+                return fis.Select(fi=>{ var f=fi.FullName; var meta=new DocumentMetadata{ FilePath=f, FileSizeBytes=fi.Length, Dpi=fi.Extension.Equals(".pdf",StringComparison.OrdinalIgnoreCase)?72:null, SavedDelimiter=null, SavedSegmentIndex=2, SavedInsertValueIndex=0, DelimiterAutoDetected=true, UseDelimiterPosition=true }; if(txts!=null){ var txt=Path.ChangeExtension(f,".txt"); if(txts.Contains(txt)) meta.TextSourcePath=txt; } return meta; }).ToList();
+            });
+            if(loadVersion!=_loadVersion) return;
             int total=metas.Count, processed=0;
             _isBulkLoading=true;
-            var progress=new Progress<int>(n=>{ if(LoadingProgress!=null && total>0) LoadingProgress.Value=n*100.0/total; });
+            int fromDbLive=0;
+            var sw=System.Diagnostics.Stopwatch.StartNew();
+            var progress=new Progress<int>(n=>{
+                if(LoadingProgress!=null && total>0) LoadingProgress.Value=n*100.0/total;
+                var eta=n>0? TimeSpan.FromSeconds(sw.Elapsed.TotalSeconds*(total-n)/n) : TimeSpan.Zero;
+                TxtStatus.Text=$"Beleg {n:N0} / {total:N0} ({(total>0?n*100.0/total:0):0.0} %) – aus Datenbank: {Volatile.Read(ref fromDbLive):N0} – Rest ca. {eta:hh\\:mm\\:ss}"; });
             // Parallel: PDF-Text lesen + Regex-Auswertung auf mehreren Kernen (Objekte sind noch nicht in der UI-Liste)
             // Hälfte der Kerne: Oberfläche bleibt beim Laden bedienbar
             var options=new ParallelOptions{ MaxDegreeOfParallelism=Math.Max(2,Environment.ProcessorCount/2) };
@@ -434,6 +573,8 @@ namespace Dateiumbenenner
             var toSave=new bool[metas.Count];
             var confirmedArr=new bool[metas.Count];
             int fromDb=0;
+            if(LoadingProgress!=null){ LoadingProgress.IsIndeterminate=false; LoadingProgress.Value=0; }
+            TxtStatus.Text=$"{total:N0} Dateien gefunden – Auswertung startet...";
             var indexed=metas.Select((m,i)=>(m,i)).ToList();
             await Parallel.ForEachAsync(indexed, options, async (x,_)=>{
                 var key=StoreSettingsKey(x.m.FilePath);
@@ -442,9 +583,9 @@ namespace Dateiumbenenner
                 if(rec!=null && upToDate)
                 {
                     ApplyStoreRecord(x.m, rec);
-                    companiesByMeta[x.i]=rec.CompanyCandidates;
+                    companiesByMeta[x.i]=TextCandidates(rec.CompanyCandidates, rec.FullText);
                     storedCompany[x.i]=rec.CompanyName;
-                    Interlocked.Increment(ref fromDb);
+                    Interlocked.Increment(ref fromDb); Interlocked.Increment(ref fromDbLive);
                 }
                 else
                 {
@@ -497,12 +638,19 @@ namespace Dateiumbenenner
             m.Loaded=true;
         }
 
+        /// <summary>Nur erkannte Namen, die im Beleg stehen (bzw. eigene Firma) – übertragene/zugewiesene Namen gehören nicht in die Liste.</summary>
+        private static List<string> TextCandidates(IEnumerable<string> list, string? fullText)
+        {
+            var own = Dateiumbenenner.Engine.OwnCompany.Current;
+            return list.Where(c => !string.IsNullOrWhiteSpace(c) && (string.IsNullOrEmpty(fullText) || CompanyMatcher.AppearsInText(c, fullText) || own.Matches(c))).ToList();
+        }
+
         /// <summary>Aktuellen Stand einer Datei in die Profil-Datenbank schreiben (thread-sicher).</summary>
         private void SaveToStore(DocumentMetadata m, string key, bool confirmed)
         {
             if(!m.Loaded || string.IsNullOrEmpty(m.FilePath)) return;
             var rec=new DocumentStore.Record{
-                FullText=m.FullText, PageCount=m.PageCount, CompanyName=m.CompanyName, CompanyCandidates=m.CompanyCandidates.ToList(),
+                FullText=m.FullText, PageCount=m.PageCount, CompanyName=m.CompanyName, CompanyCandidates=TextCandidates(m.CompanyCandidates, m.FullText),
                 DocumentType=m.DocumentType, InvoiceNumber=m.InvoiceNumber, DocumentNumber=m.DocumentNumber, Date=m.Date,
                 SelectedNumber=m.SelectedNumber, SelectedDate=m.SelectedDate, NumberCandidates=m.NumberCandidates.ToList(), DateCandidates=m.DateCandidates.ToList(),
                 Street=m.Street, Zip=m.Zip, City=m.City,
@@ -619,7 +767,7 @@ namespace Dateiumbenenner
             if (rec != null && upToDate)
             {
                 ApplyStoreRecord(meta, rec);
-                foreach (var c in rec.CompanyCandidates) meta.CompanyCandidates.Add(c);
+                foreach (var c in TextCandidates(rec.CompanyCandidates, rec.FullText)) meta.CompanyCandidates.Add(c);
                 meta.CompanyName = rec.CompanyName;
                 AutoAssignNumbers(meta);
                 return meta;
@@ -627,6 +775,9 @@ namespace Dateiumbenenner
             if (rec != null) ApplyManualValues(meta, rec);
             await LoadMetadataAsync(meta);
             AutoAssignNumbers(meta);
+            meta.Loaded = true;
+            var key = StoreSettingsKey(filePath); bool confirmed = rec?.CompanyConfirmed == true;
+            _ = Task.Run(() => SaveToStore(meta, key, confirmed));
             return meta;
         }
 
@@ -729,7 +880,7 @@ namespace Dateiumbenenner
             @"\b(Versicherung(en)?|Versicherungs\w*|Sparkasse|Volksbank|Raiffeisenbank|Bank|Stadtwerke|Stadtverwaltung|Gemeindeverwaltung|Landratsamt|Finanzamt|KfW|Krankenkasse|AOK|BKK|IKK|Verlag|Werke|Schotterwerke?|Gruppe|Telekom|Energie)\b",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex DocTypeWordRegex = new(
-            @"^(Rechnung|Stornorechnung|Gutschrift|Mahnung|Zahlungserinnerung|Angebot|Lieferschein|Auftragsbestätigung|Auftrag|Bestellung|Beleg|Quittung|Kostenvoranschlag|Invoice|Kundennummer|Seite)\b",
+            @"^(Rechnung|Stornorechnung|Gutschrift|Mahnung|Zahlungserinnerung|Angebot|Lieferschein|Auftragsbestätigung|Auftrag|Bestellung|Beleg|Quittung|Kostenvoranschlag|Invoice|Kundennummer|Seite|Page|Blatt|Gebucht|Eingegangen)\b",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex RegisterRegex = new(@"\b(USt[\s.-]*Id|UID|DE\s?\d{9}|HRB|HRA|Amtsgericht|Steuer[\s-]*Nr|Steuernummer|Handelsregister|IBAN|BIC|Registergericht)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -751,7 +902,7 @@ namespace Dateiumbenenner
         }
 
         private static readonly Regex NoiseWordRegex = new(
-            @"^(EUR|Euro|USD|CHF|MwSt|USt|Netto|Brutto|Summe|Gesamt|Betrag|Datum|Seite|Hiermit|Bitte|Ihre?|Unsere?|Sehr|Geehrte\w*|Anlage|Kunde|Kunden\w*|Konto|IBAN|BIC|Bank)$",
+            @"^(EUR|Euro|USD|CHF|MwSt|USt|Netto|Brutto|Summe|Gesamt|Betrag|Datum|Seite|Page|Blatt|Hiermit|Bitte|Ihre?|Unsere?|Sehr|Geehrte\w*|Anlage|Kunde|Kunden\w*|Konto|IBAN|BIC|Bank|Gebucht|Gebuch|Eingetragen|Eingegangen|Eingang|Bezahlt|Erledigt|Geprüft|Kopie|Original|Urlaub|Dieser Betrag|Total|Telefon|Fax|Tel)$",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex TableHeaderRegex = new(
@@ -933,6 +1084,63 @@ namespace Dateiumbenenner
 
         private readonly Dateiumbenenner.Plugins.PluginManager _pluginManager = new();
         private readonly Dictionary<string, TabItem> _pluginTabs = new();
+
+        private const string SessionMainFolderKey = "Main.Folder";
+        private static string SessionFile => Path.Combine(ProfileManager.ActiveDirectory, "session.json");
+        private static readonly object SessionLock = new();
+
+        private static Dictionary<string, string> ReadSession()
+        {
+            try { if (File.Exists(SessionFile)) return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(SessionFile)) ?? new(); } catch { }
+            return new();
+        }
+
+        public string? LoadSessionValue(string key) { lock (SessionLock) return ReadSession().TryGetValue(key, out var v) ? v : null; }
+
+        public void SaveSessionValue(string key, string? value)
+        {
+            lock (SessionLock)
+            {
+                try
+                {
+                    var d = ReadSession();
+                    if (value == null) d.Remove(key); else d[key] = value;
+                    Directory.CreateDirectory(Path.GetDirectoryName(SessionFile)!);
+                    File.WriteAllText(SessionFile, System.Text.Json.JsonSerializer.Serialize(d));
+                }
+                catch { }
+            }
+        }
+
+        private async Task AskRestoreSessionAsync()
+        {
+            var mainFolder = LoadSessionValue(SessionMainFolderKey);
+            bool hasMain = !string.IsNullOrEmpty(mainFolder) && Directory.Exists(mainFolder);
+            var iniPlugins = _pluginManager.Plugins.Where(p => p.Enabled && _pluginTabs.ContainsKey(p.Plugin.Id))
+                .Select(p => p.Plugin).OfType<Dateiumbenenner.Plugins.IPluginSessionRestore>().Where(p => p.HasSavedSession).ToList();
+            bool hasIni = iniPlugins.Count > 0;
+            if (!hasMain && !hasIni) return;
+
+            var dlg = new Window { Title = "Zustand wiederherstellen", Owner = this, SizeToContent = SizeToContent.WidthAndHeight, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
+            var panel = new StackPanel { Margin = new Thickness(16) };
+            panel.Children.Add(new TextBlock { Text = "Es ist ein gespeicherter Zustand vorhanden. Was soll wiederhergestellt werden?", Margin = new Thickness(0, 0, 0, 10) });
+            System.Windows.Controls.RadioButton Rb(string text, bool enabled) => new() { Content = text, IsEnabled = enabled, Margin = new Thickness(0, 2, 0, 2) };
+            var rbBoth = Rb("Beides", hasMain && hasIni);
+            var rbMain = Rb("Umbenennen" + (hasMain ? $"  ({mainFolder})" : ""), hasMain);
+            var rbIni = Rb("INI Generator", hasIni);
+            var rbNew = Rb("Nichts wiederherstellen (neu laden)", true);
+            (hasMain && hasIni ? rbBoth : hasMain ? rbMain : rbIni).IsChecked = true;
+            foreach (var rb in new[] { rbBoth, rbMain, rbIni, rbNew }) panel.Children.Add(rb);
+            var ok = new System.Windows.Controls.Button { Content = "OK", Width = 90, IsDefault = true, HorizontalAlignment = System.Windows.HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+            ok.Click += (_, _) => dlg.DialogResult = true;
+            panel.Children.Add(ok);
+            dlg.Content = panel;
+            if (dlg.ShowDialog() != true || rbNew.IsChecked == true) return;
+            bool restoreMain = hasMain && (rbBoth.IsChecked == true || rbMain.IsChecked == true);
+            bool restoreIni = hasIni && (rbBoth.IsChecked == true || rbIni.IsChecked == true);
+            if (restoreMain) { TxtFolder.Text = mainFolder!; await LoadFolderAsync(mainFolder!); }
+            if (restoreIni) foreach (var p in iniPlugins) { try { await p.RestoreSessionAsync(); } catch { } }
+        }
 
         private void InitPlugins()
         {
@@ -1137,6 +1345,7 @@ namespace Dateiumbenenner
             var src = Engine.ExtractNumber(meta.FullText, meta.FilePath).Candidates
                 .FirstOrDefault(c => c.Value.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase))?.Source;
             Dateiumbenenner.Engine.NumberPatternStore.Learn(meta.CompanyName, meta.DocumentType, src, value);
+            Dateiumbenenner.Engine.NumberRuleStore.Learn(meta.CompanyName, meta.DocumentType, value);
         }
 
         private void ApplyEngineFields(DocumentMetadata meta)
@@ -1156,6 +1365,7 @@ namespace Dateiumbenenner
                                  + (pattern.Label.Length > 0 && c.Source.Equals(pattern.Label, StringComparison.OrdinalIgnoreCase) ? 2 : 0);
                     if (bonus > 0) number.Add(c.Value, c.Score + bonus, c.Source);
                 }
+            Dateiumbenenner.Engine.NumberRuleStore.Apply(number, meta.CompanyName, docType.Value ?? meta.DocumentType, meta.FullText);
 
             for (int i = number.Values.Count - 1; i >= 0; i--)
             { meta.NumberCandidates.Remove(number.Values[i]); meta.NumberCandidates.Insert(0, number.Values[i]); }
@@ -1337,6 +1547,40 @@ namespace Dateiumbenenner
             TxtStatus.Text = $"Firmenname „{name}“ auf {targets.Count + 1} Datei(en) übertragen.";
         }
 
+        private async void BtnMainFromIni_Click(object sender, RoutedEventArgs e)
+        {
+            var targets = LvFiles.SelectedItems.OfType<DocumentMetadata>().ToList();
+            if (targets.Count <= 1) targets = _items.ToList();
+            if (targets.Count == 0) return;
+            TxtStatus.Text = "Werte aus INI Erzeugen werden gelesen...";
+            var data = await Task.Run(() => targets.Select(m => (m, json: DocumentStore.LoadPluginData("IniGenerator.Values", m.FilePath))).Where(x => x.json != null).ToList());
+            int n = 0;
+            _propagatingCompany = true;
+            try
+            {
+                foreach (var (m, json) in data)
+                {
+                    Dictionary<string, string?>? v;
+                    try { v = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string?>>(json!); } catch { continue; }
+                    if (v == null) continue;
+                    if (v.TryGetValue("CompanyName", out var c) && !string.IsNullOrWhiteSpace(c) && c != m.CompanyName)
+                    {
+                        if (!m.CompanyCandidates.Contains(c)) m.CompanyCandidates.Insert(0, c);
+                        m.CompanyName = c; ResetAddress(m); _confirmedCompany.Add(m);
+                    }
+                    if (v.TryGetValue("DocumentType", out var t) && !string.IsNullOrWhiteSpace(t)) { m.DocumentType = t; m.DocTypeManuallySet = true; }
+                    if (v.TryGetValue("Number", out var nr) && !string.IsNullOrWhiteSpace(nr)) { if (!m.NumberCandidates.Contains(nr)) m.NumberCandidates.Insert(0, nr); m.SelectedNumber = nr; m.NumberManuallySet = true; }
+                    if (v.TryGetValue("Date", out var d) && !string.IsNullOrWhiteSpace(d)) { if (!m.DateCandidates.Contains(d)) m.DateCandidates.Insert(0, d); m.SelectedDate = d; m.DateManuallySet = true; }
+                    ScheduleStoreSave(m);
+                    n++;
+                }
+            }
+            finally { _propagatingCompany = false; }
+            foreach (var (m, _) in data) RefreshNewNamePreview(m);
+            if (_currentMeta != null) { var cur = _currentMeta; LvFiles.SelectedItem = null; LvFiles.SelectedItem = cur; }
+            TxtStatus.Text = n == 0 ? "Keine Werte aus INI Erzeugen gefunden (zuerst dort INI erzeugen)." : $"Werte aus INI Erzeugen für {n} von {targets.Count} Datei(en) übernommen.";
+        }
+
         private static bool SameCompany(string a, string b) =>
             string.Equals(a, b, StringComparison.OrdinalIgnoreCase) ||
             CompanyMatcher.Similarity(CompanyMatcher.Normalize(a), CompanyMatcher.Normalize(b)) >= CompanyMatcher.Threshold;
@@ -1362,6 +1606,34 @@ namespace Dateiumbenenner
         {
             get => !File.Exists(AutoTemplatesOffPath);
             set { try { if (value) { if (File.Exists(AutoTemplatesOffPath)) File.Delete(AutoTemplatesOffPath); } else { Directory.CreateDirectory(Path.GetDirectoryName(AutoTemplatesOffPath)!); File.WriteAllText(AutoTemplatesOffPath, ""); } } catch { } }
+        }
+
+        private void MenuNumberRules_Click(object sender, RoutedEventArgs e)
+        {
+            var samples = _items.Where(i => i.Loaded).SelectMany(i => new[] { i.SelectedNumber }.Concat(i.NumberCandidates)
+                .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(n => ((string?)i.CompanyName, (string?)i.DocumentType, (string?)n))).ToList();
+            var dlg = new NumberRulesWindow(_currentMeta?.CompanyName, _currentMeta?.DocumentType, samples) { Owner = this };
+            if (dlg.ShowDialog() != true) return;
+            if (CmbDocType != null) CmbDocType.ItemsSource = Dateiumbenenner.Engine.DocTypeStore.Names;
+            if (dlg.Recalculate) RecalculateNumbers();
+        }
+
+        private void MenuRecalcNumbers_Click(object sender, RoutedEventArgs e) => RecalculateNumbers();
+
+        /// <summary>Belegart und Belegnummer aller geladenen Dateien neu ermitteln (manuell gesetzte Werte bleiben).</summary>
+        private void RecalculateNumbers()
+        {
+            int n = 0;
+            foreach (var m in _items.Where(i => i.Loaded))
+            {
+                var before = m.SelectedNumber;
+                ApplyEngineFields(m);
+                if (!string.Equals(before, m.SelectedNumber, StringComparison.Ordinal)) n++;
+            }
+            LvFiles?.Items.Refresh();
+            if (_currentMeta != null) { ShowDetails(_currentMeta); RefreshNewNamePreview(_currentMeta); }
+            TxtStatus.Text = $"Belegnummern neu ermittelt: {n} ge\u00E4ndert.";
         }
 
         private void MenuSettings_Click(object sender, RoutedEventArgs e)
@@ -1687,7 +1959,7 @@ namespace Dateiumbenenner
             {
                 var dir = Path.Combine(Dateiumbenenner.Plugins.PluginManager.BaseDirectory, "debug");
                 Directory.CreateDirectory(dir);
-                File.AppendAllText(Path.Combine(dir, "db_address.log"), line + Environment.NewLine);
+                Dateiumbenenner.Engine.SecureStorage.AppendAllText(Path.Combine(dir, "db_address.log"), line + Environment.NewLine);
             }
             catch { }
             if (meta == _currentMeta && TxtStatus != null) TxtStatus.Text = "Adresse: " + msg;
@@ -1913,7 +2185,17 @@ namespace Dateiumbenenner
         private void ToggleSizeUnit_Click(object sender,RoutedEventArgs e){ DocumentMetadata.UseMegaBytes=!DocumentMetadata.UseMegaBytes; foreach(var it in _items) it.RefreshSizeDisplay(); UpdateStandardStatus(); }
         private async void BtnAddToMerge_Click(object sender,RoutedEventArgs e){ var pdfMergeTab=PdfMergeTab; if(pdfMergeTab==null){ MessageBoxWpf.Show("Merge-Tab fehlt."); return; } var list=GetSelectedFiles(); if(list.Count==0){ MessageBoxWpf.Show("Keine PDF gew�hlt."); return; } foreach(var f in list) await pdfMergeTab.AddExternalFile(f); TxtStatus.Text=$"{list.Count} hinzugef�gt"; }
         private void ChkNaturalSort_Changed(object sender,RoutedEventArgs e){ _useNaturalSort=ChkNaturalSort.IsChecked==true; if(Directory.Exists(TxtFolder.Text)) _=LoadFolderAsync(TxtFolder.Text); }
-        private void TxtFilter_TextChanged(object sender,TextChangedEventArgs e){ var ft=TxtFilter.Text; if(string.IsNullOrWhiteSpace(ft)) LvFiles.ItemsSource=_items; else LvFiles.ItemsSource=_items.Where(i=> i.FileName.Contains(ft,StringComparison.OrdinalIgnoreCase) || (i.InvoiceNumber?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false) || (i.DocumentNumber?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false) || (i.CompanyName?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false) || (i.DocumentType?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false) || (Convert.ToString(i.Date)?.Contains(ft,StringComparison.OrdinalIgnoreCase)??false)).ToList(); }
+        private System.Windows.Threading.DispatcherTimer? _filterTimer; private int _filterVersion;
+        private void TxtFilter_TextChanged(object sender,TextChangedEventArgs e){ _filterTimer??=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(300)}; _filterTimer.Tick-=FilterTimer_Tick; _filterTimer.Tick+=FilterTimer_Tick; _filterTimer.Stop(); _filterTimer.Start(); }
+        private async void FilterTimer_Tick(object? sender,EventArgs e){ _filterTimer!.Stop(); var ft=TxtFilter.Text; int v=++_filterVersion; if(string.IsNullOrWhiteSpace(ft)){ _filterCts?.Cancel(); LvFiles.ItemsSource=_items; return; }
+        var snapshot=_items.ToList(); TxtStatus.Text="Filter..."; _filterCts?.Cancel(); var cts=_filterCts=new CancellationTokenSource(); var tok=cts.Token;
+                    List<DocumentMetadata> result; int textHits=0;
+                    try{ result=await Task.Run(()=>{ var full=DocumentStore.SearchFullText(ft); tok.ThrowIfCancellationRequested(); var list=new List<DocumentMetadata>(); var opts=new ParallelOptions{CancellationToken=tok}; var hit=new bool[snapshot.Count];
+                        Parallel.For(0,snapshot.Count,opts,k=>{ var i=snapshot[k]; var key=string.Concat(i.FileName,"\u0001",i.InvoiceNumber,"\u0001",i.DocumentNumber,"\u0001",i.CompanyName,"\u0001",i.DocumentType,"\u0001",Convert.ToString(i.Date)); hit[k]=key.Contains(ft,StringComparison.OrdinalIgnoreCase) || (full!=null && full.Contains(i.FilePath)); });
+                        for(int k=0;k<hit.Length;k++) if(hit[k]) list.Add(snapshot[k]); if(full!=null) textHits=full.Count; return list; },tok); }
+                    catch(OperationCanceledException){ return; }
+                    if(v!=_filterVersion) return; LvFiles.ItemsSource=result; TxtStatus.Text=$"{result.Count:N0} von {snapshot.Count:N0} Belegen" + (textHits>0?$" (inkl. Volltext: {textHits:N0} Treffer im Belegtext)":""); }
+                private CancellationTokenSource? _filterCts;
         private void CmbDocType_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DocTypeManuallySet=true; UpdateMetadataFromSelections(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); } }
         private void EditableCombo_DropDownClosed(object sender,EventArgs e){ if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } }
         private void EditableCombo_KeyDown(object sender,System.Windows.Input.KeyEventArgs e){ if(e.Key==System.Windows.Input.Key.Enter){ if(sender is SWC.ComboBox combo){ combo.IsDropDownOpen=false; if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } } } }

@@ -26,7 +26,7 @@ namespace Dateiumbenenner
         public const string ContactEmail = "85025743+everything-everything@users.noreply.github.com";
 
         public static string AppVersion =>
-            Assembly.GetExecutingAssembly().GetName().Version?.ToString(2) ?? "3.11";
+            Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "5.1.2600";
 
         private static readonly Brush LinkBrush = new SolidColorBrush(Color.FromRgb(0x00, 0x66, 0xCC));
         private static readonly Regex LinkRegex = new(@"\[\[(?<target>[^|\]]+)\|(?<text>[^\]]+)\]\]", RegexOptions.Compiled);
@@ -41,7 +41,82 @@ namespace Dateiumbenenner
             Title = $"Dateiumbenenner {AppVersion} – Hilfe";
             _topics = BuildTopics();
             AddPluginTopics();
+            LstContents.ItemsSource = _topics.Where(t => t.Id != "index").Select(t => new TopicRef(t.Id, t.Title)).ToList();
+            _index = BuildIndex();
+            LstIndex.ItemsSource = _index;
             Show(page switch { Page.Licenses => "lizenzen", Page.About => "ueber", _ => "inhalt" }, addToHistory: false);
+        }
+
+        private sealed record TopicRef(string Id, string Title);
+        private sealed record IndexEntry(string Keyword, string Id);
+        private List<IndexEntry> _index = new();
+        private bool _syncing;
+
+        /// <summary>Stichwörter aus dem Index-Thema, allen Thementiteln und Zwischenüberschriften.</summary>
+        private List<IndexEntry> BuildIndex()
+        {
+            var list = new List<IndexEntry>();
+            var idx = _topics.FirstOrDefault(t => t.Id == "index");
+            if (idx.Id != null)
+                foreach (Match m in LinkRegex.Matches(idx.Body)) list.Add(new(m.Groups["text"].Value, m.Groups["target"].Value));
+            foreach (var t in _topics.Where(t => t.Id is not "index" and not "inhalt"))
+            {
+                list.Add(new(t.Title, t.Id));
+                foreach (var line in t.Body.Replace("\r", "").Split('\n').Where(l => l.StartsWith("# ")))
+                    list.Add(new($"{LinkRegex.Replace(line[2..].Trim(), "${text}")} ({t.Title})", t.Id));
+            }
+            return list.GroupBy(e => e.Keyword, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
+                       .OrderBy(e => e.Keyword, StringComparer.CurrentCultureIgnoreCase).ToList();
+        }
+
+        private void TxtIndexFilter_TextChanged(object s, TextChangedEventArgs e)
+        {
+            var f = TxtIndexFilter.Text.Trim();
+            var items = f.Length == 0 ? _index : _index.Where(i => i.Keyword.Contains(f, StringComparison.CurrentCultureIgnoreCase))
+                .OrderBy(i => i.Keyword.StartsWith(f, StringComparison.CurrentCultureIgnoreCase) ? 0 : 1).ToList();
+            LstIndex.ItemsSource = items;
+            if (items.Count > 0) LstIndex.SelectedIndex = 0;
+        }
+
+        private void TxtIndexFilter_PreviewKeyDown(object s, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key == System.Windows.Input.Key.Enter) { BtnIndexShow_Click(s, e); e.Handled = true; }
+            else if (e.Key == System.Windows.Input.Key.Down && LstIndex.Items.Count > 0) { LstIndex.SelectedIndex = Math.Min(LstIndex.SelectedIndex + 1, LstIndex.Items.Count - 1); LstIndex.ScrollIntoView(LstIndex.SelectedItem); e.Handled = true; }
+            else if (e.Key == System.Windows.Input.Key.Up && LstIndex.SelectedIndex > 0) { LstIndex.SelectedIndex--; LstIndex.ScrollIntoView(LstIndex.SelectedItem); e.Handled = true; }
+        }
+
+        private void BtnIndexShow_Click(object s, RoutedEventArgs e)
+        {
+            if ((LstIndex.SelectedItem ?? (LstIndex.Items.Count > 0 ? LstIndex.Items[0] : null)) is IndexEntry ie) Show(ie.Id);
+        }
+
+        private void LstContents_SelectionChanged(object s, SelectionChangedEventArgs e)
+        {
+            if (!_syncing && LstContents.SelectedItem is TopicRef t) Show(t.Id);
+        }
+
+        private void TxtSearch_PreviewKeyDown(object s, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key == System.Windows.Input.Key.Enter) { BtnSearch_Click(s, e); e.Handled = true; }
+        }
+
+        private void BtnSearch_Click(object s, RoutedEventArgs e)
+        {
+            var words = TxtSearch.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length == 0) { LstSearch.ItemsSource = null; TxtSearchInfo.Text = string.Empty; return; }
+            var hits = _topics.Where(t => t.Id != "index")
+                .Select(t => (t, text: t.Title + " " + LinkRegex.Replace(t.Body, "${text}")))
+                .Where(x => words.All(w => x.text.Contains(w, StringComparison.CurrentCultureIgnoreCase)))
+                .OrderByDescending(x => words.Sum(w => x.t.Title.Contains(w, StringComparison.CurrentCultureIgnoreCase) ? 10 : 0)
+                                     + words.Sum(w => Regex.Matches(x.text, Regex.Escape(w), RegexOptions.IgnoreCase).Count))
+                .Select(x => new TopicRef(x.t.Id, x.t.Title)).ToList();
+            LstSearch.ItemsSource = hits;
+            TxtSearchInfo.Text = $"{hits.Count} Thema/Themen gefunden";
+        }
+
+        private void LstSearch_SelectionChanged(object s, SelectionChangedEventArgs e)
+        {
+            if (LstSearch.SelectedItem is TopicRef t) Show(t.Id);
         }
 
         #region Navigation
@@ -58,10 +133,14 @@ namespace Dateiumbenenner
             BtnPrev.IsEnabled = idx > 0;
             BtnNext.IsEnabled = idx < _topics.Count - 1;
             BtnBack.IsEnabled = _history.Count > 0;
+            _syncing = true;
+            LstContents.SelectedItem = (LstContents.ItemsSource as IEnumerable<TopicRef>)?.FirstOrDefault(t => t.Id == id);
+            if (LstContents.SelectedItem != null) LstContents.ScrollIntoView(LstContents.SelectedItem);
+            _syncing = false;
         }
 
         private void BtnContents_Click(object s, RoutedEventArgs e) => Show("inhalt");
-        private void BtnIndex_Click(object s, RoutedEventArgs e) => Show("index");
+        private void BtnIndex_Click(object s, RoutedEventArgs e) { NavTabs.SelectedItem = TabIndexPage; TxtIndexFilter.Focus(); }
         private void BtnBack_Click(object s, RoutedEventArgs e) { if (_history.Count > 0) Show(_history.Pop(), addToHistory: false); }
         private void BtnPrev_Click(object s, RoutedEventArgs e) { int i = _topics.FindIndex(t => t.Id == _current); if (i > 0) Show(_topics[i - 1].Id); }
         private void BtnNext_Click(object s, RoutedEventArgs e) { int i = _topics.FindIndex(t => t.Id == _current); if (i < _topics.Count - 1) Show(_topics[i + 1].Id); }
@@ -73,7 +152,169 @@ namespace Dateiumbenenner
             if (doc != null) System.Windows.Clipboard.SetText(TxtTopicTitle.Text + Environment.NewLine + new TextRange(doc.ContentStart, doc.ContentEnd).Text);
         }
 
-        private void MenuAboutHelp_Click(object s, RoutedEventArgs e) => Show("ueber");
+        private void MenuAboutHelp_Click(object s, RoutedEventArgs e)
+        {
+            var tabs = new System.Windows.Controls.TabControl { Margin = new Thickness(6) };
+
+            FlowDocumentScrollViewer Doc(string id)
+            {
+                var t = _topics.FirstOrDefault(x => x.Id == id);
+                return new FlowDocumentScrollViewer { Document = Render(t.Body ?? string.Empty), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, IsToolBarVisible = false };
+            }
+
+            System.Windows.Controls.ListView Grid2(string h1, string h2, IEnumerable<KeyValuePair<string, string>> rows, double w1 = 260, double w2 = 420)
+            {
+                var gv = new GridView();
+                gv.Columns.Add(new GridViewColumn { Header = h1, Width = w1, DisplayMemberBinding = new System.Windows.Data.Binding("Key") });
+                gv.Columns.Add(new GridViewColumn { Header = h2, Width = w2, DisplayMemberBinding = new System.Windows.Data.Binding("Value") });
+                var lv = new System.Windows.Controls.ListView { View = gv, ItemsSource = rows.ToList() };
+                ListViewCopyHelper.Attach(lv);
+                return lv;
+            }
+
+            var sys = SystemInfo();
+            var sysPanel = new DockPanel();
+            var copy = new System.Windows.Controls.Button { Content = "In Zwischenablage kopieren", Padding = new Thickness(10, 2, 10, 2), Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = System.Windows.HorizontalAlignment.Right };
+            copy.Click += (_, _) => { try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, sys.Select(k => $"{k.Key}: {k.Value}"))); } catch { } };
+            DockPanel.SetDock(copy, Dock.Bottom);
+            sysPanel.Children.Add(copy);
+            sysPanel.Children.Add(Grid2("Eigenschaft", "Wert", sys, 200, 480));
+
+            var pkgs = NuGetPackages();
+            tabs.Items.Add(new TabItem { Header = "Info", Content = Doc("ueber") });
+            tabs.Items.Add(new TabItem { Header = "Lizenzen", Content = Doc("lizenzen") });
+            tabs.Items.Add(new TabItem { Header = $"NuGet-Pakete ({pkgs.Count})", Content = Grid2("Paket", "Version", pkgs, 380, 200) });
+            tabs.Items.Add(new TabItem { Header = "Plugins", Content = Grid2("Plugin", "Version / Status", LoadedPlugins.Select(p => new KeyValuePair<string, string>(p.Plugin.Name, $"{p.Plugin.Version}{(p.Enabled ? "" : " (deaktiviert)")} – {p.Plugin.Description}"))) });
+            tabs.Items.Add(new TabItem { Header = "Systeminformationen", Content = sysPanel });
+            var (cpuPanel, cpuTimer) = CpuPanel();
+            tabs.Items.Add(new TabItem { Header = "CPU-Auslastung", Content = cpuPanel });
+
+            var close = new System.Windows.Controls.Button { Content = "OK", IsDefault = true, IsCancel = true, MinWidth = 75, Margin = new Thickness(6), HorizontalAlignment = System.Windows.HorizontalAlignment.Right };
+            var root = new DockPanel();
+            DockPanel.SetDock(close, Dock.Bottom);
+            root.Children.Add(close);
+            root.Children.Add(tabs);
+            var w = new Window { Title = $"Info – Dateiumbenenner {AppVersion}", Owner = this, Width = 760, Height = 540, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root, Background = Background, FontFamily = FontFamily, FontSize = 12 };
+            close.Click += (_, _) => w.Close();
+            w.Closed += (_, _) => cpuTimer.Stop();
+            cpuTimer.Start();
+            w.ShowDialog();
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool GetSystemTimes(out long idle, out long kernel, out long user);
+
+        /// <summary>Live-Diagramm der CPU-Auslastung (System gesamt und Dateiumbenenner), 1 Sekunde Takt, 60 Sekunden Verlauf.</summary>
+        private static (UIElement Panel, System.Windows.Threading.DispatcherTimer Timer) CpuPanel()
+        {
+            const int points = 60;
+            var sysVals = new List<double>(); var procVals = new List<double>();
+            var info = new TextBlock { Margin = new Thickness(0, 0, 0, 6), FontSize = 13 };
+            var canvas = new Canvas { Background = Brushes.Black, ClipToBounds = true, MinHeight = 200 };
+            var sysLine = new System.Windows.Shapes.Polyline { Stroke = Brushes.LimeGreen, StrokeThickness = 2 };
+            var procLine = new System.Windows.Shapes.Polyline { Stroke = Brushes.Orange, StrokeThickness = 2 };
+            var legend = new TextBlock { Margin = new Thickness(0, 6, 0, 0) };
+            legend.Inlines.Add(new Run("■ System gesamt   ") { Foreground = Brushes.Green });
+            legend.Inlines.Add(new Run("■ Dateiumbenenner   ") { Foreground = Brushes.DarkOrange });
+            legend.Inlines.Add(new Run("(letzte 60 Sekunden, Raster 25 %)") { Foreground = Brushes.Gray });
+
+            void Redraw()
+            {
+                canvas.Children.Clear();
+                double w = canvas.ActualWidth, h = canvas.ActualHeight;
+                if (w <= 0 || h <= 0) return;
+                for (int p = 1; p < 4; p++)
+                    canvas.Children.Add(new System.Windows.Shapes.Line { X1 = 0, X2 = w, Y1 = h * p / 4, Y2 = h * p / 4, Stroke = new SolidColorBrush(Color.FromRgb(0, 70, 0)), StrokeThickness = 1 });
+                PointCollection Pts(List<double> v)
+                {
+                    var pc = new PointCollection();
+                    for (int i = 0; i < v.Count; i++) pc.Add(new System.Windows.Point(w - (v.Count - 1 - i) * w / (points - 1), h - v[i] / 100 * h));
+                    return pc;
+                }
+                sysLine.Points = Pts(sysVals); procLine.Points = Pts(procVals);
+                canvas.Children.Add(sysLine); canvas.Children.Add(procLine);
+            }
+            canvas.SizeChanged += (_, _) => Redraw();
+
+            GetSystemTimes(out var lastIdle, out var lastKernel, out var lastUser);
+            var proc = Process.GetCurrentProcess();
+            var lastProc = proc.TotalProcessorTime; var lastWall = DateTime.UtcNow;
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            timer.Tick += (_, _) =>
+            {
+                double sys = 0, own = 0;
+                if (GetSystemTimes(out var idle, out var kernel, out var user))
+                {
+                    long total = (kernel - lastKernel) + (user - lastUser);
+                    if (total > 0) sys = Math.Clamp((total - (idle - lastIdle)) * 100.0 / total, 0, 100);
+                    lastIdle = idle; lastKernel = kernel; lastUser = user;
+                }
+                proc.Refresh();
+                var now = DateTime.UtcNow; var cpu = proc.TotalProcessorTime;
+                var wall = (now - lastWall).TotalMilliseconds * Environment.ProcessorCount;
+                if (wall > 0) own = Math.Clamp((cpu - lastProc).TotalMilliseconds * 100 / wall, 0, 100);
+                lastProc = cpu; lastWall = now;
+                sysVals.Add(sys); procVals.Add(own);
+                if (sysVals.Count > points) { sysVals.RemoveAt(0); procVals.RemoveAt(0); }
+                info.Text = $"System: {sys:0} %   Dateiumbenenner: {own:0.0} %   Durchschnitt System: {sysVals.Average():0} %   Prozessoren: {Environment.ProcessorCount}   Arbeitsspeicher Programm: {Environment.WorkingSet / 1024 / 1024:N0} MB";
+                Redraw();
+            };
+            info.Text = "Messung läuft …";
+
+            var panel = new DockPanel { Margin = new Thickness(8) };
+            DockPanel.SetDock(info, Dock.Top); DockPanel.SetDock(legend, Dock.Bottom);
+            panel.Children.Add(info); panel.Children.Add(legend);
+            panel.Children.Add(new Border { BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1), Child = canvas });
+            return (panel, timer);
+        }
+
+        private static List<KeyValuePair<string, string>> NuGetPackages()
+        {
+            var result = new List<KeyValuePair<string, string>>();
+            try
+            {
+                var asm = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
+                var deps = System.IO.Path.Combine(AppContext.BaseDirectory, asm.GetName().Name + ".deps.json");
+                if (!System.IO.File.Exists(deps)) return result;
+                using var json = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(deps));
+                if (!json.RootElement.TryGetProperty("libraries", out var libs)) return result;
+                foreach (var lib in libs.EnumerateObject())
+                {
+                    if (!lib.Value.TryGetProperty("type", out var type) || type.GetString() != "package") continue;
+                    var parts = lib.Name.Split('/');
+                    result.Add(new(parts[0], parts.Length > 1 ? parts[1] : string.Empty));
+                }
+            }
+            catch { }
+            return result.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private static List<KeyValuePair<string, string>> SystemInfo()
+        {
+            static KeyValuePair<string, string> P(string k, string? v) => new(k, v ?? string.Empty);
+            var gc = GC.GetGCMemoryInfo();
+            var list = new List<KeyValuePair<string, string>>
+            {
+                P("Programm", $"Dateiumbenenner {Assembly.GetExecutingAssembly().GetName().Version}"),
+                P("Programmpfad", Environment.ProcessPath),
+                P("Profilordner", ProfileManager.ActiveDirectory),
+                P("Betriebssystem", System.Runtime.InteropServices.RuntimeInformation.OSDescription),
+                P("OS-Version", Environment.OSVersion.VersionString),
+                P("Architektur (OS / Prozess)", $"{System.Runtime.InteropServices.RuntimeInformation.OSArchitecture} / {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}"),
+                P(".NET-Laufzeit", System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription),
+                P("Computername", Environment.MachineName),
+                P("Benutzer", $"{Environment.UserDomainName}\\{Environment.UserName}"),
+                P("Prozessoren (logisch)", Environment.ProcessorCount.ToString()),
+                P("Arbeitsspeicher verfügbar", $"{gc.TotalAvailableMemoryBytes / 1024 / 1024:N0} MB"),
+                P("Arbeitsspeicher Programm", $"{Environment.WorkingSet / 1024 / 1024:N0} MB"),
+                P("Bildschirm", $"{SystemParameters.PrimaryScreenWidth:0} × {SystemParameters.PrimaryScreenHeight:0}"),
+                P("Sprache / Kultur", $"{System.Globalization.CultureInfo.CurrentUICulture.Name} / {System.Globalization.CultureInfo.CurrentCulture.Name}"),
+                P("Zeitzone", TimeZoneInfo.Local.DisplayName),
+                P("Systemlaufzeit", TimeSpan.FromMilliseconds(Environment.TickCount64).ToString(@"d\.hh\:mm\:ss")),
+                P("Geladene Plugins", LoadedPlugins.Count.ToString())
+            };
+            return list;
+        }
 
         private void BtnPrint_Click(object s, RoutedEventArgs e)
         {
@@ -193,6 +434,14 @@ Klicken Sie auf ein unterstrichenes Thema, um es anzuzeigen. Mit den Schaltfläc
 * [[zusammenfuehren|PDF-Dateien zusammenführen]]
 * [[kompression|Kompressionseinstellungen]]
 * [[ocr|OCR-Korrektur und Wörterbücher]]
+* [[nummernregeln|Nummernmuster und Belegarten]]
+* [[profile|Profile]]
+* [[listen|Listen: Kopieren, Markieren, Filtern]]
+
+# INI Erzeugen
+* [[inixml|INI- und XML-Export]]
+* [[firmauebertragen|Firma übertragen]]
+* [[partnersuche|Kreditor-/Debitorensuche]]
 
 # Technische Informationen
 * [[technik|Aufbau und verwendete NuGet-Pakete]]
@@ -409,6 +658,82 @@ Dies ist ein privates, nicht kommerzielles Open-Source-Projekt.
 
 Siehe auch: [[haftung|Haftungsausschluss]], [[lizenzen|Lizenzen und Drittanbieter]]"),
 
+            ("nummernregeln", "Nummernmuster und Belegarten", @"Menü bzw. Schaltfläche ""Nummernregeln"": legt fest, wie Rechnungs- und Belegnummern je Firma und Belegart erkannt werden.
+
+# Firmenübersicht
+Links stehen alle Firmen mit Regeln oder geladenen Belegen. Das Filterfeld schränkt die Liste ein; ein Klick zeigt nur die Regeln dieser Firma.
+
+# Maske
+* $ = Ziffer
+* ? = Buchstabe
+* # = Buchstabe oder Ziffer
+* * = beliebige Zeichen
+* andere Zeichen (z. B. / - .) müssen genau so vorkommen
+
+Beispiel: Die Nummer R2306/12345 ergibt die Maske
+> ?$$$$/$$$$$
+
+# Beispielnummer
+In der Spalte ""Beispielnummer"" kann eine erkannte Nummer ausgewählt werden; die Maske wird daraus automatisch abgeleitet.
+
+# Priorität
+Passende Masken werden zuerst im Text gesucht und vor der allgemeinen Nummernerkennung bevorzugt. Regeln für Firma und Belegart gehen allgemeinen Regeln vor.
+
+# Belegarten
+Im Reiter ""Belegarten"" werden Bezeichnungen und Synonyme gepflegt (z. B. Sammelrechnung, Barverkauf, Gutschrift, Storno).
+
+Siehe auch: [[inixml|INI- und XML-Export]]"),
+
+            ("profile", "Profile", @"Über das Menü ""Profile"" werden Einstellungen, Nummernregeln und Belegarten getrennt gespeichert, z. B. pro Mandant.
+
+* Profil wechseln: Menü Profile, gewünschtes Profil wählen.
+* Neues Profil: Name eingeben; die aktuellen Einstellungen werden übernommen.
+* Profilordner öffnen: zeigt die gespeicherten Dateien im Explorer."),
+
+            ("listen", "Listen: Kopieren, Markieren, Filtern", @"Alle Dateilisten (Hauptliste, INI Erzeugen, Firma übertragen) bieten ein Kontextmenü (rechte Maustaste):
+
+* Kopieren (Zeilen) – Strg+C, tabulatorgetrennt mit Spaltenüberschriften (z. B. für Excel)
+* Dateinamen kopieren
+* Dateipfade kopieren
+* Alles markieren – Strg+A
+
+# Filter
+Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt, die alle Wörter enthalten."),
+
+            ("inixml", "INI- und XML-Export", @"Das Plugin ""INI Erzeugen"" schreibt zu jedem Beleg eine INI-Datei und optional eine Erkennungs-XML.
+
+# Nummernfeld nach Belegart
+* Rechnungsarten (Rechnung, Sammelrechnung, Barverkauf, Gutschrift, Storno, Stornorechnung …) – INI-Schlagwort Rechnungsnummer
+* alle anderen Belege – INI-Schlagwort Belegnummer
+
+# Aufbau der XML
+Jede Erkennungsregel ist ein Parameter-Element. Das INI-Schlagwort steht als Attribut IniSchlagwort, das Muster im Unterelement Pattern:
+> <Parameter IniSchlagwort=""Rechnungsnummer"">
+>   <Pattern>Rechnungs-Nr.  (+1Z) (Nummer(?$$$$/$$$$$))</Pattern>
+
+* Text vor dem Muster: Erkennungsmerkmal im Beleg
+* (+1Z): Wert steht eine Zeile unter dem Merkmal
+* (Nummer(...)): Nummernmaske, siehe [[nummernregeln|Nummernmuster]]
+* (Datum), (Betrag), (Text): weitere Feldtypen
+
+Zusätzlich werden SchlagwortGruen und SchlagwortDatev als Attribute des Wurzelelements Parameters geschrieben."),
+
+            ("firmauebertragen", "Firma übertragen", @"Überträgt Firmenname, Nummer und Adresse auf mehrere Belege.
+
+* Oben: Gruppen gleich erkannter Firmen; ähnliche Einträge sind vorausgewählt. Leertaste schaltet die Auswahl um.
+* Spalte ""Treffer"": Grund der Vorauswahl.
+* Unten links: Dateien der markierten Gruppe, Firmenname direkt bearbeitbar.
+* Unten rechts: Vorschau (PDF oder Textmodus, Vollbildvorschau).
+* Filter: mehrere Wörter möglich."),
+
+            ("partnersuche", "Kreditor-/Debitorensuche", @"Sucht Firmen in der Datenbank (Adress-, Kreditoren- und Debitorentabellen) und übernimmt Name, Nummer und Adresse.
+
+* Suchbegriff eingeben; mehrere Wörter werden kombiniert.
+* Doppelklick bzw. ""Übernehmen"" überträgt den Treffer.
+* Große Tabellen werden zwischengespeichert, damit das Filtern schnell bleibt.
+
+Siehe auch: [[firmauebertragen|Firma übertragen]]"),
+
             ("index", "Index", @"> A
 * [[technik|Aufbau des Programms]]
 > D
@@ -444,6 +769,26 @@ Siehe auch: [[haftung|Haftungsausschluss]], [[lizenzen|Lizenzen und Drittanbiete
 > R
 * [[kompression|Rasterisieren]]
 * [[umbenennen|Rechnungsnummer]]
+* [[inixml|Rechnungsnummer (INI/XML)]]
+* [[inixml|Belegnummer (INI/XML)]]
+* [[inixml|Pattern]]
+* [[inixml|IniSchlagwort]]
+* [[inixml|SchlagwortDatev]]
+* [[inixml|SchlagwortGruen]]
+* [[nummernregeln|Maske]]
+* [[nummernregeln|Belegarten]]
+* [[nummernregeln|Gutschrift]]
+* [[nummernregeln|Storno]]
+* [[nummernregeln|Sammelrechnung]]
+* [[nummernregeln|Barverkauf]]
+* [[profile|Profil]]
+* [[listen|Kopieren]]
+* [[listen|Dateinamen kopieren]]
+* [[listen|Filter]]
+* [[firmauebertragen|Firma übertragen]]
+* [[partnersuche|Kreditor]]
+* [[partnersuche|Debitor]]
+* [[partnersuche|Datenbank]]
 > S
 * [[signatur|Signatur]]
 * [[system|Systemanforderungen]]
