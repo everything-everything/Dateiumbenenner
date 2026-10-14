@@ -2194,14 +2194,35 @@ namespace Dateiumbenenner
         private async void FilterTimer_Tick(object? sender,EventArgs e){ _filterTimer!.Stop(); var ft=TxtFilter.Text; int v=++_filterVersion; if(string.IsNullOrWhiteSpace(ft)){ _filterCts?.Cancel(); LvFiles.ItemsSource=_items; return; }
         var snapshot=_items.ToList(); TxtStatus.Text="Filter..."; _filterCts?.Cancel(); var cts=_filterCts=new CancellationTokenSource(); var tok=cts.Token;
                     List<DocumentMetadata> result; int textHits=0;
-                    var idxProgress=new Progress<(int Done,int Total)>(p=>{ if(v!=_filterVersion) return; LoadingProgress.Visibility=Visibility.Visible; LoadingProgress.Maximum=Math.Max(1,p.Total); LoadingProgress.Value=p.Done; TxtStatus.Text=$"\U0001F50D Suchindex wird erstellt (einmalig) … {p.Done:N0} von {p.Total:N0} Belegen"; });
-                    try{ result=await Task.Run(()=>{ var full=DocumentStore.SearchFullText(ft,idxProgress); tok.ThrowIfCancellationRequested(); var list=new List<DocumentMetadata>(); var opts=new ParallelOptions{CancellationToken=tok}; var hit=new bool[snapshot.Count];
+                    var idxProgress=new Progress<(int Done,int Total)>(p=>{ if(v!=_filterVersion) return; ShowIndexBuilding(p.Done,p.Total); });
+                                        if(ft.Trim().Length>=3 && !DocumentStore.IsFullTextIndexReady) ShowIndexBuilding(0,0);
+                    try{ result=await Task.Run(()=>{ if(!DocumentStore.IsFullTextIndexReady) DocumentStore.EnsureFullTextIndex(idxProgress); var full=DocumentStore.SearchFullText(ft,idxProgress); tok.ThrowIfCancellationRequested(); var list=new List<DocumentMetadata>(); var opts=new ParallelOptions{CancellationToken=tok}; var hit=new bool[snapshot.Count];
                         Parallel.For(0,snapshot.Count,opts,k=>{ var i=snapshot[k]; var key=string.Concat(i.FileName,"\u0001",i.InvoiceNumber,"\u0001",i.DocumentNumber,"\u0001",i.CompanyName,"\u0001",i.DocumentType,"\u0001",Convert.ToString(i.Date)); hit[k]=key.Contains(ft,StringComparison.OrdinalIgnoreCase) || (full!=null && full.Contains(i.FilePath)); });
                         for(int k=0;k<hit.Length;k++) if(hit[k]) list.Add(snapshot[k]); if(full!=null) textHits=full.Count; return list; },tok); }
                     catch(OperationCanceledException){ return; }
-                    finally{ if(v==_filterVersion){ LoadingProgress.Visibility=Visibility.Collapsed; LoadingProgress.Maximum=100; } }
+                    finally{ UpdateIndexState(); }
                     if(v!=_filterVersion) return; LvFiles.ItemsSource=result; TxtStatus.Text=$"{result.Count:N0} von {snapshot.Count:N0} Belegen" + (textHits>0?$" (inkl. Volltext: {textHits:N0} Treffer im Belegtext)":""); }
                 private CancellationTokenSource? _filterCts;
+        private System.Windows.Threading.DispatcherTimer? _bookTimer; private int _bookFrame;
+        private static readonly string[] BookFrames = { "\U0001F4D5", "\U0001F4D6", "\U0001F4D7", "\U0001F4D6", "\U0001F4D8", "\U0001F4D6", "\U0001F4D9", "\U0001F4D6" };
+        private void ShowIndexBuilding(int done,int total)
+        {
+            if(_bookTimer==null){ _bookTimer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(180)}; _bookTimer.Tick+=(_,_)=>IdxIcon.Text=BookFrames[_bookFrame++%BookFrames.Length]; }
+            if(!_bookTimer.IsEnabled) _bookTimer.Start();
+            IdxLamp.Fill=System.Windows.Media.Brushes.Orange;
+            IdxBar.Visibility=Visibility.Visible; IdxBar.IsIndeterminate=total<=0;
+            if(total>0){ IdxBar.Maximum=total; IdxBar.Value=done; }
+            IdxText.Text=total>0?$"Index wird erstellt (einmalig) … {done:N0} von {total:N0} Belegen":"Index wird erstellt …";
+            TxtStatus.Text=IdxText.Text;
+        }
+        private void UpdateIndexState()
+        {
+            _bookTimer?.Stop(); IdxBar.Visibility=Visibility.Collapsed;
+            bool ok=DocumentStore.IsFullTextIndexReady;
+            IdxLamp.Fill=ok?System.Windows.Media.Brushes.LimeGreen:System.Windows.Media.Brushes.Gray;
+            IdxIcon.Text=ok?"\U0001F4D7":"\U0001F4D5";
+            IdxText.Text=ok?"Index bereit":"Suchindex: wird bei der ersten Suche (ab 3 Zeichen) erstellt";
+        }
         private void CmbDocType_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DocTypeManuallySet=true; UpdateMetadataFromSelections(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); ApplyDocTypeToSelection(meta, (e.AddedItems.Count>0 ? e.AddedItems[0] as string : null) ?? meta.DocumentType); } }
 
         /// <summary>Gew&#228;hlte Belegart auf weitere markierte Belege &#252;bernehmen (nach R&#252;ckfrage).</summary>

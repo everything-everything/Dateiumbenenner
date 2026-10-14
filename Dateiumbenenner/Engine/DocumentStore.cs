@@ -277,6 +277,22 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
             return _fts.Value;
         }
 
+        /// <summary>Volltextindex vorab aufbauen (z. B. beim ersten eingegebenen Zeichen), ohne zu suchen.</summary>
+        public static bool EnsureFullTextIndex(IProgress<(int Done, int Total)>? progress = null)
+        {
+            if (_fts.HasValue) return _fts.Value;
+            try
+            {
+                lock (Sync)
+                {
+                    _ = ConnectionString;
+                    using var c = Open();
+                    return EnsureFts(c, progress);
+                }
+            }
+            catch { return false; }
+        }
+
         /// <summary>Pfade aller Belege, deren Text den Suchbegriff enthält (mind. 3 Zeichen). null = Index nicht verfügbar.</summary>
         public static HashSet<string>? SearchFullText(string query, IProgress<(int Done, int Total)>? progress = null)
         {

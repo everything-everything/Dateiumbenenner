@@ -132,7 +132,15 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
+                    <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <Ellipse x:Name="IdxLamp" Width="12" Height="12" Fill="Gray" Stroke="DimGray" VerticalAlignment="Center" Margin="2,0,6,0"/>
+                        <TextBlock x:Name="IdxIcon" Text="&#x1F4D5;" FontFamily="Segoe UI Emoji" FontSize="16" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock x:Name="IdxText" Text="Suchindex: noch nicht geladen" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <ProgressBar x:Name="IdxBar" Width="200" Height="12" VerticalAlignment="Center" Visibility="Collapsed"/>
+                    </StackPanel>
                     <TextBox x:Name="TxtFilter" Margin="0,0,0,5" TextChanged="TxtFilter_TextChanged" ToolTip="In der Liste suchen: Dateiname, Firma, Typ, Rechnungs-/Belegnummer, Datum"/>
+                    </StackPanel>
                     <ListView x:Name="LvFiles" Grid.Row="1" SelectionMode="Extended" SelectionChanged="LvFiles_SelectionChanged" AlternationCount="1000000"
                                                   VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                                                   VirtualizingPanel.IsVirtualizingWhenGrouping="True" ScrollViewer.CanContentScroll="True">
