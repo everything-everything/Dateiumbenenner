@@ -232,7 +232,7 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
         private static string SearchText(Record rec) => string.Join("\n", rec.CompanyName, rec.FullText);
 
         /// <summary>Volltextindex (FTS5, Trigramm = Teilwortsuche) anlegen und einmalig aus vorhandenen Datensätzen füllen.</summary>
-        private static bool EnsureFts(SqliteConnection c)
+        private static bool EnsureFts(SqliteConnection c, IProgress<(int Done, int Total)>? progress = null)
         {
             if (_fts.HasValue) return _fts.Value;
             try
@@ -245,13 +245,18 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                     cmd.CommandText = "CREATE VIRTUAL TABLE DocText USING fts5(Path UNINDEXED, Text, tokenize='trigram case_sensitive 0')";
                     cmd.ExecuteNonQuery();
                     var rows = new List<(string, string)>();
+                    cmd.CommandText = "SELECT count(*) FROM Documents";
+                    int total = Convert.ToInt32(cmd.ExecuteScalar()), done = 0;
+                    progress?.Report((0, total));
                     cmd.CommandText = "SELECT Path, Data FROM Documents";
                     using (var r = cmd.ExecuteReader())
                         while (r.Read())
                         {
                             var rec = JsonSerializer.Deserialize<Record>(r.GetString(1));
                             if (rec != null) rows.Add((r.GetString(0), SearchText(rec)));
+                            if (++done % 200 == 0) progress?.Report((done, total));
                         }
+                    progress?.Report((total, total));
                     using var tx = c.BeginTransaction();
                     using var ins = c.CreateCommand();
                     ins.Transaction = tx;
@@ -271,7 +276,7 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
         }
 
         /// <summary>Pfade aller Belege, deren Text den Suchbegriff enthält (mind. 3 Zeichen). null = Index nicht verfügbar.</summary>
-        public static HashSet<string>? SearchFullText(string query)
+        public static HashSet<string>? SearchFullText(string query, IProgress<(int Done, int Total)>? progress = null)
         {
             if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 3) return null;
             try
@@ -280,7 +285,7 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                 {
                     _ = ConnectionString;
                     using var c = Open();
-                    if (!EnsureFts(c)) return null;
+                    if (!EnsureFts(c, progress)) return null;
                     using var cmd = c.CreateCommand();
                     cmd.CommandText = "SELECT Path FROM DocText WHERE DocText MATCH $q";
                     cmd.Parameters.AddWithValue("$q", "Text:\"" + query.Trim().Replace("\"", "\"\"") + "\"");

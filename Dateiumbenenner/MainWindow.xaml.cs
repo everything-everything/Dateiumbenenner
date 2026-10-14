@@ -2190,10 +2190,12 @@ namespace Dateiumbenenner
         private async void FilterTimer_Tick(object? sender,EventArgs e){ _filterTimer!.Stop(); var ft=TxtFilter.Text; int v=++_filterVersion; if(string.IsNullOrWhiteSpace(ft)){ _filterCts?.Cancel(); LvFiles.ItemsSource=_items; return; }
         var snapshot=_items.ToList(); TxtStatus.Text="Filter..."; _filterCts?.Cancel(); var cts=_filterCts=new CancellationTokenSource(); var tok=cts.Token;
                     List<DocumentMetadata> result; int textHits=0;
-                    try{ result=await Task.Run(()=>{ var full=DocumentStore.SearchFullText(ft); tok.ThrowIfCancellationRequested(); var list=new List<DocumentMetadata>(); var opts=new ParallelOptions{CancellationToken=tok}; var hit=new bool[snapshot.Count];
+                    var idxProgress=new Progress<(int Done,int Total)>(p=>{ if(v!=_filterVersion) return; LoadingProgress.Visibility=Visibility.Visible; LoadingProgress.Maximum=Math.Max(1,p.Total); LoadingProgress.Value=p.Done; TxtStatus.Text=$"\U0001F50D Suchindex wird erstellt (einmalig) … {p.Done:N0} von {p.Total:N0} Belegen"; });
+                    try{ result=await Task.Run(()=>{ var full=DocumentStore.SearchFullText(ft,idxProgress); tok.ThrowIfCancellationRequested(); var list=new List<DocumentMetadata>(); var opts=new ParallelOptions{CancellationToken=tok}; var hit=new bool[snapshot.Count];
                         Parallel.For(0,snapshot.Count,opts,k=>{ var i=snapshot[k]; var key=string.Concat(i.FileName,"\u0001",i.InvoiceNumber,"\u0001",i.DocumentNumber,"\u0001",i.CompanyName,"\u0001",i.DocumentType,"\u0001",Convert.ToString(i.Date)); hit[k]=key.Contains(ft,StringComparison.OrdinalIgnoreCase) || (full!=null && full.Contains(i.FilePath)); });
                         for(int k=0;k<hit.Length;k++) if(hit[k]) list.Add(snapshot[k]); if(full!=null) textHits=full.Count; return list; },tok); }
                     catch(OperationCanceledException){ return; }
+                    finally{ if(v==_filterVersion){ LoadingProgress.Visibility=Visibility.Collapsed; LoadingProgress.Maximum=100; } }
                     if(v!=_filterVersion) return; LvFiles.ItemsSource=result; TxtStatus.Text=$"{result.Count:N0} von {snapshot.Count:N0} Belegen" + (textHits>0?$" (inkl. Volltext: {textHits:N0} Treffer im Belegtext)":""); }
                 private CancellationTokenSource? _filterCts;
         private void CmbDocType_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DocTypeManuallySet=true; UpdateMetadataFromSelections(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); } }
