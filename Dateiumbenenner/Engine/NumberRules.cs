@@ -11,6 +11,9 @@ namespace Dateiumbenenner.Engine
 {
     public enum NumberRuleKind { Maske, Merkmale }
 
+    /// <summary>Lage des Begriffs zur Nummer (bevorzugte Position, kein Muss).</summary>
+    public enum KeywordPosition { Beliebig, VorNummer, HinterNummer, Umschlossen }
+
     /// <summary>
     /// Nummernregel je Firma + Belegart ("*" = alle). Maske: $ = Ziffer, ? = Buchstabe, # = Ziffer oder Buchstabe,
     /// * = beliebiges Zeichen, Leerzeichen = Leerzeichen, sonstige Zeichen w\u00F6rtlich.
@@ -34,6 +37,11 @@ namespace Dateiumbenenner.Engine
         public bool Learned { get; set; }
         /// <summary>Gew\u00E4hlte Beispielnummer (daraus wird die Maske \u00FCbersetzt).</summary>
         public string? Example { get; set; }
+        /// <summary>Begriff, bei dem die Nummer am wahrscheinlichsten steht (z. B. "Beleg-Nr").</summary>
+        public string? Keyword { get; set; }
+        public KeywordPosition KeywordPosition { get; set; } = KeywordPosition.Beliebig;
+        /// <summary>Zweiter Begriff hinter der Nummer (nur bei "Umschlossen").</summary>
+        public string? KeywordEnd { get; set; }
         /// <summary>Bisher erkannte Nummern zur Auswahl (nur Dialog).</summary>
         [JsonIgnore] public List<string> Examples { get; set; } = new();
     }
@@ -207,6 +215,16 @@ namespace Dateiumbenenner.Engine
                     }
                     catch { }
                 }
+                foreach (var (r, spec) in rules.Where(x => !string.IsNullOrWhiteSpace(x.Rule.Keyword)))
+                {
+                    try
+                    {
+                        // Bevorzugte Position: starker Hinweis, aber Muster-Treffer an anderer Stelle bleiben möglich
+                        foreach (var v in NearKeyword(r, text))
+                            number.Add(v, 50 + r.Priority * spec * Math.Max(0.3, Match(r, v)), "Begriff " + r.Keyword!.Trim());
+                    }
+                    catch { }
+                }
                 var def = DocTypeStore.Get(docType);
                 if (def != null)
                     foreach (var kw in def.NumberKeywords.Where(k => !string.IsNullOrWhiteSpace(k)))
@@ -226,6 +244,29 @@ namespace Dateiumbenenner.Engine
                 double bonus = Score(company, docType, c.Value);
                 if (bonus > 0) number.Add(c.Value, c.Score + bonus, c.Source);
             }
+        }
+
+        /// <summary>Werte an der bevorzugten Begriffsposition (gleiche Zeile oder Folgezeile).</summary>
+        private static IEnumerable<string> NearKeyword(NumberRule r, string text)
+        {
+            string Kw(string k) => @"(?<!\p{L})" + Regex.Escape(k.Trim()) + @"(?!\p{L})\.?\s*[:#]?";
+            string val = r.Kind == NumberRuleKind.Maske && !string.IsNullOrEmpty(r.Mask)
+                ? @"(?<![\p{L}\d])(?<v>" + MaskToRegex(r.Mask) + @")(?![\p{L}\d])"
+                : @"(?<![\p{L}\d])(?<v>[\p{L}\d][\p{L}\d\-/]{2,})";
+            const string gap = @"[^\S\n]*(?:\n[^\S\n]*)?";
+            var patterns = new List<string>();
+            if (r.KeywordPosition is KeywordPosition.Beliebig or KeywordPosition.VorNummer)
+                patterns.Add(Kw(r.Keyword!) + gap + val);
+            if (r.KeywordPosition is KeywordPosition.Beliebig or KeywordPosition.HinterNummer)
+                patterns.Add(val + gap + @"(?<!\p{L})" + Regex.Escape(r.Keyword!.Trim()) + @"(?!\p{L})");
+            if (r.KeywordPosition == KeywordPosition.Umschlossen)
+                patterns.Add(Kw(r.Keyword!) + gap + val + gap + (string.IsNullOrWhiteSpace(r.KeywordEnd) ? "" : @"(?<!\p{L})" + Regex.Escape(r.KeywordEnd.Trim()) + @"(?!\p{L})"));
+            foreach (var p in patterns)
+                foreach (Match m in Regex.Matches(text, p, RegexOptions.IgnoreCase))
+                {
+                    var v = m.Groups["v"].Value.Trim();
+                    if (v.Any(char.IsDigit)) yield return v;
+                }
         }
 
         /// <summary>Bester Wert aus Kandidaten und Text nach Regeln (null, wenn keine Regel passt).</summary>
@@ -291,6 +332,20 @@ namespace Dateiumbenenner.Engine
             new() { Name = "Lieferschein", Synonyms = { "Sendeinformation", "Versandmitteilung", "Lieferavis" }, NumberKeywords = { "Lieferscheinnummer", "Lieferschein", "Liefernr", "Sendungsnummer" } },
             new() { Name = "Bestellung", NumberKeywords = { "Bestellnummer", "Bestellung" } },
             new() { Name = "Mahnung", NumberKeywords = { "Mahnungsnummer", "Mahnung" } },
+            new() { Name = "Rechnungskorrektur", Synonyms = { "Korrekturrechnung" }, NumberKeywords = { "Rechnungsnummer", "Korrekturnummer", "Rechnungskorrektur" } },
+            new() { Name = "Korrektur", NumberKeywords = { "Korrekturnummer", "Korrektur" } },
+            new() { Name = "Reparaturrechnung", NumberKeywords = { "Rechnungsnummer", "Rechnungsnr", "Reparaturrechnung" } },
+            new() { Name = "Gutschriftsrechnung", NumberKeywords = { "Gutschriftsnummer", "Rechnungsnummer", "Gutschriftsrechnung" } },
+            new() { Name = "Storno", NumberKeywords = { "Stornonummer", "Storno" } },
+            new() { Name = "Avis", NumberKeywords = { "Avisnummer", "Avis" } },
+            new() { Name = "Lastschrift-Avis", NumberKeywords = { "Avisnummer", "Lastschrift-Avis", "Avis" } },
+            new() { Name = "Sendungsinformation", Synonyms = { "Sendunginformation" }, NumberKeywords = { "Sendungsnummer", "Lieferscheinnummer", "Sendungsinformation" } },
+            new() { Name = "Werkstattauftrag", Synonyms = { "Werkstatt-Auftrag", "Werkstatt Auftrag" }, NumberKeywords = { "Auftragsnummer", "Auftragsnr", "Werkstattauftrag" } },
+            new() { Name = "Reparaturauftrag", NumberKeywords = { "Auftragsnummer", "Auftragsnr", "Reparaturauftrag" } },
+            new() { Name = "Materialschein", NumberKeywords = { "Materialscheinnummer", "Materialschein" } },
+            new() { Name = "Auftrag", NumberKeywords = { "Auftragsnummer", "Auftragsnr", "Auftrag" } },
+            new() { Name = "Auftragsbestätigung", NumberKeywords = { "Auftragsnummer", "Auftragsnr", "Auftragsbestätigung" } },
+            new() { Name = "Schreiben", NumberKeywords = { "Aktenzeichen", "Zeichen", "Schreiben" } },
         };
 
         public static List<DocTypeDefinition> Items
@@ -306,7 +361,20 @@ namespace Dateiumbenenner.Engine
                             _items = JsonSerializer.Deserialize<List<DocTypeDefinition>>(SecureStorage.ReadAllText(FilePath));
                     }
                     catch { }
-                    if (_items == null || _items.Count == 0) _items = Defaults();
+                    if (_items == null || _items.Count == 0)
+                    {
+                        _items = Defaults();
+                        Save(_items);
+                    }
+                    else
+                    {
+                        var missing = Defaults().Where(d => !_items.Any(x => x.Name.Equals(d.Name, StringComparison.OrdinalIgnoreCase))).ToList();
+                        if (missing.Count > 0)
+                        {
+                            _items.AddRange(missing);
+                            Save(_items);
+                        }
+                    }
                     return _items;
                 }
             }
@@ -357,12 +425,8 @@ namespace Dateiumbenenner.Engine
             {
                 double pos = i < 30 ? 1.5 : 0.5;
                 foreach (var (type, rx) in terms)
-                {
-                    int count = rx.Matches(lines[i]).Count;
-                    if (count == 0) continue;
-                    double s = 4 * pos * (lines[i].Trim().Length < 40 ? 1.0 : 0.5);
-                    scores[type] = scores.GetValueOrDefault(type) + s * count;
-                }
+                    foreach (Match m in rx.Matches(lines[i]))
+                        scores[type] = scores.GetValueOrDefault(type) + 4 * pos * DocumentFieldExtractor.MatchFactor(lines[i], m);
             }
         }
     }

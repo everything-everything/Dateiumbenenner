@@ -19,6 +19,7 @@ namespace Dateiumbenenner
 
         private readonly ObservableCollection<NumberRule> _rules;
         private readonly ObservableCollection<DocTypeRow> _docTypes;
+        private readonly ObservableCollection<AmountRule> _amountRules;
 
         /// <summary>true, wenn nach dem Speichern die Belegnummern neu ermittelt werden sollen.</summary>
         public bool Recalculate { get; private set; }
@@ -100,6 +101,7 @@ namespace Dateiumbenenner
         {
             InitializeComponent();
             ColKind.ItemsSource = Enum.GetValues(typeof(NumberRuleKind));
+            ColKeywordPos.ItemsSource = Enum.GetValues(typeof(KeywordPosition));
             _rules = new ObservableCollection<NumberRule>(NumberRuleStore.Rules
                 .Select(Clone)
                 .OrderBy(r => r.Learned).ThenBy(r => r.Company).ThenBy(r => r.DocType).ThenByDescending(r => r.Priority));
@@ -111,6 +113,13 @@ namespace Dateiumbenenner
             }));
             GridRules.ItemsSource = _rules;
             GridDocTypes.ItemsSource = _docTypes;
+            ColAmountPos.ItemsSource = Enum.GetValues(typeof(AmountPosition));
+            ColAmountPage.ItemsSource = Enum.GetValues(typeof(AmountPage));
+            _amountRules = new ObservableCollection<AmountRule>(AmountRuleStore.Rules.Select(r => new AmountRule
+            {
+                Company = r.Company, DocType = r.DocType, Keyword = r.Keyword, Position = r.Position, KeywordEnd = r.KeywordEnd, Page = r.Page, Priority = r.Priority
+            }));
+            GridAmountRules.ItemsSource = _amountRules;
             TxtTestCompany.Text = company ?? "";
             TxtTestDocType.Text = docType ?? "";
         }
@@ -150,6 +159,24 @@ namespace Dateiumbenenner
         {
             foreach (var r in _rules.Where(r => r.Learned).ToList()) _rules.Remove(r);
             UpdateTest();
+        }
+
+        private void BtnAddAmountRule_Click(object sender, RoutedEventArgs e)
+        {
+            var r = new AmountRule
+            {
+                Company = string.IsNullOrWhiteSpace(TxtTestCompany.Text) ? "*" : TxtTestCompany.Text.Trim(),
+                DocType = string.IsNullOrWhiteSpace(TxtTestDocType.Text) ? "*" : TxtTestDocType.Text.Trim(),
+                Keyword = "Gesamtbetrag"
+            };
+            _amountRules.Insert(0, r);
+            GridAmountRules.SelectedItem = r;
+            GridAmountRules.ScrollIntoView(r);
+        }
+
+        private void BtnDeleteAmountRule_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var r in GridAmountRules.SelectedItems.OfType<AmountRule>().ToList()) _amountRules.Remove(r);
         }
 
         private void BtnAddDocType_Click(object sender, RoutedEventArgs e)
@@ -223,6 +250,7 @@ namespace Dateiumbenenner
         {
             GridRules.CommitEdit(DataGridEditingUnit.Row, true);
             GridDocTypes.CommitEdit(DataGridEditingUnit.Row, true);
+            GridAmountRules.CommitEdit(DataGridEditingUnit.Row, true);
             var empty = _rules.Count(r => r.Kind == NumberRuleKind.Maske && string.IsNullOrWhiteSpace(r.Mask));
             bool keepEmpty = true;
             if (askEmpty && empty > 0)
@@ -245,6 +273,12 @@ namespace Dateiumbenenner
                 NumberKeywords = Split(d.Keywords)
             }));
             NumberRuleStore.Save(_rules.Where(r => keepEmpty || r.Kind == NumberRuleKind.Merkmale || !string.IsNullOrWhiteSpace(r.Mask)).Select(r =>
+            {
+                r.Company = string.IsNullOrWhiteSpace(r.Company) ? "*" : r.Company.Trim();
+                r.DocType = string.IsNullOrWhiteSpace(r.DocType) ? "*" : r.DocType.Trim();
+                return r;
+            }));
+            AmountRuleStore.Save(_amountRules.Select(r =>
             {
                 r.Company = string.IsNullOrWhiteSpace(r.Company) ? "*" : r.Company.Trim();
                 r.DocType = string.IsNullOrWhiteSpace(r.DocType) ? "*" : r.DocType.Trim();

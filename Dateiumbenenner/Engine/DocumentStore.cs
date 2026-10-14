@@ -229,6 +229,8 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
         }
 
         private static bool? _fts;
+        /// <summary>True, wenn der Volltext-Suchindex bereits erstellt und geöffnet ist.</summary>
+        public static bool IsFullTextIndexReady => _fts == true;
         private static string SearchText(Record rec) => string.Join("\n", rec.CompanyName, rec.FullText);
 
         /// <summary>Volltextindex (FTS5, Trigramm = Teilwortsuche) anlegen und einmalig aus vorhandenen Datensätzen füllen.</summary>

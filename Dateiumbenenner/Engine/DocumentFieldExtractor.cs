@@ -180,7 +180,24 @@ namespace Dateiumbenenner.Engine
             ("Auftragsbestätigung",  new Regex(@"\bAuftragsbest(ä|ae|a)tigung\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 5),
             ("Angebot",              new Regex(@"\bAngebot\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
             ("Lieferschein",         new Regex(@"\bLieferschein\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
-            ("Rechnung",             new Regex(@"\bRechnung\b|\bRechnungs?\s*-?\s*(Nr|nummer)", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
+            ("Rechnung",             new Regex(@"\bRechnung\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
+            // "Rechnungsnummer" ist eindeutig, aber nur ein schwacher Hinweis
+            ("Rechnung",             new Regex(@"\bRechnungs?\s*-?\s*(Nr|nummer)", RegexOptions.IgnoreCase | RegexOptions.Compiled), 1),
+            ("Rechnungskorrektur",   new Regex(@"\b(Rechnungs\s*-?\s*korrektur|Korrektur\s*-?\s*rechnung)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 6),
+            ("Korrektur",            new Regex(@"\bKorrektur\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 3),
+            ("Sammelrechnung",       new Regex(@"\bSammel\s*-?\s*rechnung\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 6),
+            ("Reparaturrechnung",    new Regex(@"\bReparatur\s*-?\s*rechnung\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 6),
+            ("Gutschriftsrechnung",  new Regex(@"\bGutschrifts?\s*-?\s*rechnung\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 6),
+            ("Storno",               new Regex(@"\bStorno\b(?!\s*-?\s*rechnung)", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
+            ("Lastschrift-Avis",     new Regex(@"\bLastschrift\s*-?\s*Avis\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 6),
+            ("Avis",                 new Regex(@"(?<!Lastschrift\s*-?\s*)\bAvis\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
+            ("Sendungsinformation",  new Regex(@"\bSendungs?information\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
+            ("Werkstattauftrag",     new Regex(@"\bWerkstatt\s*-?\s*Auftrag\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 6),
+            ("Reparaturauftrag",     new Regex(@"\bReparatur\s*-?\s*auftrag\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 6),
+            ("Materialschein",       new Regex(@"\bMaterial\s*-?\s*schein\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 5),
+            ("Bestellung",           new Regex(@"\bBestellung\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 3),
+            ("Auftrag",              new Regex(@"(?<!(Werkstatt|Reparatur)\s*-?\s*)\bAuftrag\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 3),
+            ("Schreiben",            new Regex(@"\bSchreiben\s+vom\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 3),
         };
 
         public static Field ExtractDocumentType(string? text)
@@ -194,17 +211,33 @@ namespace Dateiumbenenner.Engine
             {
                 double pos = i < 30 ? 1.5 : 0.5;          // Kopfbereich zählt mehr
                 foreach (var (type, rx, weight) in TypeRules)
-                {
-                    int count = rx.Matches(lines[i]).Count;
-                    if (count == 0) continue;
-                    // "Bei Zahlung bitte ... Beleg-Nr." / "Rechnung" im Fließtext zählt weniger
-                    double s = weight * pos * (lines[i].Trim().Length < 40 ? 1.0 : 0.5);
-                    scores[type] = scores.GetValueOrDefault(type) + s * count;
-                }
+                    foreach (Match m in rx.Matches(lines[i]))
+                        scores[type] = scores.GetValueOrDefault(type) + weight * pos * MatchFactor(lines[i], m);
             }
             DocTypeStore.AddScores(lines, scores, new HashSet<string>(TypeRules.Select(r => r.Item1), StringComparer.OrdinalIgnoreCase));
             foreach (var kv in scores) field.Add(DocTypeStore.Canonical(kv.Key), kv.Value, "Schl\u00FCsselwort");
             return field;
+        }
+
+        private static readonly Regex ColumnGap = new(@"\s{3,}|\t", RegexOptions.Compiled);
+        private static readonly Regex LabelSuffix = new(@"^(s?\s*-?\s*(Nr|Nummer|No)\b|s?nummer|s?nr\b|-?datum)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>Gewichtung eines Belegart-Treffers: eigener Spaltenabschnitt, alleinstehender Titel z\u00E4hlt mehr, Feldbezeichnungen (z. B. "Beleg-Nr") weniger.</summary>
+        public static double MatchFactor(string line, Match m)
+        {
+            int start = 0, end = line.Length;
+            foreach (Match g in ColumnGap.Matches(line))
+            {
+                if (g.Index + g.Length <= m.Index) start = g.Index + g.Length;
+                else if (g.Index >= m.Index + m.Length) { end = g.Index; break; }
+            }
+            var segment = line.Substring(start, end - start).Trim();
+            double f = segment.Length < 40 ? 1.0 : 0.5;
+            // Belegart steht meist als alleinstehender Begriff (Titel)
+            if (segment.Equals(m.Value.Trim(), StringComparison.OrdinalIgnoreCase)) f *= 2.0;
+            // "Beleg-Nr", "Lieferschein-Datum": Feldbezeichnung, kein Hinweis auf die Belegart
+            if (LabelSuffix.IsMatch(line.Substring(m.Index + m.Length))) return 0;
+            return f;
         }
     }
 }

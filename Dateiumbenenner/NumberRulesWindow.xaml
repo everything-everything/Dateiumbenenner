@@ -50,6 +50,9 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Maske" Binding="{Binding Mask, UpdateSourceTrigger=PropertyChanged}" Width="120" FontFamily="Consolas"/>
+                            <DataGridTextColumn Header="Begriff (bevorzugt)" Binding="{Binding Keyword, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
+                            <DataGridComboBoxColumn x:Name="ColKeywordPos" Header="Lage Begriff" SelectedItemBinding="{Binding KeywordPosition}" Width="100"/>
+                            <DataGridTextColumn Header="Begriff Ende" Binding="{Binding KeywordEnd, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
                             <DataGridTextColumn Header="L&#228;nge min" Binding="{Binding MinLength, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="65"/>
                             <DataGridTextColumn Header="L&#228;nge max" Binding="{Binding MaxLength, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="65"/>
                             <DataGridCheckBoxColumn Header="Ziffern" Binding="{Binding AllowDigits, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
@@ -75,6 +78,27 @@
                             <DataGridTextColumn Header="Belegart" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
                             <DataGridTextColumn Header="Umschreibungen (;-getrennt)" Binding="{Binding Synonyms, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
                             <DataGridTextColumn Header="Nummer-Schl&#252;sselw&#246;rter (;-getrennt)" Binding="{Binding Keywords, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+            <TabItem Header="Betrag">
+                <DockPanel Margin="5">
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="Gray"
+                               Text="Bevorzugter Begriff f&#252;r den Betrag je Firma/Belegart (* = alle), z. B. Warenwert, Gesamtbetrag, Zahlbetrag. Lage: rechts daneben oder darunter (Spalte). Seite: erste oder letzte Seite. Ohne Treffer wird wie bisher der h&#246;chste Betrag genommen. Bei mehreren Belegen in einer Datei z&#228;hlen nur die Seiten der gew&#228;hlten Firma."/>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Regel hinzuf&#252;gen" Padding="8,2" Margin="0,0,6,0" Click="BtnAddAmountRule_Click"/>
+                        <Button Content="Markierte l&#246;schen" Padding="8,2" Click="BtnDeleteAmountRule_Click"/>
+                    </StackPanel>
+                    <DataGrid x:Name="GridAmountRules" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Firma" Binding="{Binding Company, UpdateSourceTrigger=PropertyChanged}" Width="180"/>
+                            <DataGridTextColumn Header="Belegart" Binding="{Binding DocType, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
+                            <DataGridTextColumn Header="Begriff" Binding="{Binding Keyword, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+                            <DataGridComboBoxColumn x:Name="ColAmountPos" Header="Lage Begriff" SelectedItemBinding="{Binding Position}" Width="100"/>
+                            <DataGridTextColumn Header="Begriff Ende" Binding="{Binding KeywordEnd, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
+                            <DataGridComboBoxColumn x:Name="ColAmountPage" Header="Seite" SelectedItemBinding="{Binding Page}" Width="100"/>
+                            <DataGridTextColumn Header="Priorit&#228;t" Binding="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>

@@ -873,7 +873,7 @@ namespace Dateiumbenenner
 
         // Name (1-5 Wörter) direkt vor einer Rechtsform; Beginn am Zeilenanfang oder nach ':', '|', ';', ',' bzw. Tab/Mehrfach-Leerzeichen
         private static readonly System.Text.RegularExpressions.Regex LegalFormNameRegex = new(
-            @"(?<![\p{L}\d&.'\-])((?:[\p{L}\d][\p{L}\d&.'\-]*\s+){0,4}?[\p{L}\d][\p{L}\d&.'\-]*\s+(?:(?i:(?:GmbH|mbH|AG|SE|UG(?:\s*\(haftungsbeschr(?:ä|ae)nkt\))?)\s*(?:&|\+|u\.|und)\s*Co\.?\s*(?:KGaA|KG|OHG))|(?i:GmbH)|AG|KGaA|KG|UG|OHG|GbR|SE|e\.\s?V\.))(?![\p{L}\d])",
+            @"(?<![\p{L}\d&.'\-])((?:(?:[\p{L}\d][\p{L}\d&.'\-]*|&|\+)\s+){0,4}?[\p{L}\d][\p{L}\d&.'\-]*\s+(?:(?i:(?:GmbH|mbH|AG|SE|UG(?:\s*\(haftungsbeschr(?:ä|ae)nkt\))?)\s*(?:&|\+|u\.|und)\s*Co\.?\s*(?:KGaA|KG|OHG))|(?i:GmbH)|AG|KGaA|KG|UG|OHG|GbR|SE|e\.\s?V\.))(?![\p{L}\d])",
             System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Multiline);
 
         private static readonly Regex IndustryRegex = new(
@@ -918,13 +918,17 @@ namespace Dateiumbenenner
             @"^((AGB|Auftrag|Rechnung|Lieferschein|Bezeichnung|Artikel|und|Pers\.?|haft\.?|persönlich|Komplementär\w*|Gesellschafter\w*:?|Inhaber:?|Bankverbindung:?|Sitz:?)\s+)+",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        /// <summary>Zeichen, die Firmennamen umschließen können ("\ Haus GmbH \", "|Haus GmbH|", ": Haus GmbH:").</summary>
+        private static readonly char[] EnclosingChars = { '\\', '/', '|', ':', ';', ',', '"', '\'', '*', '#', '[', ']', '<', '>', '„', '“', '”', '»', '«', ' ', '\t' };
+
         /// <summary>Entfernt Register-/Fußzeilen-Präfixe vor Namen mit Rechtsform und ersetzt Varianten durch die bereinigte Form.</summary>
         private static List<string> CleanCandidates(List<string> list)
         {
             var result = new List<string>();
             foreach (var raw in list)
             {
-                var c = raw.Trim();
+                var c = raw.Trim().Trim(EnclosingChars).Trim();
+                if (c.Length == 0) continue;
                 var m = RegisterPrefixRegex.Match(c);
                 if (m.Success && HasLegalForm(c[m.Length..])) c = c[m.Length..].Trim();
                 var j = LeadingJunkRegex.Match(c);
@@ -1009,7 +1013,7 @@ namespace Dateiumbenenner
         }
 
         private static readonly System.Text.RegularExpressions.Regex LegalFormEndRegex = new(
-            @"\s(GmbH(\s*&\s*Co\.?\s*KG)?|GMBH(\s*&\s*CO\.?\s*KG)?|mbH|AG|KG|UG|OHG|GbR|SE|e\.\s?V\.|e\.\s?K\.)\.?$", System.Text.RegularExpressions.RegexOptions.Compiled);
+            @"\s(?i:GmbH(\s*&\s*Co\.?\s*KG)?|mbH)|\s(AG|KG|UG|OHG|GbR|SE|e\.\s?V\.|e\.\s?K\.)\.?$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
         private static bool HasLegalForm(string c) => LegalFormEndRegex.IsMatch(c.Trim());
 
@@ -2198,7 +2202,25 @@ namespace Dateiumbenenner
                     finally{ if(v==_filterVersion){ LoadingProgress.Visibility=Visibility.Collapsed; LoadingProgress.Maximum=100; } }
                     if(v!=_filterVersion) return; LvFiles.ItemsSource=result; TxtStatus.Text=$"{result.Count:N0} von {snapshot.Count:N0} Belegen" + (textHits>0?$" (inkl. Volltext: {textHits:N0} Treffer im Belegtext)":""); }
                 private CancellationTokenSource? _filterCts;
-        private void CmbDocType_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DocTypeManuallySet=true; UpdateMetadataFromSelections(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); } }
+        private void CmbDocType_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DocTypeManuallySet=true; UpdateMetadataFromSelections(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); ApplyDocTypeToSelection(meta, (e.AddedItems.Count>0 ? e.AddedItems[0] as string : null) ?? meta.DocumentType); } }
+
+        /// <summary>Gew&#228;hlte Belegart auf weitere markierte Belege &#252;bernehmen (nach R&#252;ckfrage).</summary>
+        private void ApplyDocTypeToSelection(DocumentMetadata current, string? docType)
+        {
+            if (string.IsNullOrWhiteSpace(docType)) return;
+            var others = LvFiles.SelectedItems.OfType<DocumentMetadata>().Where(m => m != current && m.Loaded
+                && !string.Equals(m.DocumentType, docType, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (others.Count == 0) return;
+            var question = $"Belegart \u201E{docType}\u201C auch f\u00FCr die {others.Count} weiteren markierten Belege \u00FCbernehmen?";
+            if (System.Windows.MessageBox.Show(this, question, "Belegart \u00FCbernehmen", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            foreach (var m in others)
+            {
+                m.DocumentType = docType.Trim();
+                m.DocTypeManuallySet = true;
+                AutoAssignNumbers(m);
+                RefreshNewNamePreview(m);
+            }
+        }
         private void EditableCombo_DropDownClosed(object sender,EventArgs e){ if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } }
         private void EditableCombo_KeyDown(object sender,System.Windows.Input.KeyEventArgs e){ if(e.Key==System.Windows.Input.Key.Enter){ if(sender is SWC.ComboBox combo){ combo.IsDropDownOpen=false; if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } } } }
         private void InsertPosition_Changed(object sender,RoutedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ SaveCurrentSettings(meta); UpdateMetadataFromSelections(meta); RefreshNewNamePreview(meta); } }
