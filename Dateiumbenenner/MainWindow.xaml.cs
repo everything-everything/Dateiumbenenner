@@ -331,12 +331,48 @@ namespace Dateiumbenenner
                 if (ChkOcrCorrection != null && ChkOcrCorrection.IsChecked != value) ChkOcrCorrection.IsChecked = value;
                 if (MenuOcrCorrection != null) MenuOcrCorrection.IsChecked = value;
                 TxtStatus.Text = value ? "OCR-Korrektur wird angewendet..." : "OCR-Korrektur wird entfernt...";
-                foreach (var meta in _items.Where(m => m.Loaded).ToList()) ReapplyOcrAndReextract(meta);
+                _ = ReapplyOcrAllAsync(value);
+            }
+        }
+
+        private int _ocrRun;
+        /// <summary>OCR-Korrektur schrittweise auf alle Belege anwenden – UI bleibt bedienbar und zeigt Fortschritt.</summary>
+        private async Task ReapplyOcrAllAsync(bool value)
+        {
+            int run = ++_ocrRun;
+            var list = _items.Where(m => m.Loaded).ToList();
+            System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.AppStarting;
+            try
+            {
+                TxtStatus.Text = value ? "OCR-Korrektur wird vorbereitet..." : "OCR-Korrektur wird entfernt...";
+                foreach (var m in list) m.OriginalFullText ??= m.FullText;
+                var sources = list.Select(m => m.OriginalFullText ?? m.FullText ?? "").ToArray();
+                // rechenintensive Textkorrektur parallel im Hintergrund
+                var texts = await Task.Run(() =>
+                {
+                    var r = new string[sources.Length];
+                    Parallel.For(0, sources.Length, i => r[i] = value && !string.IsNullOrWhiteSpace(sources[i]) ? OcrTextCorrector.Fix(sources[i]) : sources[i]);
+                    return r;
+                });
+                if (run != _ocrRun) return;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (run != _ocrRun) return;
+                    ReapplyOcrAndReextract(list[i], texts[i], false);
+                    if (sw.ElapsedMilliseconds > 50 || i == list.Count - 1)
+                    {
+                        TxtStatus.Text = $"{(value ? "OCR-Korrektur wird angewendet" : "OCR-Korrektur wird entfernt")}: {i + 1:N0} / {list.Count:N0}";
+                        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                        sw.Restart();
+                    }
+                }
                 LvFiles.Items.Refresh();
                 if (_currentMeta != null && _currentMeta.Loaded) { PopulateSelectors(_currentMeta); ShowDetails(_currentMeta); RefreshNewNamePreview(_currentMeta); _ = UpdatePdfPreviewAsync(_currentMeta); }
                 UpdateStandardStatus();
                 OcrCorrectionChanged?.Invoke(this, EventArgs.Empty);
             }
+            finally { if (run == _ocrRun) System.Windows.Input.Mouse.OverrideCursor = null; }
         }
         private void MenuOcrCorrection_Click(object sender, RoutedEventArgs e) => OcrCorrection = MenuOcrCorrection.IsChecked;
 
@@ -584,6 +620,13 @@ namespace Dateiumbenenner
                 {
                     ApplyStoreRecord(x.m, rec);
                     companiesByMeta[x.i]=TextCandidates(rec.CompanyCandidates, rec.FullText);
+                    // Gespeicherter Stand ohne Firmenvorschläge (z. B. aus fehlerhaftem Lauf): Firmen neu ermitteln und nachspeichern
+                    if(companiesByMeta[x.i]!.Count==0 && string.IsNullOrWhiteSpace(rec.CompanyName) && !string.IsNullOrEmpty(rec.FullText))
+                    {
+                        try{ companiesByMeta[x.i]=ExtractCompanyNames(rec.FullText, x.m.FilePath); toSave[x.i]=true; } catch{ }
+                    }
+                    // Neue Regeln (z. B. Firmenname aus Webadresse) auch für bereits gespeicherte Belege ergänzen
+                    try{ var dn=new List<string>(); AddDomainNames(dn, rec.FullText); foreach(var c in dn) if(!companiesByMeta[x.i]!.Contains(c, StringComparer.OrdinalIgnoreCase)) companiesByMeta[x.i]!.Add(c); } catch{ }
                     storedCompany[x.i]=rec.CompanyName;
                     Interlocked.Increment(ref fromDb); Interlocked.Increment(ref fromDbLive);
                 }
@@ -602,7 +645,7 @@ namespace Dateiumbenenner
             if(loadVersion!=_loadVersion) return;
             // UI-Thread: Nummern zuordnen und Liste in Originalreihenfolge in einem Durchgang füllen
             var boundSource=LvFiles.ItemsSource; LvFiles.ItemsSource=null;
-            for(int mi=0; mi<metas.Count; mi++){ var meta=metas[mi]; AutoAssignNumbers(meta); try{ meta.CompanyCandidates.Clear(); foreach(var c in companiesByMeta[mi] ?? new List<string>()) meta.CompanyCandidates.Add(c); if(!string.IsNullOrWhiteSpace(storedCompany[mi]) && !meta.CompanyCandidates.Contains(storedCompany[mi]!)) meta.CompanyCandidates.Insert(0, storedCompany[mi]!); meta.CompanyName=storedCompany[mi] ?? meta.CompanyCandidates.FirstOrDefault(); } catch{ } meta.PropertyChanged-=Meta_CompanyChanged; meta.PropertyChanged+=Meta_CompanyChanged; _lastCompany[meta]=meta.CompanyName; _items.Add(meta); }
+            for(int mi=0; mi<metas.Count; mi++){ var meta=metas[mi]; AutoAssignNumbers(meta); try{ meta.CompanyCandidates.Clear(); foreach(var c in companiesByMeta[mi] ?? new List<string>()) meta.CompanyCandidates.Add(c); if(!string.IsNullOrWhiteSpace(storedCompany[mi]) && !meta.CompanyCandidates.Contains(storedCompany[mi]!)) meta.CompanyCandidates.Insert(0, storedCompany[mi]!); meta.CompanyName=string.IsNullOrWhiteSpace(storedCompany[mi]) ? meta.CompanyCandidates.FirstOrDefault() : storedCompany[mi]; } catch{ } meta.PropertyChanged-=Meta_CompanyChanged; meta.PropertyChanged+=Meta_CompanyChanged; _lastCompany[meta]=meta.CompanyName; _items.Add(meta); }
             LvFiles.ItemsSource=boundSource??_items;
             var newMetas=metas.Select((m,i)=>(m,i)).Where(x=>toSave[x.i]).Select(x=>(x.m, key:StoreSettingsKey(x.m.FilePath), confirmed:confirmedArr[x.i])).ToList();
             foreach(var x in metas.Select((m,i)=>(m,i)).Where(x=>confirmedArr[x.i])) _confirmedCompany.Add(x.m);
@@ -813,7 +856,13 @@ namespace Dateiumbenenner
                 else if (list.Count > 0 && HasLegalForm(list[0]) && !HasLegalForm(profile.Company) && !list[0].StartsWith(profile.Company, StringComparison.OrdinalIgnoreCase)) list.Insert(1, profile.Company);
                 else list.Insert(0, profile.Company);
             }
-            return SecureCandidates(list, fullText);
+            var secured = SecureCandidates(list, fullText);
+            // Firmenname aus Webadresse/E-Mail immer anbieten (wird sonst evtl. von Filtern entfernt)
+            var dn = new List<string>();
+            AddDomainNames(dn, fullText);
+            foreach (var d in dn)
+                if (!secured.Any(c => c.Equals(d, StringComparison.OrdinalIgnoreCase))) secured.Add(d);
+            return secured;
         }
 
         /// <summary>Absicherung: nur Namen, die im Beleg stehen; Kurzformen ("ZAPF-G") hinter den vollständigen Namen mit Rechtsform ("ZAPF GmbH").</summary>
@@ -952,6 +1001,41 @@ namespace Dateiumbenenner
         }
 
         private const int LinesPerPage = 45;
+
+        private static readonly Regex DomainRegex = new(@"(?:\bwww\s*\.\s*|@)([\p{L}\d][\p{L}\d-]{2,})\s*\.\s*(?:de|com|at|ch|eu|net|org|info|biz)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly HashSet<string> GenericDomains = new(StringComparer.OrdinalIgnoreCase) { "gmail", "gmx", "web", "t-online", "outlook", "hotmail", "yahoo", "icloud", "online", "freenet", "posteo", "mail", "email" };
+
+        /// <summary>Firmenwort aus Webadresse/E-Mail (www.debeka.de, info@debeka.de → debeka); eigene Firma ausgenommen.</summary>
+        private static IEnumerable<string> DomainWords(string? fullText)
+        {
+            if (string.IsNullOrEmpty(fullText)) yield break;
+            var own = Dateiumbenenner.Engine.OwnCompany.Current;
+            foreach (var w in DomainRegex.Matches(fullText).Select(m => m.Groups[1].Value).Distinct(StringComparer.OrdinalIgnoreCase))
+                if (!GenericDomains.Contains(w) && !own.Matches(w)) yield return w;
+        }
+
+        /// <summary>
+        /// Webadresse als Firmenhinweis: steht das Domainwort auch im Fließtext ("VGB (Debeka Wohngebäudeversicherung"),
+        /// wird dieser Name samt folgender großgeschriebener Wörter übernommen, sonst das Domainwort selbst ("Debeka").
+        /// </summary>
+        private static void AddDomainNames(List<string> list, string? fullText)
+        {
+            if (string.IsNullOrEmpty(fullText)) return;
+            foreach (var d in DomainWords(fullText))
+            {
+                var rx = new Regex(@"(?<![\p{L}\d.@/-])" + Regex.Escape(d) + @"(?![\p{L}\d]*\.(?:de|com|at|ch|eu|net|org|info|biz)\b)(?:[ \t]+\p{Lu}[\p{L}\-]+){0,3}", RegexOptions.IgnoreCase);
+                var found = rx.Matches(fullText).Select(m => m.Value.Trim()).Where(v => v.Length >= d.Length && char.IsUpper(v[0])).ToList();
+                var plain = d.All(char.IsLower) ? char.ToUpper(d[0]) + d[1..] : d;
+                var tld = DomainRegex.Matches(fullText).Where(m => m.Groups[1].Value.Equals(d, StringComparison.OrdinalIgnoreCase))
+                    .Select(m => Regex.Match(m.Value, @"\.\s*(\w+)$").Groups[1].Value.ToLowerInvariant()).FirstOrDefault() ?? "de";
+                // Varianten: mit Zusatz ("Debeka Wohngebäudeversicherung"), ohne ("Debeka") und Webadresse ("debeka.de")
+                var variants = found.Distinct(StringComparer.OrdinalIgnoreCase).OrderByDescending(v => v.Length).ToList();
+                variants.Add(plain);
+                variants.Add(d.ToLowerInvariant() + "." + tld);
+                foreach (var v in variants)
+                    if (!list.Contains(v, StringComparer.OrdinalIgnoreCase)) list.Add(v);
+            }
+        }
 
         /// <summary>Kombiniert mehrere Faktoren zu einer Punktzahl; Reihenfolge aus dem Adress-Ranking fließt mit ein.</summary>
         private static List<string> ScoreCompanies(List<string> list, string? fullText, string? pdfPath = null)
@@ -2038,7 +2122,8 @@ namespace Dateiumbenenner
         private string ApplyOcrHeuristics(string input)=> string.IsNullOrWhiteSpace(input)? input : OcrTextCorrector.Fix(input);
         private string? ExtractDateFromFileName(string fileName){ var match=Regex.Match(fileName,@"(\d{1,4})[-_.](\d{1,2})[-_.](\d{1,4})"); if(match.Success){ var year=match.Groups[1].Value; var month=match.Groups[2].Value; var day=match.Groups[3].Value; year=year.Length==2?"20"+year:year; month=month.PadLeft(2,'0'); day=day.PadLeft(2,'0'); return $"{day}.{month}.{year}"; } return null; }
         private string NormalizeDate(string dateStr){ if(string.IsNullOrWhiteSpace(dateStr)) return dateStr; dateStr=Regex.Replace(dateStr.Trim(),@"\s+"," "); if(DateTime.TryParseExact(dateStr,DateFormats,DeCulture,DateTimeStyles.AllowWhiteSpaces,out var dt)) return dt.ToString("dd.MM.yyyy",DeCulture); if(DateTime.TryParse(dateStr,DeCulture,DateTimeStyles.AllowWhiteSpaces,out dt)) return dt.ToString("dd.MM.yyyy",DeCulture); return dateStr; }
-        private void ReapplyOcrAndReextract(DocumentMetadata meta){ if(meta==null||!meta.Loaded) return; meta.OriginalFullText??=meta.FullText; var source=meta.OriginalFullText??meta.FullText; if(string.IsNullOrEmpty(source)) return; meta.FullText=_enableOcrCorrection? ApplyOcrHeuristics(source): source; meta.NumberCandidates.Clear(); meta.DateCandidates.Clear(); if(!meta.NumberManuallySet){ meta.SelectedNumber=null; meta.InvoiceNumber=null; meta.DocumentNumber=null; } if(!meta.DateManuallySet){ meta.SelectedDate=null; meta.Date=null; } meta.DocumentType=null; var flag=meta.DocTypeManuallySet; meta.DocTypeManuallySet=false; if(!string.IsNullOrEmpty(meta.FullText)) ExtractCandidates(meta); meta.DocTypeManuallySet=flag; AutoAssignNumbers(meta); PopulateSelectors(meta); ShowDetails(meta); RefreshNewNamePreview(meta); LvFiles.Items.Refresh(); }
+        private void ReapplyOcrAndReextract(DocumentMetadata meta) => ReapplyOcrAndReextract(meta, null, true);
+        private void ReapplyOcrAndReextract(DocumentMetadata meta, string? prepared, bool refreshUi){ if(meta==null||!meta.Loaded) return; meta.OriginalFullText??=meta.FullText; var source=meta.OriginalFullText??meta.FullText; if(string.IsNullOrEmpty(source)) return; meta.FullText=prepared ?? (_enableOcrCorrection? ApplyOcrHeuristics(source): source); meta.NumberCandidates.Clear(); meta.DateCandidates.Clear(); if(!meta.NumberManuallySet){ meta.SelectedNumber=null; meta.InvoiceNumber=null; meta.DocumentNumber=null; } if(!meta.DateManuallySet){ meta.SelectedDate=null; meta.Date=null; } meta.DocumentType=null; var flag=meta.DocTypeManuallySet; meta.DocTypeManuallySet=false; if(!string.IsNullOrEmpty(meta.FullText)) ExtractCandidates(meta); meta.DocTypeManuallySet=flag; AutoAssignNumbers(meta); if(!refreshUi) return; PopulateSelectors(meta); ShowDetails(meta); RefreshNewNamePreview(meta); LvFiles.Items.Refresh(); }
         private string? FindNumberNearDocType(string fullText,string docType,int minDigits){ if(!_docTypeNumberKeywords.TryGetValue(docType,out var keywords)||keywords.Length==0) return null; var pattern="\\b("+string.Join("|",keywords.Select(Regex.Escape))+")\\b"; var keyMatches=Regex.Matches(fullText,pattern,RegexOptions.IgnoreCase); if(keyMatches.Count==0) return null; foreach(Match km in keyMatches){ if(_docTypeNumberSearchForward){ int startIndex=km.Index+km.Length; if(startIndex>=fullText.Length) continue; var sliceLen=Math.Min(1000,fullText.Length-startIndex); var slice=fullText.Substring(startIndex,sliceLen); var tokenMatches=Regex.Matches(slice,@"\S+"); for(int t=0;t<Math.Min(_docTypeNumberSteps,tokenMatches.Count);t++){ var tok=tokenMatches[t].Value.Trim(); if(IsPotentialEnvironmentNumber(tok,minDigits)) return tok; var tmIndex=tokenMatches[t].Index; var m=_environmentNumberRegex.Match(slice,tmIndex); if(m.Success && IsPotentialEnvironmentNumber(m.Groups[1].Value,minDigits)) return m.Groups[1].Value; } var mAll=_environmentNumberRegex.Match(slice); if(mAll.Success && IsPotentialEnvironmentNumber(mAll.Groups[1].Value,minDigits)) return mAll.Groups[1].Value; } else { int endIndex=km.Index; if(endIndex<=0) continue; var sliceStart=Math.Max(0,endIndex-1000); var slice=fullText.Substring(sliceStart,endIndex-sliceStart); var tokenMatches=Regex.Matches(slice,@"\S+"); for(int t=1;t<=Math.Min(_docTypeNumberSteps,tokenMatches.Count);t++){ var idx=tokenMatches.Count-t; var tok=tokenMatches[idx].Value.Trim(); if(IsPotentialEnvironmentNumber(tok,minDigits)) return tok; var tmIndex=tokenMatches[idx].Index; var m=_environmentNumberRegex.Match(slice,tmIndex); if(m.Success && IsPotentialEnvironmentNumber(m.Groups[1].Value,minDigits)) return m.Groups[1].Value; } var all=_environmentNumberRegex.Matches(slice); if(all.Count>0){ var last=all.Cast<Match>().Last(); if(IsPotentialEnvironmentNumber(last.Groups[1].Value,minDigits)) return last.Groups[1].Value; } } } return null; }
         private void ReevaluateNumbersAfterDocTypeEnvChange(){ foreach(var item in _items.Where(m=>m.Loaded)){ if(!item.NumberManuallySet){ var appropriate=GetAppropriateNumber(item,item.DocumentType); if(!string.IsNullOrEmpty(appropriate)){ item.SelectedNumber=appropriate; AutoAssignNumbers(item); } } } if(_currentMeta is {Loaded:true} cur){ PopulateSelectors(cur); AutoAssignNumbers(cur); ShowDetails(cur); RefreshNewNamePreview(cur); } LvFiles.Items.Refresh(); UpdateStandardStatus(); }
         private bool IsPotentialEnvironmentNumber(string text,int minDigits){ if(string.IsNullOrWhiteSpace(text)) return false; if(!_environmentNumberRegex.IsMatch(text)) return false; var digits=new string(text.Where(char.IsDigit).ToArray()); if(digits.Length<minDigits) return false; return IsValidNumber(text); }
