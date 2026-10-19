@@ -146,4 +146,177 @@
         <Setter Property="BorderThickness" Value="0,0,1,1"/>
         <Setter Property="Padding" Value="5,3"/>
     </Style>
+
+    <!-- Bildlaufleisten im Luna-Stil (blaue Pfeiltasten und Schieber, helle Leiste) -->
+    <LinearGradientBrush x:Key="XpScrollTrackV" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#EEEDE5" Offset="0"/>
+        <GradientStop Color="#FBFBF8" Offset="0.35"/>
+        <GradientStop Color="#F5F4EF" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="XpScrollTrackH" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#EEEDE5" Offset="0"/>
+        <GradientStop Color="#FBFBF8" Offset="0.35"/>
+        <GradientStop Color="#F5F4EF" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="XpScrollFaceV" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#E3EBFE" Offset="0"/>
+        <GradientStop Color="#CAD9FC" Offset="0.5"/>
+        <GradientStop Color="#B4C8F6" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="XpScrollFaceH" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#E3EBFE" Offset="0"/>
+        <GradientStop Color="#CAD9FC" Offset="0.5"/>
+        <GradientStop Color="#B4C8F6" Offset="1"/>
+    </LinearGradientBrush>
+    <Geometry x:Key="XpArrowUp">M 0,4 L 3.5,0.5 L 7,4</Geometry>
+    <Geometry x:Key="XpArrowDown">M 0,0.5 L 3.5,4 L 7,0.5</Geometry>
+    <Geometry x:Key="XpArrowLeft">M 4,0 L 0.5,3.5 L 4,7</Geometry>
+    <Geometry x:Key="XpArrowRight">M 0.5,0 L 4,3.5 L 0.5,7</Geometry>
+
+    <Style x:Key="XpScrollArrow" TargetType="RepeatButton">
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border x:Name="Outer" CornerRadius="3" BorderThickness="1" BorderBrush="#B1C4F2" Margin="0,0,0,0" SnapsToDevicePixels="True">
+                        <Grid>
+                            <Border CornerRadius="2" BorderThickness="1" BorderBrush="#F7FAFF" Background="{TemplateBinding Background}"/>
+                            <Border x:Name="Overlay" CornerRadius="2" Background="Transparent"/>
+                            <Path x:Name="Glyph" Data="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Stroke="#4D6185" StrokeThickness="2"
+                                  StrokeStartLineCap="Square" StrokeEndLineCap="Square" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Overlay" Property="Background" Value="#55FFFFFF"/>
+                            <Setter TargetName="Outer" Property="BorderBrush" Value="#98B1EC"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Overlay" Property="Background" Value="#506E8EEB"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="XpScrollPage" TargetType="RepeatButton">
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Rectangle Fill="Transparent"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="XpScrollThumb" TargetType="Thumb">
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border x:Name="Outer" CornerRadius="3" BorderThickness="1" BorderBrush="#B1C4F2" SnapsToDevicePixels="True">
+                        <Grid ClipToBounds="True">
+                            <Border CornerRadius="2" BorderThickness="1" BorderBrush="#F7FAFF" Background="{TemplateBinding Background}"/>
+                            <Border x:Name="Overlay" CornerRadius="2" Background="Transparent"/>
+                            <ContentPresenter Content="{TemplateBinding Tag}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Overlay" Property="Background" Value="#55FFFFFF"/>
+                            <Setter TargetName="Outer" Property="BorderBrush" Value="#98B1EC"/>
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Overlay" Property="Background" Value="#506E8EEB"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <ControlTemplate x:Key="XpVScrollBar" TargetType="ScrollBar">
+        <Grid Background="{StaticResource XpScrollTrackV}" SnapsToDevicePixels="True">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="17"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="17"/>
+            </Grid.RowDefinitions>
+            <RepeatButton Grid.Row="0" Style="{StaticResource XpScrollArrow}" Background="{StaticResource XpScrollFaceV}" Tag="{StaticResource XpArrowUp}" Command="ScrollBar.LineUpCommand"/>
+            <Track x:Name="PART_Track" Grid.Row="1" IsDirectionReversed="True">
+                <Track.DecreaseRepeatButton>
+                    <RepeatButton Style="{StaticResource XpScrollPage}" Command="ScrollBar.PageUpCommand"/>
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                    <Thumb Style="{StaticResource XpScrollThumb}" Background="{StaticResource XpScrollFaceV}">
+                        <Thumb.Tag>
+                            <StackPanel>
+                                <Rectangle Width="7" Height="1" Fill="#EEF4FE"/><Rectangle Width="7" Height="1" Fill="#8CB0F8"/>
+                                <Rectangle Width="7" Height="1" Fill="#EEF4FE"/><Rectangle Width="7" Height="1" Fill="#8CB0F8"/>
+                                <Rectangle Width="7" Height="1" Fill="#EEF4FE"/><Rectangle Width="7" Height="1" Fill="#8CB0F8"/>
+                                <Rectangle Width="7" Height="1" Fill="#EEF4FE"/><Rectangle Width="7" Height="1" Fill="#8CB0F8"/>
+                            </StackPanel>
+                        </Thumb.Tag>
+                    </Thumb>
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                    <RepeatButton Style="{StaticResource XpScrollPage}" Command="ScrollBar.PageDownCommand"/>
+                </Track.IncreaseRepeatButton>
+            </Track>
+            <RepeatButton Grid.Row="2" Style="{StaticResource XpScrollArrow}" Background="{StaticResource XpScrollFaceV}" Tag="{StaticResource XpArrowDown}" Command="ScrollBar.LineDownCommand"/>
+        </Grid>
+    </ControlTemplate>
+    <ControlTemplate x:Key="XpHScrollBar" TargetType="ScrollBar">
+        <Grid Background="{StaticResource XpScrollTrackH}" SnapsToDevicePixels="True">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="17"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="17"/>
+            </Grid.ColumnDefinitions>
+            <RepeatButton Grid.Column="0" Style="{StaticResource XpScrollArrow}" Background="{StaticResource XpScrollFaceH}" Tag="{StaticResource XpArrowLeft}" Command="ScrollBar.LineLeftCommand"/>
+            <Track x:Name="PART_Track" Grid.Column="1">
+                <Track.DecreaseRepeatButton>
+                    <RepeatButton Style="{StaticResource XpScrollPage}" Command="ScrollBar.PageLeftCommand"/>
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                    <Thumb Style="{StaticResource XpScrollThumb}" Background="{StaticResource XpScrollFaceH}">
+                        <Thumb.Tag>
+                            <StackPanel Orientation="Horizontal">
+                                <Rectangle Width="1" Height="7" Fill="#EEF4FE"/><Rectangle Width="1" Height="7" Fill="#8CB0F8"/>
+                                <Rectangle Width="1" Height="7" Fill="#EEF4FE"/><Rectangle Width="1" Height="7" Fill="#8CB0F8"/>
+                                <Rectangle Width="1" Height="7" Fill="#EEF4FE"/><Rectangle Width="1" Height="7" Fill="#8CB0F8"/>
+                                <Rectangle Width="1" Height="7" Fill="#EEF4FE"/><Rectangle Width="1" Height="7" Fill="#8CB0F8"/>
+                            </StackPanel>
+                        </Thumb.Tag>
+                    </Thumb>
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                    <RepeatButton Style="{StaticResource XpScrollPage}" Command="ScrollBar.PageRightCommand"/>
+                </Track.IncreaseRepeatButton>
+            </Track>
+            <RepeatButton Grid.Column="2" Style="{StaticResource XpScrollArrow}" Background="{StaticResource XpScrollFaceH}" Tag="{StaticResource XpArrowRight}" Command="ScrollBar.LineRightCommand"/>
+        </Grid>
+    </ControlTemplate>
+    <Style TargetType="ScrollBar">
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Width" Value="17"/>
+        <Setter Property="MinWidth" Value="17"/>
+        <Setter Property="Height" Value="Auto"/>
+        <Setter Property="Template" Value="{StaticResource XpVScrollBar}"/>
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto"/>
+                <Setter Property="MinWidth" Value="0"/>
+                <Setter Property="Height" Value="17"/>
+                <Setter Property="MinHeight" Value="17"/>
+                <Setter Property="Template" Value="{StaticResource XpHScrollBar}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
 </ResourceDictionary>

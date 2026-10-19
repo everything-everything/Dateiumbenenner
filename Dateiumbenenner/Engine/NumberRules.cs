@@ -219,9 +219,13 @@ namespace Dateiumbenenner.Engine
                 {
                     try
                     {
-                        // Bevorzugte Position: starker Hinweis, aber Muster-Treffer an anderer Stelle bleiben möglich
-                        foreach (var v in NearKeyword(r, text))
-                            number.Add(v, 50 + r.Priority * spec * Math.Max(0.3, Match(r, v)), "Begriff " + r.Keyword!.Trim());
+                        // Bevorzugte Position: zusätzlich zum Muster-Treffer (gleich aufgebaute Nummern an anderer Stelle
+                        // bleiben möglich, liegen aber dahinter)
+                        foreach (var v in NearKeyword(r, text).Distinct(StringComparer.OrdinalIgnoreCase))
+                        {
+                            var existing = number.Candidates.FirstOrDefault(c => c.Value.Equals(v, StringComparison.OrdinalIgnoreCase))?.Score ?? 0;
+                            number.Add(v, Math.Max(existing, 50 + r.Priority * spec * Math.Max(0.3, Match(r, v))) + 20, "Begriff " + r.Keyword!.Trim());
+                        }
                     }
                     catch { }
                 }
@@ -238,12 +242,14 @@ namespace Dateiumbenenner.Engine
                         catch { }
                     }
             }
-            if (rules.Count == 0) return;
-            foreach (var c in number.Candidates.ToList())
-            {
-                double bonus = Score(company, docType, c.Value);
-                if (bonus > 0) number.Add(c.Value, c.Score + bonus, c.Source);
-            }
+            if (rules.Count > 0)
+                foreach (var c in number.Candidates.ToList())
+                {
+                    double bonus = Score(company, docType, c.Value);
+                    if (bonus > 0) number.Add(c.Value, c.Score + bonus, c.Source);
+                }
+            // Gelernte Fundstelle (Begriff davor/dahinter, wievielte gleichartige Nummer, Lage) entscheidet zwischen gleich aufgebauten Nummern
+            ValueLocationStore.Apply(number, ValueKind.Nummer, company, docType, text);
         }
 
         /// <summary>Werte an der bevorzugten Begriffsposition (gleiche Zeile oder Folgezeile).</summary>
@@ -272,12 +278,13 @@ namespace Dateiumbenenner.Engine
         /// <summary>Bester Wert aus Kandidaten und Text nach Regeln (null, wenn keine Regel passt).</summary>
         public static string? Best(string? company, string? docType, IEnumerable<string?> candidates, string? text)
         {
-            if (RulesFor(company, docType).Count == 0) return null;
+            if (RulesFor(company, docType).Count == 0 && !ValueLocationStore.Has(ValueKind.Nummer, company, docType)) return null;
             var f = new Field();
             int n = 0;
             foreach (var c in candidates) f.Add(c, Math.Max(0, 1 - 0.01 * n++), "Kandidat");
             Apply(f, company, docType, text);
-            var best = f.Candidates.Select(c => (c.Value, S: Score(company, docType, c.Value), T: c.Score)).Where(x => x.S > 0).OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault();
+            var best = f.Candidates.Select(c => (c.Value, S: Score(company, docType, c.Value), T: c.Score, L: c.Source == "Fundstelle"))
+                .Where(x => x.S > 0 || x.L).OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault();
             return best.Value;
         }
 

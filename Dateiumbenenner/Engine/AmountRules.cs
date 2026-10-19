@@ -133,6 +133,9 @@ namespace Dateiumbenenner.Engine
                 for (int i = 0; i < found.Count; i++)
                     amount.Add(found[i], 50 + r.Priority * spec - i * 0.01, "Begriff " + r.Keyword.Trim());
             }
+
+            // Gelernte Fundstelle (Firma + Belegart): Begriff davor/dahinter, wievielter Betrag, Lage im Beleg
+            ValueLocationStore.Apply(amount, ValueKind.Betrag, company, docType, text);
         }
 
         /// <summary>Betr\u00E4ge beim Begriff: rechts daneben (gleiche Spalte bis zum n\u00E4chsten Begriff) bzw. in den Folgezeilen unter der Begriffsspalte.</summary>

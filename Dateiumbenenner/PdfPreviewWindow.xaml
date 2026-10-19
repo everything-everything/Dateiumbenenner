@@ -29,17 +29,28 @@
             <wv2:WebView2 x:Name="PdfWebView" Visibility="Collapsed"/>
             <Image x:Name="ImgPdfPreview" Stretch="Uniform" Visibility="Collapsed"/>
             <ScrollViewer x:Name="PdfTextScroll" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
-                <TextBox x:Name="TxtPdfFallback" 
-                         IsReadOnly="True" 
-                         TextWrapping="Wrap" 
-                         AcceptsReturn="True"
-                         BorderThickness="0"
-                         Background="Transparent"
-                         FontFamily="Consolas"
-                         FontSize="12"
-                         IsInactiveSelectionHighlightEnabled="True"
-                                                  SelectionBrush="Yellow"
-                                                  SelectionOpacity="0.5"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Background="#F3F3F3" BorderBrush="#D8D8D8" BorderThickness="0,0,1,0" Margin="0,0,4,0">
+                        <Canvas x:Name="LineGutter" Width="30" IsHitTestVisible="False" ClipToBounds="True"/>
+                    </Border>
+                    <Canvas x:Name="MarkLayer" Grid.Column="1" IsHitTestVisible="False"/>
+                    <TextBox x:Name="TxtPdfFallback" Grid.Column="1"
+                             SizeChanged="TxtPdfFallback_SizeChanged"
+                             IsReadOnly="True"
+                             TextWrapping="Wrap"
+                             AcceptsReturn="True"
+                             BorderThickness="0"
+                             Background="Transparent"
+                             FontFamily="Consolas"
+                             FontSize="12"
+                             IsInactiveSelectionHighlightEnabled="True"
+                             SelectionBrush="Yellow"
+                             SelectionOpacity="0.5"/>
+                </Grid>
             </ScrollViewer>
         </Grid>
     </Grid>

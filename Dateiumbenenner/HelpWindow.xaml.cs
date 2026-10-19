@@ -714,7 +714,8 @@ Jede Erkennungsregel ist ein Parameter-Element. Das INI-Schlagwort steht als Att
 * Text vor dem Muster: Erkennungsmerkmal im Beleg
 * (+1Z): Wert steht eine Zeile unter dem Merkmal
 * (Nummer(...)): Nummernmaske, siehe [[nummernregeln|Nummernmuster]]
-* (Datum), (Betrag), (Text): weitere Feldtypen
+* (Datum), (Betrag): weitere Feldtypen
+* Feste Werte (z. B. Belegart ""Rechnung"", Firmenname): Pattern leer, Wert im Unterelement Inhalt – wie im Archivprogramm. Ein Feldtyp (Text) existiert dort nicht; ältere Dateien mit (Text) wandelt der XML-Editor beim Öffnen um.
 
 Zusätzlich werden SchlagwortGruen und SchlagwortDatev als Attribute des Wurzelelements Parameters geschrieben."),
 

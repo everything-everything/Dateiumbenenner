@@ -217,6 +217,7 @@ namespace Dateiumbenenner.Engine
 
         private static void ConvertAll(byte[]? from, byte[]? to)
         {
+            DocumentStore.Flush();
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             foreach (var dir in ProfileDirectories())
             {

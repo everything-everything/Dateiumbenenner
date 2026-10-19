@@ -246,6 +246,81 @@ namespace Dateiumbenenner
             }), System.Windows.Threading.DispatcherPriority.Background);
         }
 
+        private string? _docPath;
+        private string? _docText;
+        private PdfPreviewWindow? _preview;
+        private readonly List<ValueHit> _hits = new();
+
+        /// <summary>Betrag-Reiter vorwählen.</summary>
+        public void ShowAmountTab() => TabAmount.IsSelected = true;
+
+        /// <summary>Ausgewählten Beleg anzeigen: Vorschau (PDF/TXT) und Fundstellen von Nummer, Datum und Betrag.</summary>
+        public void SetDocument(string? filePath, string? fullText, string? number, string? date, string? amount)
+        {
+            _docPath = filePath;
+            _docText = fullText;
+            if (string.IsNullOrEmpty(filePath)) { PnlDocument.Visibility = Visibility.Collapsed; return; }
+            PnlDocument.Visibility = Visibility.Visible;
+            TxtDocument.Text = "Beleg: " + System.IO.Path.GetFileName(filePath);
+            TxtDocument.ToolTip = filePath;
+            PnlSources.Children.Clear();
+            _hits.Clear();
+            foreach (var (name, field, value) in new[] { ("Nummer", SourceField.Nummer, number), ("Datum", SourceField.Datum, date), ("Betrag", SourceField.Betrag, amount) })
+            {
+                if (string.IsNullOrWhiteSpace(value)) continue;
+                var src = ValueSources.Locate(field, fullText, value);
+                var tb = new TextBlock { Margin = new Thickness(0, 1, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+                tb.Inlines.Add(new System.Windows.Documents.Run($"{name} {value}: ") { FontWeight = FontWeights.SemiBold });
+                var hint = new System.Windows.Documents.Run(src?.Describe() ?? "im Text nicht gefunden") { Foreground = src != null ? HintBrush : System.Windows.Media.Brushes.DimGray };
+                tb.Inlines.Add(hint);
+                if (src != null)
+                {
+                    _hits.Add(src);
+                    tb.ToolTip = $"Zeile {src.Line}: {src.LineText}\n(Klicken: Fundstelle in der Vorschau zeigen)";
+                    tb.Cursor = System.Windows.Input.Cursors.Hand;
+                    tb.MouseEnter += (_, _) => { hint.Foreground = HintHoverBrush; hint.TextDecorations = TextDecorations.Underline; };
+                    tb.MouseLeave += (_, _) => { hint.Foreground = HintBrush; hint.TextDecorations = null; };
+                    tb.MouseLeftButtonUp += (_, _) => ShowPreview(src);
+                }
+                PnlSources.Children.Add(tb);
+            }
+        }
+
+        private static readonly System.Windows.Media.Brush HintBrush = Freeze(new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x3A, 0x6E, 0xA5)));
+        private static readonly System.Windows.Media.Brush HintHoverBrush = Freeze(new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x1F, 0x4E, 0x8C)));
+        private static System.Windows.Media.Brush Freeze(System.Windows.Media.SolidColorBrush b) { b.Freeze(); return b; }
+
+        private void BtnPreview_Click(object sender, RoutedEventArgs e) => ShowPreview(null);
+
+        private void ShowPreview(ValueHit? at)
+        {
+            if (string.IsNullOrEmpty(_docPath)) return;
+            try
+            {
+                // Eigenes Fenster: Fenster, die vor diesem Dialog offen waren, sind währenddessen gesperrt
+                if (_preview == null)
+                {
+                    _preview = new PdfPreviewWindow { Owner = this };
+                    _preview.Closed += (_, _) => _preview = null;
+                    _preview.Show();
+                }
+                // direkt in der Text-Ansicht, alle Fundstellen markiert, zur gewählten scrollen
+                var marks = _hits.Select(h => (h.Index, h.Length, h.LabelIndex, h.LabelLength)).ToList();
+                _preview.ShowDocumentText(_docPath, _docText, marks, at == null ? 0 : Math.Max(0, _hits.IndexOf(at)));
+                _preview.Activate();
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(this, "Vorschau nicht m\u00F6glich: " + ex.Message, Title);
+            }
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            try { _preview?.Close(); } catch { }
+            base.OnClosed(e);
+        }
+
         private bool SaveAll(bool askEmpty = true)
         {
             GridRules.CommitEdit(DataGridEditingUnit.Row, true);

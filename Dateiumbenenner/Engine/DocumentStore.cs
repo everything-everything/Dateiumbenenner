@@ -53,6 +53,10 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
             var c = new SqliteConnection(_connString);
             c.Open();
             ApplyKey(c, Dateiumbenenner.Engine.SecureStorage.DatabaseKey);
+            // Im WAL-Modus sicher und deutlich schneller: kein Warten auf die Platte bei jedem Commit
+            using var p = c.CreateCommand();
+            p.CommandText = "PRAGMA synchronous=NORMAL;";
+            p.ExecuteNonQuery();
             return c;
         }
 
@@ -109,18 +113,30 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
             public string? Street { get; set; }
             public string? Zip { get; set; }
             public string? City { get; set; }
+            /// <summary>Adresse per „Firma übertragen“ bestätigt (auch leer) – nicht neu ermitteln.</summary>
+            public bool AddressManuallySet { get; set; }
             public bool NumberManuallySet { get; set; }
             public bool DateManuallySet { get; set; }
             public bool DocTypeManuallySet { get; set; }
             public bool CompanyConfirmed { get; set; }
+            /// <summary>Dateinamen-Aufbau der Datei (Trennzeichen, Segment, Einfügepositionen), z. B. aus einer übernommenen Vorlage.</summary>
+            public Dateiumbenenner.Engine.DocTemplate? Layout { get; set; }
+            /// <summary>Vorlage, deren Übernahme für diese Datei abgelehnt wurde (nicht erneut fragen).</summary>
+            public string? TemplateDeclined { get; set; }
         }
+
+        /// <summary>Bereits berechnete Teil-Hashes (gültig, solange Größe und Änderungszeit gleich sind).</summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Size, long Ticks, string Hash)> StampCache = new(StringComparer.OrdinalIgnoreCase);
 
         public static string Stamp(string path, out long size, out long ticks)
         {
             var fi = new FileInfo(path);
             size = fi.Length;
             ticks = fi.LastWriteTimeUtc.Ticks;
-            return PartialHash(path, size);
+            if (StampCache.TryGetValue(fi.FullName, out var s) && s.Size == size && s.Ticks == ticks) return s.Hash;
+            var hash = PartialHash(path, size);
+            StampCache[fi.FullName] = (size, ticks, hash);
+            return hash;
         }
 
         private static string PartialHash(string path, long length)
@@ -149,39 +165,54 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
             upToDate = false;
             try
             {
-                var fi = new FileInfo(path);
+                var full = Path.GetFullPath(path);
+                // Noch nicht geschriebener Stand hat Vorrang (wird mit der aktuellen Datei geschrieben)
+                PendingDoc? pd;
+                lock (PendingSync) PendingDocs.TryGetValue(full, out pd);
+                if (pd != null)
+                {
+                    upToDate = pd.SettingsKey == settingsKey;
+                    return JsonSerializer.Deserialize(pd.Data, StoreJsonContext.Default.Record);
+                }
+                var fi = new FileInfo(full);
                 long size = fi.Length, ticks = fi.LastWriteTimeUtc.Ticks;
-                string? hash = null;
+                if (!TakeDoc(full, out var row))
+                {
+                    lock (Sync)
+                    {
+                        _ = ConnectionString;
+                        using var c = Open();
+                        using var cmd = c.CreateCommand();
+                        cmd.CommandText = "SELECT Size, Ticks, ContentHash, SettingsKey, ExtractorVersion, Data FROM Documents WHERE Path=$p";
+                        cmd.Parameters.AddWithValue("$p", full);
+                        using var r = cmd.ExecuteReader();
+                        row = r.Read() ? new DocRow(r.GetInt64(0), r.GetInt64(1), r.GetString(2), r.GetString(3), r.GetInt32(4), r.GetString(5)) : null;
+                    }
+                }
+                if (row != null)
+                {
+                    var rec = JsonSerializer.Deserialize(row.Data, StoreJsonContext.Default.Record);
+                    bool same = row.Size == size && row.SettingsKey == settingsKey && row.Version == ExtractorVersion;
+                    // Schnellpfad: Größe + Änderungszeit gleich -> kein Lesen der Datei nötig
+                    if (row.Size == size && row.Ticks == ticks) StampCache[full] = (size, ticks, row.Hash);
+                    if (same && row.Ticks == ticks) { upToDate = true; return rec; }
+                    upToDate = same && row.Hash == Stamp(full, out _, out _);
+                    return rec;
+                }
+                var hash = Stamp(full, out _, out _);
                 lock (Sync)
                 {
                     _ = ConnectionString;
                     using var c = Open();
                     using var cmd = c.CreateCommand();
-                    cmd.CommandText = "SELECT Size, Ticks, ContentHash, SettingsKey, ExtractorVersion, Data FROM Documents WHERE Path=$p";
-                    cmd.Parameters.AddWithValue("$p", Path.GetFullPath(path));
-                    using (var r = cmd.ExecuteReader())
-                    {
-                        if (r.Read())
-                        {
-                            var rec = JsonSerializer.Deserialize<Record>(r.GetString(5));
-                            bool same = r.GetInt64(0) == size && r.GetString(3) == settingsKey && r.GetInt32(4) == ExtractorVersion;
-                            // Schnellpfad: Größe + Änderungszeit gleich -> kein Lesen der Datei nötig
-                            if (same && r.GetInt64(1) == ticks) { upToDate = true; return rec; }
-                            hash ??= PartialHash(path, size);
-                            upToDate = same && r.GetString(2) == hash;
-                            return rec;
-                        }
-                    }
-                    hash ??= PartialHash(path, size);
                     // Datei verschoben/umbenannt: gleicher Inhalt unter anderem Pfad
                     cmd.CommandText = "SELECT SettingsKey, ExtractorVersion, Data FROM Documents WHERE ContentHash=$h AND Size=$s ORDER BY Updated DESC LIMIT 1";
-                    cmd.Parameters.Clear();
                     cmd.Parameters.AddWithValue("$h", hash);
                     cmd.Parameters.AddWithValue("$s", size);
                     using var r2 = cmd.ExecuteReader();
                     if (!r2.Read()) return null;
                     upToDate = r2.GetString(0) == settingsKey && r2.GetInt32(1) == ExtractorVersion;
-                    return JsonSerializer.Deserialize<Record>(r2.GetString(2));
+                    return JsonSerializer.Deserialize(r2.GetString(2), StoreJsonContext.Default.Record);
                 }
             }
             catch
@@ -195,37 +226,98 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
             try
             {
                 if (!File.Exists(path)) return;
-                var hash = Stamp(path, out var size, out var ticks);
-                lock (Sync)
-                {
-                    _ = ConnectionString;
-                    using var c = Open();
-                    using var cmd = c.CreateCommand();
-                    cmd.CommandText = @"INSERT INTO Documents(Path,Size,Ticks,ContentHash,SettingsKey,ExtractorVersion,Data,Updated)
-VALUES($p,$s,$t,$h,$k,$v,$d,$u)
-ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,ExtractorVersion=$v,Data=$d,Updated=$u";
-                    cmd.Parameters.AddWithValue("$p", Path.GetFullPath(path));
-                    cmd.Parameters.AddWithValue("$s", size);
-                    cmd.Parameters.AddWithValue("$t", ticks);
-                    cmd.Parameters.AddWithValue("$h", hash);
-                    cmd.Parameters.AddWithValue("$k", settingsKey);
-                    cmd.Parameters.AddWithValue("$v", ExtractorVersion);
-                    cmd.Parameters.AddWithValue("$d", JsonSerializer.Serialize(rec));
-                    cmd.Parameters.AddWithValue("$u", DateTime.UtcNow.ToString("O"));
-                    cmd.ExecuteNonQuery();
-                    if (EnsureFts(c))
-                    {
-                        using var f = c.CreateCommand();
-                        f.CommandText = "DELETE FROM DocText WHERE Path=$p; INSERT INTO DocText(Path,Text) VALUES($p,$t)";
-                        f.Parameters.AddWithValue("$p", Path.GetFullPath(path));
-                        f.Parameters.AddWithValue("$t", SearchText(rec));
-                        f.ExecuteNonQuery();
-                    }
-                }
+                var full = Path.GetFullPath(path);
+                var doc = new PendingDoc(full, settingsKey, JsonSerializer.Serialize(rec, StoreJsonContext.Default.Record), SearchText(rec));
+                lock (PendingSync) PendingDocs[full] = doc;
+                StartFlusher();
             }
             catch
             {
             }
+        }
+
+        private sealed record PendingDoc(string FullPath, string SettingsKey, string Data, string Text);
+        private static readonly Dictionary<string, PendingDoc> PendingDocs = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Wartende Belegstände gebündelt schreiben (Datensatz + Volltextindex in einer Transaktion je Block).</summary>
+        private static void FlushDocuments()
+        {
+            List<PendingDoc> batch;
+            lock (PendingSync) batch = PendingDocs.Values.ToList();
+            foreach (var chunk in batch.Chunk(500))
+            {
+                var rows = new List<(PendingDoc D, string Hash, long Size, long Ticks)>();
+                foreach (var d in chunk)
+                {
+                    try { if (File.Exists(d.FullPath)) rows.Add((d, Stamp(d.FullPath, out var size, out var ticks), size, ticks)); }
+                    catch { }
+                }
+                try
+                {
+                    lock (Sync)
+                    {
+                        _ = ConnectionString;
+                        using var c = Open();
+                        bool fts = EnsureFts(c);
+                        using var tx = c.BeginTransaction();
+                        using var cmd = c.CreateCommand();
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"INSERT INTO Documents(Path,Size,Ticks,ContentHash,SettingsKey,ExtractorVersion,Data,Updated)
+VALUES($p,$s,$t,$h,$k,$v,$d,$u)
+ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,ExtractorVersion=$v,Data=$d,Updated=$u";
+                        var pp = cmd.Parameters.Add("$p", SqliteType.Text);
+                        var ps = cmd.Parameters.Add("$s", SqliteType.Integer);
+                        var pt = cmd.Parameters.Add("$t", SqliteType.Integer);
+                        var ph = cmd.Parameters.Add("$h", SqliteType.Text);
+                        var pk = cmd.Parameters.Add("$k", SqliteType.Text);
+                        var pv = cmd.Parameters.Add("$v", SqliteType.Integer);
+                        var pd = cmd.Parameters.Add("$d", SqliteType.Text);
+                        var pu = cmd.Parameters.Add("$u", SqliteType.Text);
+                        using var del = c.CreateCommand();
+                        del.Transaction = tx;
+                        del.CommandText = "DELETE FROM DocText WHERE Path=$p";
+                        var dp = del.Parameters.Add("$p", SqliteType.Text);
+                        using var ins = c.CreateCommand();
+                        ins.Transaction = tx;
+                        ins.CommandText = "INSERT INTO DocText(Path,Text) VALUES($p,$t)";
+                        var ip = ins.Parameters.Add("$p", SqliteType.Text);
+                        var it = ins.Parameters.Add("$t", SqliteType.Text);
+                        var now = DateTime.UtcNow.ToString("O");
+                        foreach (var (d, h, size, ticks) in rows)
+                        {
+                            // Inzwischen überholt oder verschoben: der aktuelle Eintrag wird im nächsten Durchgang geschrieben
+                            if (!IsCurrent(d)) continue;
+                            pp.Value = d.FullPath; ps.Value = size; pt.Value = ticks; ph.Value = h; pk.Value = d.SettingsKey; pv.Value = ExtractorVersion; pd.Value = d.Data; pu.Value = now;
+                            cmd.ExecuteNonQuery();
+                            if (fts)
+                            {
+                                dp.Value = d.FullPath; del.ExecuteNonQuery();
+                                ip.Value = d.FullPath; it.Value = d.Text; ins.ExecuteNonQuery();
+                            }
+                        }
+                        tx.Commit();
+                        foreach (var r in rows) ForgetDoc(r.D.FullPath);
+                    }
+                }
+                catch
+                {
+                }
+                lock (PendingSync)
+                    foreach (var d in chunk)
+                        if (PendingDocs.TryGetValue(d.FullPath, out var cur) && ReferenceEquals(cur, d)) PendingDocs.Remove(d.FullPath);
+            }
+        }
+
+        private static bool IsCurrent(PendingDoc d)
+        {
+            lock (PendingSync) return PendingDocs.TryGetValue(d.FullPath, out var cur) && ReferenceEquals(cur, d);
+        }
+
+        /// <summary>Alle wartenden Schreibvorgänge (Belegstände und Plugin-Daten) sofort ausführen.</summary>
+        public static void Flush()
+        {
+            FlushDocuments();
+            FlushPluginData();
         }
 
         private static bool? _fts;
@@ -254,7 +346,7 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                     using (var r = cmd.ExecuteReader())
                         while (r.Read())
                         {
-                            var rec = JsonSerializer.Deserialize<Record>(r.GetString(1));
+                            var rec = JsonSerializer.Deserialize(r.GetString(1), StoreJsonContext.Default.Record);
                             if (rec != null) rows.Add((r.GetString(0), SearchText(rec)));
                             if (++done % 200 == 0) progress?.Report((done, total));
                         }
@@ -297,21 +389,21 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
         public static HashSet<string>? SearchFullText(string query, IProgress<(int Done, int Total)>? progress = null)
         {
             if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 3) return null;
+            if (_fts != true && !EnsureFullTextIndex(progress)) return null;
             try
             {
-                lock (Sync)
-                {
-                    _ = ConnectionString;
-                    using var c = Open();
-                    if (!EnsureFts(c, progress)) return null;
-                    using var cmd = c.CreateCommand();
-                    cmd.CommandText = "SELECT Path FROM DocText WHERE DocText MATCH $q";
-                    cmd.Parameters.AddWithValue("$q", "Text:\"" + query.Trim().Replace("\"", "\"\"") + "\"");
-                    var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    using var r = cmd.ExecuteReader();
-                    while (r.Read()) set.Add(r.GetString(0));
-                    return set;
-                }
+                // Eigene Leseverbindung ohne globale Sperre: WAL erlaubt Lesen parallel zu laufenden Schreibvorgängen
+                _ = ConnectionString;
+                using var c = new SqliteConnection(new SqliteConnectionStringBuilder(_connString) { Cache = SqliteCacheMode.Private }.ToString());
+                c.Open();
+                ApplyKey(c, Dateiumbenenner.Engine.SecureStorage.DatabaseKey);
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT Path FROM DocText WHERE DocText MATCH $q";
+                cmd.Parameters.AddWithValue("$q", "Text:\"" + query.Trim().Replace("\"", "\"\"") + "\"");
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                using var r = cmd.ExecuteReader();
+                while (r.Read()) set.Add(r.GetString(0));
+                return set;
             }
             catch
             {
@@ -319,24 +411,35 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
             }
         }
 
-        /// <summary>Plugin-Daten lesen
+        /// <summary>Plugin-Daten lesen (noch nicht geschriebene Werte aus der Warteschlange haben Vorrang).</summary>
         public static string? LoadPluginData(string pluginId, string path)
         {
             try
             {
-                var hash = Stamp(path, out var size, out _);
-                lock (Sync)
+                var full = Path.GetFullPath(path);
+                var key = PendingKey(pluginId, full);
+                lock (PendingSync)
+                    if (Pending.TryGetValue(key, out var p)) return p.Data;
+                var fi = new FileInfo(full);
+                long size = fi.Length, ticks = fi.LastWriteTimeUtc.Ticks;
+                if (!TakePlugin(key, out var row))
                 {
-                    EnsurePluginTable();
-                    using var c = Open();
-                    using var cmd = c.CreateCommand();
-                    cmd.CommandText = "SELECT Data FROM PluginData WHERE PluginId=$i AND Path=$p AND ContentHash=$h AND Size=$s";
-                    cmd.Parameters.AddWithValue("$i", pluginId);
-                    cmd.Parameters.AddWithValue("$p", Path.GetFullPath(path));
-                    cmd.Parameters.AddWithValue("$h", hash);
-                    cmd.Parameters.AddWithValue("$s", size);
-                    return cmd.ExecuteScalar() as string;
+                    lock (Sync)
+                    {
+                        EnsurePluginTable();
+                        using var c = Open();
+                        using var cmd = c.CreateCommand();
+                        cmd.CommandText = "SELECT ContentHash, Size, Ticks, Data FROM PluginData WHERE PluginId=$i AND Path=$p";
+                        cmd.Parameters.AddWithValue("$i", pluginId);
+                        cmd.Parameters.AddWithValue("$p", full);
+                        using var r = cmd.ExecuteReader();
+                        row = r.Read() ? new PluginRow(r.GetString(0), r.GetInt64(1), r.GetInt64(2), r.GetString(3)) : null;
+                    }
                 }
+                if (row == null || row.Size != size) return null;
+                // Schnellpfad: Größe + Änderungszeit gleich -> Datei muss nicht gelesen werden
+                if (row.Ticks == ticks) { StampCache[full] = (size, ticks, row.Hash); return row.Data; }
+                return row.Hash == Stamp(full, out _, out _) ? row.Data : null;
             }
             catch
             {
@@ -344,30 +447,108 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
             }
         }
 
+        private sealed record PendingWrite(string PluginId, string FullPath, string Data);
+        private static readonly object PendingSync = new();
+        private static readonly Dictionary<string, PendingWrite> Pending = new(StringComparer.OrdinalIgnoreCase);
+        private static bool _flushRunning, _exitHooked;
+        private static string PendingKey(string pluginId, string fullPath) => pluginId + "\u0001" + fullPath;
+
+        /// <summary>Plugin-Daten speichern: wird gesammelt und gebündelt in einer Transaktion geschrieben
+        /// (tausende Einzelschreibvorgänge würden die Datenbank – und damit die Suche – minutenlang blockieren).</summary>
         public static void SavePluginData(string pluginId, string path, string data)
         {
             try
             {
-                if (!File.Exists(path)) return;
-                var hash = Stamp(path, out var size, out _);
-                lock (Sync)
-                {
-                    EnsurePluginTable();
-                    using var c = Open();
-                    using var cmd = c.CreateCommand();
-                    cmd.CommandText = @"INSERT INTO PluginData(PluginId,Path,ContentHash,Size,Data,Updated) VALUES($i,$p,$h,$s,$d,$u)
-ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Data=$d,Updated=$u";
-                    cmd.Parameters.AddWithValue("$i", pluginId);
-                    cmd.Parameters.AddWithValue("$p", Path.GetFullPath(path));
-                    cmd.Parameters.AddWithValue("$h", hash);
-                    cmd.Parameters.AddWithValue("$s", size);
-                    cmd.Parameters.AddWithValue("$d", data);
-                    cmd.Parameters.AddWithValue("$u", DateTime.UtcNow.ToString("O"));
-                    cmd.ExecuteNonQuery();
-                }
+                var full = Path.GetFullPath(path);
+                lock (PendingSync) Pending[PendingKey(pluginId, full)] = new PendingWrite(pluginId, full, data);
+                StartFlusher();
             }
             catch
             {
+            }
+        }
+
+        private static void StartFlusher()
+        {
+            lock (PendingSync)
+            {
+                if (!_exitHooked) { _exitHooked = true; AppDomain.CurrentDomain.ProcessExit += (_, _) => Flush(); }
+                if (_flushRunning) return;
+                _flushRunning = true;
+            }
+            Task.Run(FlushLoop);
+        }
+
+        private static void FlushLoop()
+        {
+            while (true)
+            {
+                Thread.Sleep(250);
+                lock (PendingSync)
+                    if (Pending.Count == 0 && PendingDocs.Count == 0) { _flushRunning = false; return; }
+                try { Flush(); }
+                catch { }
+            }
+        }
+
+        /// <summary>Alle wartenden Plugin-Daten sofort schreiben (in Blöcken, damit Lesezugriffe dazwischen drankommen).</summary>
+        public static void FlushPluginData()
+        {
+            List<KeyValuePair<string, PendingWrite>> batch;
+            lock (PendingSync) batch = new(Pending);
+            if (batch.Count == 0) return;
+            var stamps = new Dictionary<string, (string Hash, long Size, long Ticks)?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var chunk in batch.Chunk(500))
+            {
+                var rows = new List<(PendingWrite W, string Hash, long Size, long Ticks)>();
+                foreach (var (_, w) in chunk)
+                {
+                    if (!stamps.TryGetValue(w.FullPath, out var st))
+                    {
+                        try { st = File.Exists(w.FullPath) ? (Stamp(w.FullPath, out var size, out var ticks), size, ticks) : null; }
+                        catch { st = null; }
+                        stamps[w.FullPath] = st;
+                    }
+                    if (st is { } s) rows.Add((w, s.Hash, s.Size, s.Ticks));
+                }
+                try
+                {
+                    lock (Sync)
+                    {
+                        EnsurePluginTable();
+                        using var c = Open();
+                        using var tx = c.BeginTransaction();
+                        using var cmd = c.CreateCommand();
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"INSERT INTO PluginData(PluginId,Path,ContentHash,Size,Ticks,Data,Updated) VALUES($i,$p,$h,$s,$t,$d,$u)
+ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Ticks=$t,Data=$d,Updated=$u";
+                        var pi = cmd.Parameters.Add("$i", SqliteType.Text);
+                        var pp = cmd.Parameters.Add("$p", SqliteType.Text);
+                        var ph = cmd.Parameters.Add("$h", SqliteType.Text);
+                        var ps = cmd.Parameters.Add("$s", SqliteType.Integer);
+                        var pt = cmd.Parameters.Add("$t", SqliteType.Integer);
+                        var pd = cmd.Parameters.Add("$d", SqliteType.Text);
+                        var pu = cmd.Parameters.Add("$u", SqliteType.Text);
+                        var now = DateTime.UtcNow.ToString("O");
+                        foreach (var (w, h, size, ticks) in rows)
+                        {
+                            // Inzwischen überholt oder mit der Datei verschoben: nicht mehr schreiben
+                            lock (PendingSync)
+                                if (!Pending.TryGetValue(PendingKey(w.PluginId, w.FullPath), out var cur) || !ReferenceEquals(cur, w)) continue;
+                            pi.Value = w.PluginId; pp.Value = w.FullPath; ph.Value = h; ps.Value = size; pt.Value = ticks; pd.Value = w.Data; pu.Value = now;
+                            cmd.ExecuteNonQuery();
+                        }
+                        tx.Commit();
+                        foreach (var (w, h, size, ticks) in rows) UpdatePlugin(PendingKey(w.PluginId, w.FullPath), new PluginRow(h, size, ticks, w.Data));
+                    }
+                }
+                catch
+                {
+                }
+                // Erst nach dem Schreiben aus der Warteschlange nehmen (Lesen sieht bis dahin den neuen Wert); neuere Werte bleiben stehen
+                lock (PendingSync)
+                    foreach (var (key, w) in chunk)
+                        if (Pending.TryGetValue(key, out var cur) && ReferenceEquals(cur, w)) Pending.Remove(key);
             }
         }
 
@@ -387,7 +568,136 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Data=$d,Updated=
   Updated TEXT NOT NULL,
   PRIMARY KEY(PluginId, Path));";
             cmd.ExecuteNonQuery();
+            // Änderungszeit ergänzt: gleiche Größe + Zeit -> gültig ohne die Datei zu lesen (ältere Einträge haben 0 und werden per Hash geprüft)
+            cmd.CommandText = "SELECT count(*) FROM pragma_table_info('PluginData') WHERE name='Ticks'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE PluginData ADD COLUMN Ticks INTEGER NOT NULL DEFAULT 0";
+                cmd.ExecuteNonQuery();
+            }
             _pluginTable = true;
+        }
+
+        private sealed record DocRow(long Size, long Ticks, string Hash, string SettingsKey, int Version, string Data);
+        private sealed record PluginRow(string Hash, long Size, long Ticks, string Data);
+
+        /// <summary>Vorab gelesene Datensätze eines Ladevorgangs (Eintrag wird bei Verwendung entnommen).</summary>
+        private sealed class PrefetchScope : IDisposable
+        {
+            public readonly System.Collections.Concurrent.ConcurrentDictionary<string, DocRow?> Docs = new(StringComparer.OrdinalIgnoreCase);
+            public readonly System.Collections.Concurrent.ConcurrentDictionary<string, PluginRow?> Plugin = new(StringComparer.OrdinalIgnoreCase);
+            public void Dispose()
+            {
+                lock (ScopeSync) _scopes = _scopes.Where(s => s != this).ToArray();
+                Docs.Clear();
+                Plugin.Clear();
+            }
+        }
+        private static readonly object ScopeSync = new();
+        private static volatile PrefetchScope[] _scopes = Array.Empty<PrefetchScope>();
+
+        /// <summary>
+        /// Liest die Datensätze vieler Dateien gebündelt (eine Abfrage je Ordner statt einer je Datei). Bis zum Freigeben bedienen
+        /// <see cref="TryGet"/> und <see cref="LoadPluginData"/> diese Dateien ohne eigene Datenbankabfrage.
+        /// </summary>
+        public static IDisposable Prefetch(IEnumerable<string> paths, bool documents, params string[] pluginIds)
+        {
+            var scope = new PrefetchScope();
+            try
+            {
+                var wanted = new HashSet<string>(paths.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+                // Bei wenigen Dateien lohnt sich das nicht (Einzelabfragen sind dann schneller als ein Ordnerbereich)
+                if (wanted.Count < 32 || (!documents && pluginIds.Length == 0)) return scope;
+                var roots = new List<string>();
+                foreach (var d in wanted.Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(d => d.Length))
+                    if (!roots.Any(r => IsUnder(d, r))) roots.Add(d);
+                lock (ScopeSync) _scopes = _scopes.Append(scope).ToArray();
+                // Unter derselben Sperre wie Schreibvorgänge: kein veralteter Stand im Vorab-Ergebnis
+                lock (Sync)
+                {
+                    _ = ConnectionString;
+                    if (pluginIds.Length > 0) EnsurePluginTable();
+                    using var c = Open();
+                    foreach (var root in roots)
+                    {
+                        var lo = root.TrimEnd('\\') + "\\";
+                        var hi = root.TrimEnd('\\') + "]";
+                        if (documents)
+                        {
+                            using var cmd = c.CreateCommand();
+                            cmd.CommandText = "SELECT Path, Size, Ticks, ContentHash, SettingsKey, ExtractorVersion, Data FROM Documents WHERE Path >= $lo AND Path < $hi";
+                            cmd.Parameters.AddWithValue("$lo", lo);
+                            cmd.Parameters.AddWithValue("$hi", hi);
+                            using var r = cmd.ExecuteReader();
+                            while (r.Read())
+                            {
+                                var p = r.GetString(0);
+                                if (wanted.Contains(p)) scope.Docs[p] = new DocRow(r.GetInt64(1), r.GetInt64(2), r.GetString(3), r.GetString(4), r.GetInt32(5), r.GetString(6));
+                            }
+                        }
+                        foreach (var id in pluginIds)
+                        {
+                            using var cmd = c.CreateCommand();
+                            cmd.CommandText = "SELECT Path, ContentHash, Size, Ticks, Data FROM PluginData WHERE PluginId=$i AND Path >= $lo AND Path < $hi";
+                            cmd.Parameters.AddWithValue("$i", id);
+                            cmd.Parameters.AddWithValue("$lo", lo);
+                            cmd.Parameters.AddWithValue("$hi", hi);
+                            using var r = cmd.ExecuteReader();
+                            while (r.Read())
+                            {
+                                var p = r.GetString(0);
+                                if (wanted.Contains(p)) scope.Plugin[PendingKey(id, p)] = new PluginRow(r.GetString(1), r.GetInt64(2), r.GetInt64(3), r.GetString(4));
+                            }
+                        }
+                    }
+                    // Nicht gefunden = kein Eintrag vorhanden (spart die Einzelabfrage)
+                    foreach (var p in wanted)
+                    {
+                        if (documents) scope.Docs.TryAdd(p, null);
+                        foreach (var id in pluginIds) scope.Plugin.TryAdd(PendingKey(id, p), null);
+                    }
+                }
+            }
+            catch
+            {
+                scope.Docs.Clear();
+                scope.Plugin.Clear();
+            }
+            return scope;
+        }
+
+        private static bool IsUnder(string dir, string root) =>
+            dir.Equals(root, StringComparison.OrdinalIgnoreCase) || dir.StartsWith(root.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+
+        private static bool TakeDoc(string full, out DocRow? row)
+        {
+            foreach (var s in _scopes) if (s.Docs.TryRemove(full, out row)) return true;
+            row = null;
+            return false;
+        }
+
+        private static bool TakePlugin(string key, out PluginRow? row)
+        {
+            foreach (var s in _scopes) if (s.Plugin.TryRemove(key, out row)) return true;
+            row = null;
+            return false;
+        }
+
+        private static void ForgetDoc(string full)
+        {
+            foreach (var s in _scopes) s.Docs.TryRemove(full, out _);
+        }
+
+        private static void UpdatePlugin(string key, PluginRow row)
+        {
+            foreach (var s in _scopes) if (s.Plugin.ContainsKey(key)) s.Plugin[key] = row;
+        }
+
+        private static void ForgetPath(string full)
+        {
+            ForgetDoc(full);
+            foreach (var s in _scopes)
+                foreach (var k in s.Plugin.Keys.Where(k => k.EndsWith("\u0001" + full, StringComparison.OrdinalIgnoreCase)).ToList()) s.Plugin.TryRemove(k, out _);
         }
 
         /// <summary>Pfad nach Umbenennen aktualisieren (Datensatz bleibt erhalten).</summary>
@@ -395,6 +705,19 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Data=$d,Updated=
         {
             try
             {
+                string o = Path.GetFullPath(oldPath), n = Path.GetFullPath(newPath);
+                // Noch nicht geschriebene Plugin-Daten wandern mit
+                lock (PendingSync)
+                {
+                    foreach (var k in Pending.Where(kv => kv.Value.FullPath.Equals(n, StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Key).ToList()) Pending.Remove(k);
+                    foreach (var (k, w) in Pending.Where(kv => kv.Value.FullPath.Equals(o, StringComparison.OrdinalIgnoreCase)).ToList())
+                    {
+                        Pending.Remove(k);
+                        Pending[PendingKey(w.PluginId, n)] = w with { FullPath = n };
+                    }
+                    PendingDocs.Remove(n);
+                    if (PendingDocs.Remove(o, out var doc)) PendingDocs[n] = doc with { FullPath = n };
+                }
                 lock (Sync)
                 {
                     _ = ConnectionString;
@@ -402,9 +725,11 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Data=$d,Updated=
                     using var cmd = c.CreateCommand();
                     cmd.CommandText = "DELETE FROM Documents WHERE Path=$n; UPDATE Documents SET Path=$n WHERE Path=$o; DELETE FROM PluginData WHERE Path=$n; UPDATE PluginData SET Path=$n WHERE Path=$o";
                     EnsurePluginTable();
-                    cmd.Parameters.AddWithValue("$o", Path.GetFullPath(oldPath));
-                    cmd.Parameters.AddWithValue("$n", Path.GetFullPath(newPath));
+                    cmd.Parameters.AddWithValue("$o", o);
+                    cmd.Parameters.AddWithValue("$n", n);
                     cmd.ExecuteNonQuery();
+                    ForgetPath(o);
+                    ForgetPath(n);
                     if (EnsureFts(c))
                     {
                         cmd.CommandText = "DELETE FROM DocText WHERE Path=$n; UPDATE DocText SET Path=$n WHERE Path=$o";

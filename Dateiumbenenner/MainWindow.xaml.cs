@@ -43,6 +43,8 @@ namespace Dateiumbenenner
         public string? Zip { get; set; }
         public string? City { get; set; }
         public bool AddressLoaded { get; set; }
+        /// <summary>Adresse per „Firma übertragen“ bestätigt (auch leer) – wird nicht automatisch neu ermittelt.</summary>
+        public bool AddressManuallySet { get; set; }
         public bool Loaded { get; set; }
         public string? SelectedNumber { get; set; }
         public string? SelectedDate { get; set; }
@@ -64,6 +66,9 @@ namespace Dateiumbenenner
         public bool RemoveDuplicates { get; set; }
         public bool ReplaceSegments { get; set; }
         public bool RemoveAttachment { get; set; } // NEU: letztes WAxxxx[_ocred]-Segment entfernen
+        /// <summary>Dateinamen-Aufbau wurde festgelegt (Vorlage/Benutzer) und wird in der Datenbank gespeichert.</summary>
+        public bool LayoutSet { get; set; }
+        public string? TemplateDeclined { get; set; }
         public List<InsertPosition> InsertPositions { get; set; } = new(){ new InsertPosition{ Position=1, ValueType="Nummer (Auswahl)", Enabled=true }, new InsertPosition{ Position=2, ValueType="Datum", Enabled=true }, new InsertPosition{ Position=3, ValueType="Dokumenttyp", Enabled=true } };
         public bool NumberManuallySet { get; set; }
         public bool DateManuallySet { get; set; }
@@ -271,11 +276,7 @@ namespace Dateiumbenenner
                 prefixTab?.AttachExternalEditors(CmbMainCompany, TxtMainNewPrefix, TxtMainPrefixNewName);
                 prefixTab?.AttachSplitInfo(TxtMainSplitInfo);
                 if (TxtMainNewPrefix != null) TxtMainNewPrefix.TextChanged += (_, _) => { if (_currentMeta != null) RefreshNewNamePreview(_currentMeta); };
-                if (CmbMainCompany != null)
-                {
-                    CmbMainCompany.SelectionChanged += (_, _) => { if (_currentMeta != null) { if (CmbMainCompany.SelectedItem is string s && !string.IsNullOrWhiteSpace(s)) _currentMeta.CompanyName = s; RefreshNewNamePreview(_currentMeta); } };
-                    CmbMainCompany.LostFocus += (_, _) => { var t = CmbMainCompany.Text?.Trim(); if (_currentMeta != null && !string.IsNullOrWhiteSpace(t) && t != _currentMeta.CompanyName) { _currentMeta.CompanyName = t; RefreshNewNamePreview(_currentMeta); } };
-                }
+                if (CmbMainCompany != null) HookMainCompanyEditing();
                 InitPlugins();
                 var txtSteps = FindName("TxtDocTypeNumberSteps") as System.Windows.Controls.TextBox;
                 if (txtSteps != null && string.IsNullOrEmpty(txtSteps.Text)) txtSteps.Text = _docTypeNumberSteps.ToString();
@@ -602,14 +603,18 @@ namespace Dateiumbenenner
                 var eta=n>0? TimeSpan.FromSeconds(sw.Elapsed.TotalSeconds*(total-n)/n) : TimeSpan.Zero;
                 TxtStatus.Text=$"Beleg {n:N0} / {total:N0} ({(total>0?n*100.0/total:0):0.0} %) – aus Datenbank: {Volatile.Read(ref fromDbLive):N0} – Rest ca. {eta:hh\\:mm\\:ss}"; });
             // Parallel: PDF-Text lesen + Regex-Auswertung auf mehreren Kernen (Objekte sind noch nicht in der UI-Liste)
-            // Hälfte der Kerne: Oberfläche bleibt beim Laden bedienbar
-            var options=new ParallelOptions{ MaxDegreeOfParallelism=Math.Max(2,Environment.ProcessorCount/2) };
+            // Alle Kerne bis auf einen (wie im Plugin): ein Kern bleibt für die Oberfläche frei
+            var options=new ParallelOptions{ MaxDegreeOfParallelism=Math.Max(2,Environment.ProcessorCount-1) };
             var companiesByMeta=new List<string>?[metas.Count];
             var storedCompany=new string?[metas.Count];
             var toSave=new bool[metas.Count];
             var confirmedArr=new bool[metas.Count];
             int fromDb=0;
             if(LoadingProgress!=null){ LoadingProgress.IsIndeterminate=false; LoadingProgress.Value=0; }
+            TxtStatus.Text=$"{total:N0} Dateien gefunden – Datenbank wird gelesen...";
+            // Gespeicherte Stände des Ordners gebündelt vorab lesen (eine Abfrage statt einer je Datei)
+            using var prefetch=await Task.Run(()=>DocumentStore.Prefetch(metas.Select(m=>m.FilePath), true));
+            if(loadVersion!=_loadVersion) return;
             TxtStatus.Text=$"{total:N0} Dateien gefunden – Auswertung startet...";
             var indexed=metas.Select((m,i)=>(m,i)).ToList();
             await Parallel.ForEachAsync(indexed, options, async (x,_)=>{
@@ -640,7 +645,7 @@ namespace Dateiumbenenner
                     if(rec?.CompanyConfirmed==true) storedCompany[x.i]=rec.CompanyName;
                     toSave[x.i]=true;
                 }
-                ((IProgress<int>)progress).Report(Interlocked.Increment(ref processed)); });
+                int done=Interlocked.Increment(ref processed); if((done&15)==0 || done==total) ((IProgress<int>)progress).Report(done); });
             // Wurde inzwischen neu geladen (z. B. Sortierung/A-Modus umgeschaltet), dieses Ergebnis verwerfen
             if(loadVersion!=_loadVersion) return;
             // UI-Thread: Nummern zuordnen und Liste in Originalreihenfolge in einem Durchgang füllen
@@ -662,12 +667,46 @@ namespace Dateiumbenenner
         private string StoreSettingsKey(string path) =>
             $"{AMode}|{_enableOcrCorrection}|{Dateiumbenenner.Engine.TextReflow.Width}|{Dateiumbenenner.Engine.TextReflow.GetFileWidth(path)}";
 
-        private static void ApplyManualValues(DocumentMetadata m, DocumentStore.Record r)
+        private void ApplyManualValues(DocumentMetadata m, DocumentStore.Record r)
         {
             if(r.NumberManuallySet){ m.SelectedNumber=r.SelectedNumber; m.NumberManuallySet=true; }
             if(r.DateManuallySet){ m.SelectedDate=r.SelectedDate; m.Date=r.Date; m.DateManuallySet=true; }
             if(r.DocTypeManuallySet){ m.DocumentType=r.DocumentType; m.DocTypeManuallySet=true; }
+            ApplyStoredLayout(m, r);
         }
+
+        private void ApplyStoredLayout(DocumentMetadata m, DocumentStore.Record r)
+        {
+            m.TemplateDeclined=r.TemplateDeclined;
+            if(r.Layout==null) return;
+            ApplyLayout(m, r.Layout);
+            if(m.DelimiterAutoDetected) m.SavedDelimiter=DetectDelimiterFromFilename(m.FileName);
+        }
+
+        private static void ApplyLayout(DocumentMetadata m, Dateiumbenenner.Engine.DocTemplate t)
+        {
+            m.SavedDelimiter = t.Delimiter;
+            m.DelimiterAutoDetected = string.IsNullOrEmpty(t.Delimiter);
+            m.SavedSegmentIndex = t.SegmentIndex;
+            m.UseDelimiterPosition = t.UseDelimiterPosition;
+            m.RemoveDuplicates = t.RemoveDuplicates;
+            m.ReplaceSegments = t.ReplaceSegments;
+            m.RemoveAttachment = t.RemoveAttachment;
+            if (t.InsertPositions.Count > 0)
+                m.InsertPositions = t.InsertPositions.Select(p => new InsertPosition { Position = p.Position, ValueType = p.ValueType, Enabled = p.Enabled }).ToList();
+            m.LayoutSet = true;
+        }
+
+        private static Dateiumbenenner.Engine.DocTemplate CaptureLayout(DocumentMetadata m) => new()
+        {
+            Delimiter = m.DelimiterAutoDetected ? null : m.SavedDelimiter,
+            SegmentIndex = m.SavedSegmentIndex,
+            UseDelimiterPosition = m.UseDelimiterPosition,
+            RemoveDuplicates = m.RemoveDuplicates,
+            ReplaceSegments = m.ReplaceSegments,
+            RemoveAttachment = m.RemoveAttachment,
+            InsertPositions = m.InsertPositions.Select(p => new Dateiumbenenner.Engine.TemplatePosition { Position = p.Position, ValueType = p.ValueType, Enabled = p.Enabled }).ToList()
+        };
 
         private void ApplyStoreRecord(DocumentMetadata m, DocumentStore.Record r)
         {
@@ -676,8 +715,10 @@ namespace Dateiumbenenner
             m.SelectedNumber=r.SelectedNumber; m.SelectedDate=r.SelectedDate;
             m.NumberCandidates=new List<string>(r.NumberCandidates); m.DateCandidates=new List<string>(r.DateCandidates);
             m.NumberManuallySet=r.NumberManuallySet; m.DateManuallySet=r.DateManuallySet; m.DocTypeManuallySet=r.DocTypeManuallySet;
-            if(!string.IsNullOrWhiteSpace(r.Street)||!string.IsNullOrWhiteSpace(r.City)){ m.Street=r.Street; m.Zip=r.Zip; m.City=r.City; m.AddressLoaded=true; }
+            if(!string.IsNullOrWhiteSpace(r.Street)||!string.IsNullOrWhiteSpace(r.City)||r.AddressManuallySet){ m.Street=r.Street; m.Zip=r.Zip; m.City=r.City; m.AddressLoaded=true; }
+            m.AddressManuallySet=r.AddressManuallySet;
             if(string.IsNullOrEmpty(m.SavedDelimiter)||m.DelimiterAutoDetected){ m.SavedDelimiter=DetectDelimiterFromFilename(m.FileName); m.DelimiterAutoDetected=true; }
+            ApplyStoredLayout(m, r);
             m.Loaded=true;
         }
 
@@ -696,9 +737,10 @@ namespace Dateiumbenenner
                 FullText=m.FullText, PageCount=m.PageCount, CompanyName=m.CompanyName, CompanyCandidates=TextCandidates(m.CompanyCandidates, m.FullText),
                 DocumentType=m.DocumentType, InvoiceNumber=m.InvoiceNumber, DocumentNumber=m.DocumentNumber, Date=m.Date,
                 SelectedNumber=m.SelectedNumber, SelectedDate=m.SelectedDate, NumberCandidates=m.NumberCandidates.ToList(), DateCandidates=m.DateCandidates.ToList(),
-                Street=m.Street, Zip=m.Zip, City=m.City,
+                Street=m.Street, Zip=m.Zip, City=m.City, AddressManuallySet=m.AddressManuallySet,
                 NumberManuallySet=m.NumberManuallySet, DateManuallySet=m.DateManuallySet, DocTypeManuallySet=m.DocTypeManuallySet,
-                CompanyConfirmed=confirmed };
+                CompanyConfirmed=confirmed,
+                Layout=m.LayoutSet ? CaptureLayout(m) : null, TemplateDeclined=m.TemplateDeclined };
             DocumentStore.Save(m.FilePath, key, rec);
         }
 
@@ -1434,18 +1476,35 @@ namespace Dateiumbenenner
                 .FirstOrDefault(c => c.Value.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase))?.Source;
             Dateiumbenenner.Engine.NumberPatternStore.Learn(meta.CompanyName, meta.DocumentType, src, value);
             Dateiumbenenner.Engine.NumberRuleStore.Learn(meta.CompanyName, meta.DocumentType, value);
+            Dateiumbenenner.Engine.ValueLocationStore.Learn(Dateiumbenenner.Engine.ValueKind.Nummer, meta.CompanyName, meta.DocumentType, meta.FullText, value);
+            ReapplyNumbers(meta);
         }
 
-        private void ApplyEngineFields(DocumentMetadata meta)
+        /// <summary>Weitere Belege derselben Firma + Belegart nach Muster und gelernter Fundstelle neu bewerten (manuell gesetzte bleiben).</summary>
+        private void ReapplyNumbers(DocumentMetadata src)
         {
-            var pdf = meta.FilePath;
-            meta.AddressLoaded = false; // Adresse bei Bedarf neu berechnen (Text hat sich geändert)
-            var number = Engine.ExtractNumber(meta.FullText, pdf);
-            var date = Engine.ExtractDate(meta.FullText, pdf);
-            var docType = Engine.ExtractDocumentType(meta.FullText, pdf);
+            var dt = Dateiumbenenner.Engine.DocTypeStore.Canonical(src.DocumentType);
+            int changed = 0, total = 0;
+            foreach (var m in _items.Where(i => i != src && i.Loaded && !i.NumberManuallySet && !string.IsNullOrEmpty(i.FullText)
+                         && string.Equals(i.CompanyName?.Trim(), src.CompanyName?.Trim(), StringComparison.OrdinalIgnoreCase)
+                         && string.Equals(Dateiumbenenner.Engine.DocTypeStore.Canonical(i.DocumentType), dt, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                total++;
+                var before = m.SelectedNumber;
+                ApplyNumberField(m, Engine.ExtractNumber(m.FullText, m.FilePath), m.DocumentType);
+                if (string.Equals(before, m.SelectedNumber, StringComparison.Ordinal)) continue;
+                changed++;
+                AutoAssignNumbers(m);
+                RefreshNewNamePreview(m);
+                ScheduleStoreSave(m);
+            }
+            if (total > 0) TxtStatus.Text = $"Nummer-Fundstelle für {src.CompanyName} / {src.DocumentType} gelernt: {changed} von {total} weiteren Beleg(en) angepasst.";
+        }
 
-            // Gelerntes Nummernformat (Firma + Belegtyp): passende Kandidaten nach vorne
-            var pattern = Dateiumbenenner.Engine.NumberPatternStore.Get(meta.CompanyName, docType.Value ?? meta.DocumentType);
+        /// <summary>Nummern-Kandidaten nach gelerntem Format, Regeln und Fundstelle ordnen; Nummer setzen, wenn nicht manuell gewählt.</summary>
+        private void ApplyNumberField(DocumentMetadata meta, Dateiumbenenner.Engine.Field number, string? docType)
+        {
+            var pattern = Dateiumbenenner.Engine.NumberPatternStore.Get(meta.CompanyName, docType);
             if (pattern != null)
                 foreach (var c in number.Candidates.ToList())
                 {
@@ -1453,14 +1512,25 @@ namespace Dateiumbenenner
                                  + (pattern.Label.Length > 0 && c.Source.Equals(pattern.Label, StringComparison.OrdinalIgnoreCase) ? 2 : 0);
                     if (bonus > 0) number.Add(c.Value, c.Score + bonus, c.Source);
                 }
-            Dateiumbenenner.Engine.NumberRuleStore.Apply(number, meta.CompanyName, docType.Value ?? meta.DocumentType, meta.FullText);
-
+            Dateiumbenenner.Engine.NumberRuleStore.Apply(number, meta.CompanyName, docType, meta.FullText);
             for (int i = number.Values.Count - 1; i >= 0; i--)
             { meta.NumberCandidates.Remove(number.Values[i]); meta.NumberCandidates.Insert(0, number.Values[i]); }
+            if (!meta.NumberManuallySet && number.Value != null) { meta.InvoiceNumber = number.Value; meta.SelectedNumber = number.Value; }
+        }
+
+        private void ApplyEngineFields(DocumentMetadata meta)
+        {
+            var pdf = meta.FilePath;
+            if (!meta.AddressManuallySet) meta.AddressLoaded = false; // Adresse bei Bedarf neu berechnen (Text hat sich geändert)
+            var number = Engine.ExtractNumber(meta.FullText, pdf);
+            var date = Engine.ExtractDate(meta.FullText, pdf);
+            var docType = Engine.ExtractDocumentType(meta.FullText, pdf);
+
+            // Gelerntes Nummernformat, Regeln und Fundstelle (Firma + Belegtyp): passende Kandidaten nach vorne
+            ApplyNumberField(meta, number, docType.Value ?? meta.DocumentType);
             for (int i = date.Values.Count - 1; i >= 0; i--)
             { meta.DateCandidates.Remove(date.Values[i]); meta.DateCandidates.Insert(0, date.Values[i]); }
 
-            if (!meta.NumberManuallySet && number.Value != null) { meta.InvoiceNumber = number.Value; meta.SelectedNumber = number.Value; }
             if (!meta.DateManuallySet && date.Value != null) { meta.Date = date.Value; meta.SelectedDate = date.Value; }
             if (!meta.DocTypeManuallySet && docType.Value != null) meta.DocumentType = docType.Value;
         }
@@ -1552,19 +1622,168 @@ namespace Dateiumbenenner
             if (!_isBulkLoading) ResetAddress(src);
             if (!_isBulkLoading && !string.IsNullOrWhiteSpace(src.CompanyName)) { _confirmedCompany.Add(src); ScheduleStoreSave(src); }
             if (src == _currentMeta) RefreshNewNamePreview(src);
-            if (!_isBulkLoading && !_propagatingCompany && src == _currentMeta)
+            // Benutzer bearbeitet das Firmenfeld noch: Lernen, Vorlagen und Rückfrage erst beim Verlassen
+            if (ReferenceEquals(src, _companyEditMeta) && !_propagatingCompany)
             {
-                CompanyMatcher.Learn(src.CompanyName);
-                if (!string.IsNullOrWhiteSpace(src.CompanyName) && src.FullText?.Contains(src.CompanyName!, StringComparison.OrdinalIgnoreCase) == true)
-                    Engine.ConfirmSender(src.FullText, src.CompanyName!);
-                Dispatcher.BeginInvoke(new Action(() => OfferTemplates(new[] { src })), System.Windows.Threading.DispatcherPriority.Background);
+                if (_pendingCompanyPropagation?.Src != src) _pendingCompanyPropagation = (src, oldName);
+                return;
             }
+            if (!_isBulkLoading && !_propagatingCompany && src == _currentMeta) LearnCompany(src);
             if (_propagatingCompany || string.IsNullOrWhiteSpace(src.CompanyName)) return;
             var name = src.CompanyName!;
             Dispatcher.BeginInvoke(new Action(() => PropagateCompany(src, name, oldName)), System.Windows.Threading.DispatcherPriority.Background);
         }
 
-        private void PropagateCompany(DocumentMetadata src, string name, string? oldName = null)
+        private void LearnCompany(DocumentMetadata src)
+        {
+            CompanyMatcher.Learn(src.CompanyName);
+            if (!string.IsNullOrWhiteSpace(src.CompanyName) && src.FullText?.Contains(src.CompanyName!, StringComparison.OrdinalIgnoreCase) == true)
+                Engine.ConfirmSender(src.FullText, src.CompanyName!);
+            Dispatcher.BeginInvoke(new Action(() => OfferTemplates(new[] { src })), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        // Bearbeitungssitzung im Firmenfeld: Beleg, Firma beim Betreten, letzter vom Benutzer eingegebener Text
+        private DocumentMetadata? _companyEditMeta;
+        private string? _companyEditOriginal;
+        private string? _companyEditText;
+        private bool _companyUserEdited;
+        private (DocumentMetadata Src, string? OldName)? _pendingCompanyPropagation;
+        private System.Windows.Threading.DispatcherTimer? _companyEditTimer;
+
+        private static bool IsInside(DependencyObject? d, DependencyObject? container)
+        {
+            for (; d != null && container != null; d = (d is System.Windows.Media.Visual || d is System.Windows.Media.Media3D.Visual3D ? System.Windows.Media.VisualTreeHelper.GetParent(d) : null) ?? LogicalTreeHelper.GetParent(d))
+                if (ReferenceEquals(d, container)) return true;
+            return false;
+        }
+
+        private bool EnsureCompanySession()
+        {
+            if (_companyEditMeta != null) return true;
+            if (_currentMeta == null) return false;
+            _companyEditMeta = _currentMeta;
+            _companyEditOriginal = _currentMeta.CompanyName;
+            _companyEditText = null;
+            _companyUserEdited = false;
+            _pendingCompanyPropagation = null;
+            return true;
+        }
+
+        /// <summary>Firmenfeld: nur echte Benutzereingaben übernehmen (nicht das Befüllen beim Belegwechsel).
+        /// Getippter Text wird nach kurzer Pause übernommen; nach weiteren Belegen wird erst beim Verlassen gefragt
+        /// (Fokuswechsel, Klick außerhalb des Felds oder Enter).</summary>
+        private void HookMainCompanyEditing()
+        {
+            var cb = CmbMainCompany;
+            _companyEditTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000) };
+            _companyEditTimer.Tick += (_, _) => { _companyEditTimer.Stop(); ApplyTypedCompany(); };
+            void Capture() => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_companyEditMeta == null || !cb.IsKeyboardFocusWithin) return;
+                _companyEditText = cb.Text;
+                _companyEditTimer.Stop(); _companyEditTimer.Start();
+            }), System.Windows.Threading.DispatcherPriority.Input);
+            void Edited() { if (!EnsureCompanySession()) return; _companyUserEdited = true; Capture(); }
+
+            cb.AddHandler(UIElement.GotKeyboardFocusEvent, new System.Windows.Input.KeyboardFocusChangedEventHandler((_, _) =>
+            {
+                if (_companyEditMeta != null && !ReferenceEquals(_companyEditMeta, _currentMeta)) FinishCompanyEdit(null, null, true);
+                EnsureCompanySession();
+            }), true);
+            cb.AddHandler(UIElement.PreviewTextInputEvent, new System.Windows.Input.TextCompositionEventHandler((_, _) => Edited()), true);
+            cb.AddHandler(System.Windows.DataObject.PastingEvent, new System.Windows.DataObjectPastingEventHandler((_, _) => Edited()), true);
+            cb.AddHandler(UIElement.PreviewKeyDownEvent, new System.Windows.Input.KeyEventHandler((_, e) =>
+            {
+                if (e.Key == System.Windows.Input.Key.Enter && !cb.IsDropDownOpen)
+                {
+                    FinishCompanyEdit(cb.Text, _currentMeta, true); // Enter = Eingabe abschließen
+                    return;
+                }
+                var mods = System.Windows.Input.Keyboard.Modifiers;
+                bool ctrl = (mods & System.Windows.Input.ModifierKeys.Control) != 0, shift = (mods & System.Windows.Input.ModifierKeys.Shift) != 0;
+                if (e.Key is System.Windows.Input.Key.Back or System.Windows.Input.Key.Delete or System.Windows.Input.Key.Up or System.Windows.Input.Key.Down
+                    || ctrl && e.Key is System.Windows.Input.Key.V or System.Windows.Input.Key.X
+                    || shift && e.Key == System.Windows.Input.Key.Insert)
+                    Edited();
+            }), true);
+            cb.SelectionChanged += (_, _) =>
+            {
+                // Nur Auswahl aus der aufgeklappten Liste – das Befüllen beim Belegwechsel ist keine Benutzerauswahl
+                if (!cb.IsDropDownOpen || cb.SelectedItem is not string s || string.IsNullOrWhiteSpace(s) || !EnsureCompanySession()) return;
+                var meta = _companyEditMeta!;
+                _companyUserEdited = true;
+                _companyEditText = s;
+                if (s != meta.CompanyName) meta.CompanyName = s;
+                RefreshNewNamePreview(meta);
+            };
+            cb.LostFocus += (_, _) =>
+            {
+                var text = cb.Text;
+                var cur = _currentMeta;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (cb.IsDropDownOpen || cb.IsKeyboardFocusWithin) return; // noch im Feld (z. B. Liste aufgeklappt)
+                    FinishCompanyEdit(text, cur, true);
+                }), System.Windows.Threading.DispatcherPriority.Input);
+            };
+            // Klick außerhalb des Felds (auch auf Bereiche, die keinen Fokus annehmen) = Verlassen
+            AddHandler(UIElement.PreviewMouseDownEvent, new System.Windows.Input.MouseButtonEventHandler((_, e) =>
+            {
+                if (_companyEditMeta == null || cb.IsDropDownOpen || IsInside(e.OriginalSource as DependencyObject, cb)) return;
+                var text = cb.Text;
+                var cur = _currentMeta;
+                // „Übertragen…“ fragt selbst – keine zweite Rückfrage
+                bool ask = !IsInside(e.OriginalSource as DependencyObject, BtnMainTransferName);
+                Dispatcher.BeginInvoke(new Action(() => FinishCompanyEdit(text, cur, ask)), System.Windows.Threading.DispatcherPriority.Input);
+            }), true);
+        }
+
+        /// <summary>Getippten Firmennamen nach kurzer Pause übernehmen (Dateiname aktualisiert sich), noch ohne Rückfrage.</summary>
+        private void ApplyTypedCompany()
+        {
+            var meta = _companyEditMeta;
+            var text = _companyEditText?.Trim();
+            if (meta == null || !_companyUserEdited || string.IsNullOrWhiteSpace(text) || text == meta.CompanyName || !_items.Contains(meta)) return;
+            if (!meta.CompanyCandidates.Contains(text)) meta.CompanyCandidates.Add(text);
+            meta.CompanyName = text;
+            RefreshNewNamePreview(meta);
+            TxtStatus.Text = $"Firma „{text}“ übernommen.";
+        }
+
+        private void FinishCompanyEdit(string? textAtLeave, DocumentMetadata? currentAtLeave, bool ask)
+        {
+            _companyEditTimer?.Stop();
+            var meta = _companyEditMeta;
+            var original = _companyEditOriginal;
+            var edited = _companyUserEdited;
+            // Bei Belegwechsel zeigt das Feld schon den neuen Beleg – dann den zuletzt getippten Text verwenden
+            var text = (ReferenceEquals(currentAtLeave, meta) ? textAtLeave : _companyEditText)?.Trim();
+            var pending = _pendingCompanyPropagation;
+            _companyEditMeta = null; _companyEditOriginal = null; _companyEditText = null; _companyUserEdited = false; _pendingCompanyPropagation = null;
+            if (meta == null || !edited || !_items.Contains(meta)) return;
+
+            if (!string.IsNullOrWhiteSpace(text) && text != meta.CompanyName)
+            {
+                if (!meta.CompanyCandidates.Contains(text)) meta.CompanyCandidates.Add(text);
+                if (!ask) _propagatingCompany = true;
+                try { meta.CompanyName = text; } // Sitzung ist beendet → Meta_CompanyChanged lernt und fragt jetzt regulär
+                finally { _propagatingCompany = false; }
+                if (!ask && meta == _currentMeta) LearnCompany(meta);
+                RefreshNewNamePreview(meta);
+                return;
+            }
+            // Während der Bearbeitung übernommene Firma: jetzt lernen und nachfragen, sofern sie sich gegenüber dem Betreten geändert hat
+            if (pending is { } p && ReferenceEquals(p.Src, meta) && !string.IsNullOrWhiteSpace(meta.CompanyName)
+                && !string.Equals(meta.CompanyName?.Trim(), original?.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                if (meta == _currentMeta) LearnCompany(meta);
+                if (!ask) return;
+                var name = meta.CompanyName!;
+                Dispatcher.BeginInvoke(new Action(() => PropagateCompany(meta, name, p.OldName)), System.Windows.Threading.DispatcherPriority.Background);
+            }
+        }
+
+        private async void PropagateCompany(DocumentMetadata src, string name, string? oldName = null)
         {
             if (src.CompanyName != name) return; // inzwischen erneut geändert
             // 1) Weitere markierte Einträge
@@ -1587,6 +1806,8 @@ namespace Dateiumbenenner
                 targets.AddRange(sameCompany);
             if (targets.Count == 0) return;
 
+            await EnsureAddressAsync(src);
+            if (src.CompanyName != name) return;
             _propagatingCompany = true;
             try
             {
@@ -1594,7 +1815,7 @@ namespace Dateiumbenenner
                 {
                     if (!m.CompanyCandidates.Contains(name)) m.CompanyCandidates.Add(name);
                     m.CompanyName = name;
-                    ResetAddress(m);
+                    TransferAddress(src, m);
                     // Nur lernen, wenn die Firma im Dokument tatsächlich vorkommt
                     if (m.FullText?.Contains(name, StringComparison.OrdinalIgnoreCase) == true) Engine.ConfirmSender(m.FullText, name);
                 }
@@ -1604,7 +1825,7 @@ namespace Dateiumbenenner
         }
 
         /// <summary>„Namen übertragen“: Übersicht aller Dateien, markierte erhalten den Firmennamen der aktuellen Datei.</summary>
-        private void BtnMainTransferName_Click(object sender, RoutedEventArgs e)
+        private async void BtnMainTransferName_Click(object sender, RoutedEventArgs e)
         {
             if (_currentMeta is not { } src) return;
             var name = (string.IsNullOrWhiteSpace(CmbMainCompany.Text) ? src.CompanyName : CmbMainCompany.Text)?.Trim();
@@ -1620,6 +1841,27 @@ namespace Dateiumbenenner
             var dlg = new CompanyTransferDialog(others, name, n => !string.IsNullOrWhiteSpace(n) && SameCompany(n, name)) { Owner = this };
             if (dlg.ShowDialog() != true) return;
             var targets = dlg.SelectedItems.ToList();
+            var edited = dlg.EditedNames.ToList();
+            if (edited.Count > 0)
+            {
+                // Im Dialog von Hand korrigierte Namen ohne weitere Rückfrage übernehmen
+                _propagatingCompany = true;
+                try
+                {
+                    foreach (var (m, n) in edited)
+                    {
+                        if (!m.CompanyCandidates.Contains(n)) m.CompanyCandidates.Add(n);
+                        m.CompanyName = n;
+                    }
+                }
+                finally { _propagatingCompany = false; }
+            }
+            if (targets.Count == 0)
+            {
+                if (edited.Count > 0) TxtStatus.Text = $"Firmenname bei {edited.Count} Datei(en) geändert.";
+                return;
+            }
+            await EnsureAddressAsync(src);
             _propagatingCompany = true;
             try
             {
@@ -1627,12 +1869,43 @@ namespace Dateiumbenenner
                 {
                     if (!m.CompanyCandidates.Contains(name)) m.CompanyCandidates.Add(name);
                     m.CompanyName = name;
-                    ResetAddress(m);
+                    TransferAddress(src, m);
                     if (m.FullText?.Contains(name, StringComparison.OrdinalIgnoreCase) == true) Engine.ConfirmSender(m.FullText, name);
                 }
             }
             finally { _propagatingCompany = false; }
-            TxtStatus.Text = $"Firmenname „{name}“ auf {targets.Count + 1} Datei(en) übertragen.";
+            var adr = FormatAddress(src);
+            TxtStatus.Text = $"Firmenname „{name}“" + (adr.Length > 0 ? $" mit Adresse ({adr})" : " mit leerer Adresse") + $" auf {targets.Count + 1} Datei(en) übertragen."
+                + (edited.Count > 0 ? $" {edited.Count} weitere von Hand geändert." : "");
+        }
+
+        /// <summary>„Belegart übertragen“: Belege gruppiert nach Firma/Nummernaufbau/Belegart, markierte bzw. zugewiesene erhalten die Belegart.</summary>
+        private void BtnMainTransferDocType_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentMeta is not { Loaded: true } src) return;
+            var type = (string.IsNullOrWhiteSpace(CmbDocType.Text) ? src.DocumentType : CmbDocType.Text)?.Trim();
+            if (!string.IsNullOrWhiteSpace(type) && !string.Equals(src.DocumentType, type, StringComparison.Ordinal))
+            {
+                src.DocumentType = type;
+                src.DocTypeManuallySet = true;
+            }
+            var others = _items.Where(m => m != src && m.Loaded).ToList();
+            if (others.Count == 0) { TxtStatus.Text = "Keine weiteren geladenen Belege."; return; }
+            var dlg = new DocTypeTransferDialog(src, others, Dateiumbenenner.Engine.DocTypeStore.Names,
+                (a, b) => !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) && SameCompany(a, b)) { Owner = this };
+            if (dlg.ShowDialog() != true || dlg.Assignments.Count == 0) return;
+            foreach (var (m, t) in dlg.Assignments)
+            {
+                m.DocumentType = t;
+                m.DocTypeManuallySet = true;
+                AutoAssignNumbers(m);
+                RefreshNewNamePreview(m);
+                ScheduleStoreSave(m);
+            }
+            LvFiles.Items.Refresh();
+            ShowDetails(src);
+            TxtStatus.Text = $"Belegart auf {dlg.Assignments.Count} Datei(en) übertragen: "
+                + string.Join(", ", dlg.Assignments.GroupBy(a => a.Value, StringComparer.OrdinalIgnoreCase).Select(g => $"{g.Key} ({g.Count()})"));
         }
 
         private async void BtnMainFromIni_Click(object sender, RoutedEventArgs e)
@@ -1685,9 +1958,28 @@ namespace Dateiumbenenner
         private void ResetAddress(DocumentMetadata meta)
         {
             meta.AddressLoaded = false;
+            meta.AddressManuallySet = false;
             meta.Street = meta.Zip = meta.City = null;
             if (meta == _currentMeta) ShowDetails(meta);
         }
+
+        /// <summary>Firma übertragen = Adresse bestätigt: Straße, PLZ und Ort der Quelle werden übernommen – auch leer
+        /// (entfernt z. B. eine fälschlich erkannte Empfängeradresse) und danach nicht automatisch neu ermittelt.</summary>
+        private void TransferAddress(DocumentMetadata src, DocumentMetadata target)
+        {
+            target.Street = src.Street;
+            target.Zip = src.Zip;
+            target.City = src.City;
+            target.AddressLoaded = true;
+            target.AddressManuallySet = true;
+            _addressTasks.Remove(target);
+            if (target == _currentMeta) ShowDetails(target);
+            RefreshNewNamePreview(target);
+            ScheduleStoreSave(target);
+        }
+
+        private static string FormatAddress(DocumentMetadata m)
+            => string.Join(", ", new[] { m.Street, $"{m.Zip} {m.City}".Trim() }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
         private static string AutoTemplatesOffPath => Path.Combine(Dateiumbenenner.Plugins.PluginManager.BaseDirectory, "templates_auto.off");
         private bool AutoTemplates
@@ -1702,6 +1994,9 @@ namespace Dateiumbenenner
                 .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase)
                 .Select(n => ((string?)i.CompanyName, (string?)i.DocumentType, (string?)n))).ToList();
             var dlg = new NumberRulesWindow(_currentMeta?.CompanyName, _currentMeta?.DocumentType, samples) { Owner = this };
+            string? amount = null;
+            try { if (!string.IsNullOrEmpty(_currentMeta?.FullText)) amount = Engine.ExtractAmount(_currentMeta.FullText).Value; } catch { }
+            dlg.SetDocument(_currentMeta?.FilePath, _currentMeta?.FullText, _currentMeta?.SelectedNumber, _currentMeta?.SelectedDate, amount);
             if (dlg.ShowDialog() != true) return;
             if (CmbDocType != null) CmbDocType.ItemsSource = Dateiumbenenner.Engine.DocTypeStore.Names;
             if (dlg.Recalculate) RecalculateNumbers();
@@ -1726,9 +2021,10 @@ namespace Dateiumbenenner
 
         private void MenuSettings_Click(object sender, RoutedEventArgs e)
         {
-            var dlg = new SettingsWindow(AutoTemplates) { Owner = this };
+            var dlg = new SettingsWindow(AutoTemplates, AutoApplyTemplates) { Owner = this };
             if (dlg.ShowDialog() != true) return;
             AutoTemplates = dlg.AskTemplates;
+            AutoApplyTemplates = dlg.AutoApplyTemplates;
             if (MessageBoxWpf.Show("Einstellungen gespeichert.\n\nFirmenerkennung für alle geladenen Dateien mit den neuen Ausschlüssen neu ausführen?",
                     "Einstellungen", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             _propagatingCompany = true;
@@ -1764,15 +2060,8 @@ namespace Dateiumbenenner
 
         private void ApplyTemplate(DocumentMetadata m, Dateiumbenenner.Engine.DocTemplate t)
         {
-            m.SavedDelimiter = t.Delimiter;
-            m.DelimiterAutoDetected = string.IsNullOrEmpty(t.Delimiter);
-            m.SavedSegmentIndex = t.SegmentIndex;
-            m.UseDelimiterPosition = t.UseDelimiterPosition;
-            m.RemoveDuplicates = t.RemoveDuplicates;
-            m.ReplaceSegments = t.ReplaceSegments;
-            m.RemoveAttachment = t.RemoveAttachment;
-            if (t.InsertPositions.Count > 0)
-                m.InsertPositions = t.InsertPositions.Select(p => new InsertPosition { Position = p.Position, ValueType = p.ValueType, Enabled = p.Enabled }).ToList();
+            ApplyLayout(m, t);
+            m.TemplateDeclined = null;
             if (m == _currentMeta)
             {
                 if (t.PrefixDelimiter != null && TxtPrefixDelimiter != null) TxtPrefixDelimiter.Text = t.PrefixDelimiter;
@@ -1782,21 +2071,115 @@ namespace Dateiumbenenner
                 PopulateSelectors(m);
             }
             RefreshNewNamePreview(m);
+            ScheduleStoreSave(m);
         }
 
         /// <summary>Gespeicherte Vorlagen (Firma + Dokumenttyp) nach Rückfrage anwenden.</summary>
         private void OfferTemplates(IEnumerable<DocumentMetadata> metas)
         {
             if (!AutoTemplates) return;
+            // Nur Dokumente, deren Einstellungen noch von der Vorlage abweichen
             var hits = metas.Select(m => (m, t: Dateiumbenenner.Engine.DocTemplateStore.Get(m.CompanyName, m.DocumentType)))
-                            .Where(x => x.t != null && CompanyMatcher.AppearsInText(x.m.CompanyName, x.m.FullText)).ToList();
+                            .Where(x => x.t != null && CompanyMatcher.AppearsInText(x.m.CompanyName, x.m.FullText) && !TemplateMatches(x.m, x.t)
+                                        && x.m.TemplateDeclined != DeclineKey(x.m, x.t))
+                            .Select(x => (x.m, t: x.t!)).ToList();
             if (hits.Count == 0) return;
-            var text = hits.Count == 1
-                ? $"Für „{hits[0].m.CompanyName} – {hits[0].m.DocumentType}“ gibt es eine gespeicherte Vorlage.\n\nEigenschaften übernehmen?"
-                : $"Für {hits.Count} Dokumente gibt es gespeicherte Vorlagen (Firma + Dokumenttyp).\n\nEigenschaften übernehmen?";
-            if (MessageBoxWpf.Show(text, "Vorlage übernehmen", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-            foreach (var (m, t) in hits) ApplyTemplate(m, t!);
-            TxtStatus.Text = $"Vorlage auf {hits.Count} Dokument(e) angewendet.";
+            var groups = hits.GroupBy(x => ((x.m.CompanyName ?? "").Trim() + "|" + (x.m.DocumentType ?? "").Trim()).ToLowerInvariant())
+                             .Select(g => g.ToList()).ToList();
+            var chosen = AutoApplyTemplates ? groups : AskTemplateGroups(groups);
+            // Abgelehnte Vorlagen je Datei merken, damit nach einem Neustart nicht erneut gefragt wird
+            foreach (var (m, t) in groups.Where(g => chosen == null || !chosen.Contains(g)).SelectMany(g => g))
+            {
+                m.TemplateDeclined = DeclineKey(m, t);
+                ScheduleStoreSave(m);
+            }
+            if (chosen == null || chosen.Count == 0) return;
+            foreach (var (m, t) in chosen.SelectMany(g => g)) ApplyTemplate(m, t);
+            TxtStatus.Text = "Vorlage angewendet: " + string.Join(", ", chosen.Select(g => $"{g[0].m.CompanyName} – {g[0].m.DocumentType} ({g.Count})"))
+                + (AutoApplyTemplates ? "  (automatisch, abschaltbar unter Einstellungen)" : "");
+        }
+
+        private static string DeclineKey(DocumentMetadata m, Dateiumbenenner.Engine.DocTemplate t)
+            => $"{m.CompanyName?.Trim()}|{m.DocumentType?.Trim()}|{DescribeTemplate(t)}".ToLowerInvariant();
+
+        private static string AutoApplyTemplatesPath => Path.Combine(Dateiumbenenner.Plugins.PluginManager.BaseDirectory, "templates_auto.apply");
+        /// <summary>Vorlagen beim Laden ohne Rückfrage anwenden.</summary>
+        private bool AutoApplyTemplates
+        {
+            get => File.Exists(AutoApplyTemplatesPath);
+            set { try { if (!value) { if (File.Exists(AutoApplyTemplatesPath)) File.Delete(AutoApplyTemplatesPath); } else { Directory.CreateDirectory(Path.GetDirectoryName(AutoApplyTemplatesPath)!); File.WriteAllText(AutoApplyTemplatesPath, ""); } } catch { } }
+        }
+
+        private static List<(int Pos, string Type)> EffectivePositions(IEnumerable<(int Pos, string Type, bool Enabled)>? list)
+        {
+            var l = list?.Where(p => p.Enabled).Select(p => (p.Pos, p.Type)).ToList() ?? new();
+            if (l.Count == 0) l = new() { (1, "Nummer (Auswahl)"), (2, "Datum"), (3, "Dokumenttyp") };
+            return l.OrderBy(p => p.Pos).ThenBy(p => p.Type).ToList();
+        }
+
+        /// <summary>Entspricht das Dokument bereits der Vorlage? Dann muss nicht gefragt werden.</summary>
+        private static bool TemplateMatches(DocumentMetadata m, Dateiumbenenner.Engine.DocTemplate t)
+        {
+            if (!string.IsNullOrEmpty(t.Delimiter) && m.SavedDelimiter != t.Delimiter) return false;
+            if (t.SegmentIndex.HasValue && m.SavedSegmentIndex != t.SegmentIndex) return false;
+            if (m.UseDelimiterPosition != t.UseDelimiterPosition || m.RemoveDuplicates != t.RemoveDuplicates
+                || m.ReplaceSegments != t.ReplaceSegments || m.RemoveAttachment != t.RemoveAttachment) return false;
+            return t.InsertPositions.Count == 0
+                || EffectivePositions(m.InsertPositions?.Select(p => (p.Position, p.ValueType, p.Enabled)))
+                   .SequenceEqual(EffectivePositions(t.InsertPositions.Select(p => (p.Position, p.ValueType, p.Enabled))));
+        }
+
+        private static string DescribeTemplate(Dateiumbenenner.Engine.DocTemplate t)
+        {
+            var parts = new List<string> { "Trennzeichen " + (string.IsNullOrEmpty(t.Delimiter) ? "automatisch" : $"„{t.Delimiter}“") };
+            if (t.SegmentIndex.HasValue) parts.Add($"Segment {t.SegmentIndex}");
+            var pos = t.InsertPositions.Where(p => p.Enabled).OrderBy(p => p.Position).Select(p => $"{p.Position}. {p.ValueType}").ToList();
+            if (pos.Count > 0) parts.Add("Einfügen: " + string.Join(", ", pos));
+            if (t.RemoveDuplicates) parts.Add("doppelte Segmente entfernen");
+            if (t.ReplaceSegments) parts.Add("Segmente ersetzen");
+            if (t.RemoveAttachment) parts.Add("Anhang entfernen");
+            return string.Join(" · ", parts);
+        }
+
+        /// <summary>Auswahl, welche Vorlagen angewendet werden: je Firma + Dokumenttyp mit Anzahl, Inhalt und Dateiliste (Tooltip).</summary>
+        private List<List<(DocumentMetadata m, Dateiumbenenner.Engine.DocTemplate t)>>? AskTemplateGroups(List<List<(DocumentMetadata m, Dateiumbenenner.Engine.DocTemplate t)>> groups)
+        {
+            var dlg = new Window { Title = "Gespeicherte Vorlagen übernehmen?", Owner = this, SizeToContent = SizeToContent.WidthAndHeight, MaxHeight = 600, MaxWidth = 900,
+                                   WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
+            var panel = new StackPanel { Margin = new Thickness(16) };
+            panel.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, MaxWidth = 640, Margin = new Thickness(0, 0, 0, 10),
+                Text = "Für folgende Firmen und Dokumenttypen haben Sie früher eine Vorlage gespeichert (Button „Eigenschaften übertragen“). " +
+                       "Eine Vorlage legt fest, wie der neue Dateiname aufgebaut wird (Trennzeichen, Segment, Einfügepositionen). " +
+                       "Die Firma oder andere erkannte Werte werden dabei nicht geändert.\n\nHaken = Vorlage auf diese Dokumente anwenden:" });
+            var boxes = new List<(CheckBoxWpf box, List<(DocumentMetadata m, Dateiumbenenner.Engine.DocTemplate t)> group)>();
+            var list = new StackPanel();
+            foreach (var g in groups)
+            {
+                var (m0, t0) = g[0];
+                var files = g.Select(x => x.m.FileName).Take(25).ToList();
+                var box = new CheckBoxWpf
+                {
+                    IsChecked = true, Margin = new Thickness(0, 3, 0, 3),
+                    ToolTip = string.Join("\n", files) + (g.Count > files.Count ? $"\n… und {g.Count - files.Count} weitere" : ""),
+                    Content = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxWidth = 610,
+                        Text = $"{m0.CompanyName} – {m0.DocumentType}:  {g.Count} Dokument(e)\n    {DescribeTemplate(t0)}" }
+                };
+                boxes.Add((box, g));
+                list.Children.Add(box);
+            }
+            panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 330, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+            var chkAuto = new CheckBoxWpf { Content = "Künftig ohne Rückfrage übernehmen (abschaltbar unter Einstellungen)", Margin = new Thickness(0, 12, 0, 0) };
+            panel.Children.Add(chkAuto);
+            var buttons = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = System.Windows.HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+            var ok = new System.Windows.Controls.Button { Content = "Übernehmen", Width = 100, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
+            var no = new System.Windows.Controls.Button { Content = "Nicht übernehmen", Width = 120, IsCancel = true };
+            ok.Click += (_, _) => dlg.DialogResult = true;
+            buttons.Children.Add(ok); buttons.Children.Add(no);
+            panel.Children.Add(buttons);
+            dlg.Content = panel;
+            if (dlg.ShowDialog() != true) return null;
+            if (chkAuto.IsChecked == true) AutoApplyTemplates = true;
+            return boxes.Where(b => b.box.IsChecked == true).Select(b => b.group).ToList();
         }
 
         private void BtnApplyTemplate_Click(object sender, RoutedEventArgs e)
@@ -1852,7 +2235,7 @@ namespace Dateiumbenenner
             {
                 await Dateiumbenenner.Engine.PlzDirectory.DownloadGeoNamesAsync();
                 var count = await Task.Run(Dateiumbenenner.Engine.DocumentEngine.ReloadPlz);
-                foreach (var m in _items) m.AddressLoaded = false;
+                foreach (var m in _items.Where(i => !i.AddressManuallySet)) m.AddressLoaded = false;
                 if (_currentMeta != null) ShowDetails(_currentMeta);
                 MessageBoxWpf.Show($"PLZ-Verzeichnis aktualisiert: {count} PLZ (vorher {before}).", "PLZ-Verzeichnis", MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -1958,7 +2341,7 @@ namespace Dateiumbenenner
 
         private void UpdateMetadataFromSelections(DocumentMetadata meta){ if(meta==null||_isPopulatingSelectors) return; if(CmbDocType!=null && !string.IsNullOrWhiteSpace(CmbDocType.Text)) meta.DocumentType=CmbDocType.Text.Trim(); if(CmbNumberCandidates!=null && !string.IsNullOrWhiteSpace(CmbNumberCandidates.Text)) meta.SelectedNumber=CmbNumberCandidates.Text.Trim(); if(CmbDateCandidates!=null && !string.IsNullOrWhiteSpace(CmbDateCandidates.Text)){ var dt=CmbDateCandidates.Text.Trim(); meta.SelectedDate=dt; meta.Date=dt; } }
 
-        private void SaveCurrentSettings(DocumentMetadata meta){ if(meta==null||!meta.Loaded) return; if(_currentMeta!=meta || _isPopulatingSelectors) return; var docType=CmbDocType.Text; if(!string.IsNullOrEmpty(docType)){ meta.DocumentType=docType; meta.DocTypeManuallySet=true; } var number=CmbNumberCandidates.Text; if(!string.IsNullOrWhiteSpace(number)){ meta.SelectedNumber=number; meta.NumberManuallySet=true; } var date=CmbDateCandidates.Text; if(!string.IsNullOrWhiteSpace(date)){ meta.SelectedDate=date; meta.Date=date; meta.DateManuallySet=true; } meta.SavedDelimiter=TxtDelimiter.Text; meta.RemoveDuplicates=ChkRemoveDuplicates.IsChecked==true; meta.ReplaceSegments=ChkReplaceSegments.IsChecked==true; meta.RemoveAttachment=ChkRemoveAttachment.IsChecked==true; if(int.TryParse(TxtSegmentIndex.Text,out int segIdx)) meta.SavedSegmentIndex=segIdx; meta.UseDelimiterPosition=ChkUseDelimiterPosition.IsChecked==true; meta.InsertPositions.Clear(); if(CmbNumberPosition!=null && CmbNumberPosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbNumberPosition.SelectedIndex+1,ValueType="Nummer (Auswahl)",Enabled=true}); if(CmbDatePosition!=null && CmbDatePosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbDatePosition.SelectedIndex+1,ValueType="Datum",Enabled=true}); if(CmbDocTypePosition!=null && CmbDocTypePosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbDocTypePosition.SelectedIndex+1,ValueType="Dokumenttyp",Enabled=true}); if(CmbAddressPosition!=null && CmbAddressPosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbAddressPosition.SelectedIndex+1,ValueType=AddressTypePrefix+SelectedAddressPart,Enabled=true}); if(TxtEditableNewName!=null && TxtEditableNewName.IsFocused) meta.ManualFileName=TxtEditableNewName.Text.Trim(); RefreshNewNamePreview(meta); ScheduleStoreSave(meta); }
+        private void SaveCurrentSettings(DocumentMetadata meta){ if(meta==null||!meta.Loaded) return; if(_currentMeta!=meta || _isPopulatingSelectors) return; var docType=CmbDocType.Text; if(!string.IsNullOrEmpty(docType)){ meta.DocumentType=docType; meta.DocTypeManuallySet=true; } var number=CmbNumberCandidates.Text; if(!string.IsNullOrWhiteSpace(number)){ meta.SelectedNumber=number; meta.NumberManuallySet=true; } var date=CmbDateCandidates.Text; if(!string.IsNullOrWhiteSpace(date)){ meta.SelectedDate=date; meta.Date=date; meta.DateManuallySet=true; } meta.SavedDelimiter=TxtDelimiter.Text; meta.RemoveDuplicates=ChkRemoveDuplicates.IsChecked==true; meta.ReplaceSegments=ChkReplaceSegments.IsChecked==true; meta.RemoveAttachment=ChkRemoveAttachment.IsChecked==true; if(int.TryParse(TxtSegmentIndex.Text,out int segIdx)) meta.SavedSegmentIndex=segIdx; meta.UseDelimiterPosition=ChkUseDelimiterPosition.IsChecked==true; meta.InsertPositions.Clear(); if(CmbNumberPosition!=null && CmbNumberPosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbNumberPosition.SelectedIndex+1,ValueType="Nummer (Auswahl)",Enabled=true}); if(CmbDatePosition!=null && CmbDatePosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbDatePosition.SelectedIndex+1,ValueType="Datum",Enabled=true}); if(CmbDocTypePosition!=null && CmbDocTypePosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbDocTypePosition.SelectedIndex+1,ValueType="Dokumenttyp",Enabled=true}); if(CmbAddressPosition!=null && CmbAddressPosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbAddressPosition.SelectedIndex+1,ValueType=AddressTypePrefix+SelectedAddressPart,Enabled=true}); if(TxtEditableNewName!=null && TxtEditableNewName.IsFocused) meta.ManualFileName=TxtEditableNewName.Text.Trim(); meta.LayoutSet=true; RefreshNewNamePreview(meta); ScheduleStoreSave(meta); }
 
         private void RefreshNewNamePreview(DocumentMetadata meta){ if(meta==null) return; ChainedUpdates(()=>{ var raw=GenerateNewFileName(meta); var unique=EnsureUniquePreviewName(meta,raw); meta.ProposedNewName=unique; if(TxtEditableNewName!=null){ _isSettingPreviewName=true; try{ var sel=TxtEditableNewName.SelectionStart; TxtEditableNewName.Text=unique; TxtEditableNewName.SelectionStart=Math.Min(sel,unique.Length); } finally { _isSettingPreviewName=false; } } }); }
         private void ChainedUpdates(Action act){ _updateTimer?.Stop(); _updateTimer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(100)}; _updateTimer.Tick += (s,e)=>{ _updateTimer.Stop(); act(); }; _updateTimer.Start(); }
@@ -2032,9 +2415,22 @@ namespace Dateiumbenenner
             catch { }
             meta.AddressLoaded = true;
             if (string.IsNullOrWhiteSpace(meta.Street) && string.IsNullOrWhiteSpace(meta.Zip) && string.IsNullOrWhiteSpace(meta.City))
-                _ = FillAddressFromProvidersAsync(meta);
+                _addressTasks[meta] = FillAddressFromProvidersAsync(meta);
             else
                 LogAddress(meta, $"Dokumentadresse verwendet, keine DB-Abfrage: {meta.Street}, {meta.Zip} {meta.City}");
+        }
+
+        private readonly Dictionary<DocumentMetadata, Task> _addressTasks = new();
+
+        /// <summary>Adresse ermitteln und auf eine laufende DB-Abfrage warten.</summary>
+        private async Task EnsureAddressAsync(DocumentMetadata meta)
+        {
+            EnsureAddress(meta);
+            if (_addressTasks.TryGetValue(meta, out var t))
+            {
+                try { await t; } catch { }
+                _addressTasks.Remove(meta);
+            }
         }
 
         /// <summary>Diagnose: Statuszeile (aktuelles Dokument) + Daten/debug/db_address.log.</summary>
@@ -2072,6 +2468,7 @@ namespace Dateiumbenenner
                 try
                 {
                     var r = await p.LookupAddressAsync(company);
+                    if (meta.AddressManuallySet) return;
                     if (r == null) { LogAddress(meta, $"{p.GetType().Name}: kein Treffer für „{company}“ (DB aus, Adressspalten leer oder Firma nicht gefunden)."); continue; }
                     if (string.IsNullOrWhiteSpace(meta.Street)) meta.Street = r.Street;
                     if (string.IsNullOrWhiteSpace(meta.Zip)) meta.Zip = r.Zip;
@@ -2276,17 +2673,16 @@ namespace Dateiumbenenner
         private void ChkNaturalSort_Changed(object sender,RoutedEventArgs e){ _useNaturalSort=ChkNaturalSort.IsChecked==true; if(Directory.Exists(TxtFolder.Text)) _=LoadFolderAsync(TxtFolder.Text); }
         private System.Windows.Threading.DispatcherTimer? _filterTimer; private int _filterVersion;
         private void TxtFilter_TextChanged(object sender,TextChangedEventArgs e){ _filterTimer??=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(300)}; _filterTimer.Tick-=FilterTimer_Tick; _filterTimer.Tick+=FilterTimer_Tick; _filterTimer.Stop(); _filterTimer.Start(); }
-        private async void FilterTimer_Tick(object? sender,EventArgs e){ _filterTimer!.Stop(); var ft=TxtFilter.Text; int v=++_filterVersion; if(string.IsNullOrWhiteSpace(ft)){ _filterCts?.Cancel(); LvFiles.ItemsSource=_items; return; }
+        private async void FilterTimer_Tick(object? sender,EventArgs e){ _filterTimer!.Stop(); var ft=TxtFilter.Text; int v=++_filterVersion; if(string.IsNullOrWhiteSpace(ft)){ _filterCts?.Cancel(); _filterCts=null; LvFiles.ItemsSource=_items; UpdateIndexState(); return; }
         var snapshot=_items.ToList(); TxtStatus.Text="Filter..."; _filterCts?.Cancel(); var cts=_filterCts=new CancellationTokenSource(); var tok=cts.Token;
                     List<DocumentMetadata> result; int textHits=0;
                     var idxProgress=new Progress<(int Done,int Total)>(p=>{ if(v!=_filterVersion) return; ShowIndexBuilding(p.Done,p.Total); });
-                                        if(ft.Trim().Length>=3 && !DocumentStore.IsFullTextIndexReady) ShowIndexBuilding(0,0);
+                                        if(ft.Trim().Length>=3 && !DocumentStore.IsFullTextIndexReady) ShowIndexBuilding(0,0); else ShowSearching();
                     try{ result=await Task.Run(()=>{ if(!DocumentStore.IsFullTextIndexReady) DocumentStore.EnsureFullTextIndex(idxProgress); var full=DocumentStore.SearchFullText(ft,idxProgress); tok.ThrowIfCancellationRequested(); var list=new List<DocumentMetadata>(); var opts=new ParallelOptions{CancellationToken=tok}; var hit=new bool[snapshot.Count];
                         Parallel.For(0,snapshot.Count,opts,k=>{ var i=snapshot[k]; var key=string.Concat(i.FileName,"\u0001",i.InvoiceNumber,"\u0001",i.DocumentNumber,"\u0001",i.CompanyName,"\u0001",i.DocumentType,"\u0001",Convert.ToString(i.Date)); hit[k]=key.Contains(ft,StringComparison.OrdinalIgnoreCase) || (full!=null && full.Contains(i.FilePath)); });
                         for(int k=0;k<hit.Length;k++) if(hit[k]) list.Add(snapshot[k]); if(full!=null) textHits=full.Count; return list; },tok); }
-                    catch(OperationCanceledException){ return; }
-                    finally{ UpdateIndexState(); }
-                    if(v!=_filterVersion) return; LvFiles.ItemsSource=result; TxtStatus.Text=$"{result.Count:N0} von {snapshot.Count:N0} Belegen" + (textHits>0?$" (inkl. Volltext: {textHits:N0} Treffer im Belegtext)":""); }
+                    catch(OperationCanceledException){ if(v==_filterVersion) UpdateIndexState(); return; }
+                    if(v!=_filterVersion) return; LvFiles.ItemsSource=result; UpdateIndexState(); TxtStatus.Text=$"{result.Count:N0} von {snapshot.Count:N0} Belegen" + (textHits>0?$" (inkl. Volltext: {textHits:N0} Treffer im Belegtext)":""); }
                 private CancellationTokenSource? _filterCts;
         private System.Windows.Threading.DispatcherTimer? _bookTimer; private int _bookFrame;
         private static readonly string[] BookFrames = { "\U0001F4D5", "\U0001F4D6", "\U0001F4D7", "\U0001F4D6", "\U0001F4D8", "\U0001F4D6", "\U0001F4D9", "\U0001F4D6" };
@@ -2299,6 +2695,14 @@ namespace Dateiumbenenner
             if(total>0){ IdxBar.Maximum=total; IdxBar.Value=done; }
             IdxText.Text=total>0?$"Index wird erstellt (einmalig) … {done:N0} von {total:N0} Belegen":"Index wird erstellt …";
             TxtStatus.Text=IdxText.Text;
+        }
+        private void ShowSearching()
+        {
+            _bookTimer?.Stop();
+            IdxLamp.Fill=System.Windows.Media.Brushes.Gold;
+            IdxIcon.Text="\U0001F50D";
+            IdxBar.Visibility=Visibility.Visible; IdxBar.IsIndeterminate=true;
+            IdxText.Text="Suche läuft …";
         }
         private void UpdateIndexState()
         {

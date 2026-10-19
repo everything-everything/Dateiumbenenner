@@ -2,12 +2,17 @@
 # SHA-256-Hashliste aller Dateien inkl. CMS-Signatur, ZIP-Archiv.
 param(
     [string]$Version = "1.0.0",
-    [string]$Subject = 'CN=everything-everything, E="85025743+everything-everything@users.noreply.github.com"'
+    [string]$Subject = 'CN=everything-everything, E="85025743+everything-everything@users.noreply.github.com"',
+    [switch]$IncludeIniGeneratorPlugin
 )
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $out = Join-Path $root "release\Dateiumbenenner-$Version"
 $cerPath = Join-Path $root "release\Dateiumbenenner-CodeSigning.cer"
+$pluginProject = Join-Path $root "Plugins\IniGeneratorPlugin\IniGeneratorPlugin.csproj"
+if ($IncludeIniGeneratorPlugin -and -not (Test-Path -LiteralPath $pluginProject -PathType Leaf)) {
+    throw "Das private INI-Generator-Projekt fehlt: $pluginProject"
+}
 
 # 1. Zertifikat suchen oder selbst ausstellen
 $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object { $_.Subject -eq $Subject -and $_.NotAfter -gt (Get-Date) } | Select-Object -First 1
@@ -19,6 +24,9 @@ if (-not $cert) {
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 dotnet publish (Join-Path $root "Dateiumbenenner\Dateiumbenenner.csproj") -c Release -r win-x64 --self-contained false -o $out
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish fehlgeschlagen" }
+if (Test-Path -LiteralPath (Join-Path $out "Plugins")) {
+    throw "Das Hauptprogramm-Paket darf keine Plugins enthalten."
+}
 Copy-Item (Join-Path $root "LICENSE"), (Join-Path $root "THIRD-PARTY-NOTICES.md"), (Join-Path $root "README.md") $out
 
 # 3. Eigene Binärdateien und Skripte Authenticode-signieren (Fremd-DLLs bleiben unverändert)
@@ -55,11 +63,32 @@ Compress-Archive -Path "$out\*" -DestinationPath $zip
 Write-Host "Fertig: $zip"
 Write-Host "Zertifikat-Fingerabdruck: $($cert.Thumbprint)"
 
+if ($IncludeIniGeneratorPlugin) {
+    dotnet build $pluginProject -c Release "-p:Version=$Version"
+    if ($LASTEXITCODE -ne 0) { throw "Plugin-Build fehlgeschlagen" }
+
+    # Nur das kuratierte Paket verwenden, niemals den gesamten bin-Ordner packen.
+    $pluginPackage = Join-Path $root "Plugins\IniGeneratorPlugin\dist\Dateiumbenenner.IniGenerator.Plugin-$Version.zip"
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($pluginPackage)
+    try {
+        if ($null -eq $archive.GetEntry('Server/dateiumbenenner_api.php')) {
+            throw "Die PHP-API fehlt im Plugin-Paket: $pluginPackage"
+        }
+    } finally {
+        $archive.Dispose()
+    }
+    $pluginZip = Join-Path $root "release\Dateiumbenenner.IniGenerator.Plugin-$Version.zip"
+    Copy-Item -LiteralPath $pluginPackage -Destination $pluginZip -Force
+    "{0}  {1}" -f (Get-FileHash $pluginZip -Algorithm SHA256).Hash.ToLower(), (Split-Path $pluginZip -Leaf) | Set-Content "$pluginZip.sha256" -Encoding UTF8
+    Write-Host "Separates Plugin-Paket: $pluginZip"
+}
+
 # SIG # Begin signature block
 # MIIH/AYJKoZIhvcNAQcCoIIH7TCCB+kCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCtR1A/0S0nVrvm
-# fJKRaFSxJauVTGWDhORVhf2RIQVXJKCCBKQwggSgMIIDCKADAgECAhBDYujFJsGA
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBsXia/v8mpe3z
+# xcs2rMWuq07pHc7iOCj3LuH+zodiNaCCBKQwggSgMIIDCKADAgECAhBDYujFJsGA
 # mEtWv63vIZ0LMA0GCSqGSIb3DQEBCwUAMGgxRjBEBgkqhkiG9w0BCQEWNzg1MDI1
 # NzQzK2V2ZXJ5dGhpbmctZXZlcnl0aGluZ0B1c2Vycy5ub3JlcGx5LmdpdGh1Yi5j
 # b20xHjAcBgNVBAMMFWV2ZXJ5dGhpbmctZXZlcnl0aGluZzAeFw0yNjEwMDIyMjMz
@@ -89,14 +118,14 @@ Write-Host "Zertifikat-Fingerabdruck: $($cert.Thumbprint)"
 # Yi5jb20xHjAcBgNVBAMMFWV2ZXJ5dGhpbmctZXZlcnl0aGluZwIQQ2LoxSbBgJhL
 # Vr+t7yGdCzANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgACh
 # AoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAM
-# BgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCmADb4izOTMH9LRnR60Gk/zyaO
-# lhJ7f1/G8mD3hIzfSTANBgkqhkiG9w0BAQEFAASCAYBPsV1urAEMa6aW1k7X6bkK
-# Pn1iuqEW9Yd9WTmhHa6Ms2t4DQMHFhFwjsqOB4h/EdOE35HO9+4ie96eiRrXy8wI
-# E3gY49PjhAR9FeGf7f4KEJ87lVobT8ReGKozcA2YwO80J7ptYdKcoKm2Mt2NEwWc
-# Tqh2dlMr0xhMyF7bxhKKby3CNsNaga6ucASXhAqhRtZpR+JuSIufRcFyOB2wr5wG
-# z6r0tzzDeZM+fqZfpAm0Ve7JoEs3S4UD59dYhyfgerpgNz92NphkC7CeUVZHacmX
-# rFIfY+ySOfPQuyZIs3ffVBY1zHUR1q17pTuWYDEy8+/SAXBZ4/MDbDzb3jb755rH
-# SefYPsE1k+Vcix0sC9SCPVCzVuBDo2QKLsVql7HGG4QQU48XORudtzMe8phwqNge
-# Fz46w4p1OnIyGu5hoTDI63wzgdp20sCjzpTw3Hm0i1F10MOEBu1b4MKHkSUBveh4
-# 5sk1Mp+CS+dKgEvaHRugzVV5cFbYKmB9YoZuqGCkyG0=
+# BgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAn6eRTw3KAkdUMoteAo7DzMrUx
+# GfUCqTs9XgOlHoKjqTANBgkqhkiG9w0BAQEFAASCAYBI4YD/Slc7GiSCcJitH3mm
+# JK4BTxJLTwK6i9Ss1aXo6o7l0X/nElXFHuRUoq5mhhzFE4ZQZYbeYbrQVF5lT8w2
+# tvB42FACTAu+eLQ0kZ+PWq+tYTUGUh+tXH5GNKbSsUGSwV2gLPItAubdaia+mugC
+# 6bt7RNhNpn438kPfHyKONRTYj2yecqJRviK81ce/hKjTeoK6Co351kj18gv87zz1
+# GZ1LU9ufzaQxXQnC0RUNLV1nzkHded59cwhH1fxMxPQuGDyra+6MBA7PjoabZp7w
+# JFmQLxn+SCMUjEy87lYom7pHHFbddpmKqbkWyD10H991Qwv6X5YsZnJ9JXzuHLUa
+# GDEOXueNYdx9iyDMbfqCIv8R5S873+HM1RzxmrmACeaEVbFPf4+opWKcaqGViUCw
+# k81+SldDZs3BpfYCX6BD7HtMGqqht8lfeaQ2L7nw2VDkv/ZAtcwDSVPsg87AZlwU
+# 4S6XLlkSU9ZS++EnEaKuHo6frRZ4BEBqW5m0rS4rweE=
 # SIG # End signature block

@@ -275,7 +275,7 @@
                             <TextBlock Text="Seiten:" Grid.Row="3" Grid.Column="0" Margin="0,0,5,5"/>
                             <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
                                 <TextBlock x:Name="TxtDetailPages"/>
-                                <TextBlock Text="Absender:" Margin="20,0,5,0" Foreground="Gray"/>
+                                <TextBlock Text="Absender:" Margin="20,0,5,0"/>
                                 <TextBlock x:Name="TxtDetailAddress" ToolTip="Erkannte Absenderadresse (Engine-Bewertung)"/>
                             </StackPanel>
 
@@ -283,7 +283,7 @@
                             <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,10,0,5">
                                 <TextBlock Text="Firma:" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <ComboBox x:Name="CmbMainCompany" IsEditable="True" Width="170" Margin="0,0,4,0" ToolTip="Firmenname auswählen oder eingeben"/>
-                                <Button Content="&#220;bertragen&#8230;" Padding="6,0" Margin="0,0,4,0" Click="BtnMainTransferName_Click" ToolTip="Firmennamen auf weitere Dateien &#252;bertragen (Auswahl in &#220;bersicht)"/>
+                                <Button x:Name="BtnMainTransferName" Content="&#220;bertragen&#8230;" Padding="6,0" Margin="0,0,4,0" Click="BtnMainTransferName_Click" ToolTip="Firmennamen auf weitere Dateien &#252;bertragen (Auswahl in &#220;bersicht)"/>
                                 <Button Content="Aus INI Erzeugen übernehmen" Padding="6,0" Margin="0,0,10,0" Click="BtnMainFromIni_Click" ToolTip="Firma, Dokumenttyp, Nummer und Datum aus der Registerkarte INI Erzeugen (zuletzt erzeugte INI) für die markierten bzw. alle Dateien übernehmen"/>
                                 <TextBlock Text="Neuer Pr&#228;fix:" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <TextBox x:Name="TxtMainNewPrefix" Width="130" Margin="0,0,10,0" VerticalContentAlignment="Center"/>
@@ -299,7 +299,8 @@
                             <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
                                 <ComboBox x:Name="CmbDocType" IsEditable="True" SelectionChanged="CmbDocType_SelectionChanged" 
                                           LostFocus="EditableCombo_DropDownClosed" MaxDropDownHeight="180" KeyDown="EditableCombo_KeyDown" 
-                                          Width="170" Margin="0,0,10,0"/>
+                                          Width="170" Margin="0,0,4,0"/>
+                                <Button Content="&#220;bertragen&#8230;" Padding="6,0" Margin="0,0,10,0" Click="BtnMainTransferDocType_Click" ToolTip="Belegart auf weitere Belege &#252;bertragen: gleiche Firma und gleicher Nummernaufbau/-kreis oder &#228;hnlicher Inhalt; Gruppenzuweisung m&#246;glich"/>
                                 <TextBlock Text=":" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <ComboBox x:Name="CmbDocTypePosition" Width="90" SelectedIndex="2" SelectionChanged="InsertPosition_Changed">
                                     <ComboBoxItem Content="Position 1"/>

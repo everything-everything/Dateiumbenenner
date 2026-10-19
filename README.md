@@ -35,6 +35,22 @@ Dateiumbenenner selbst steht unter MIT-Lizenz. Details: THIRD-PARTY-NOTICES.md.
 dotnet build Dateiumbenenner.slnx -c Release
 ```
 
+### Release-Pakete
+`Build-SignedRelease.ps1 -Version <Version>` erstellt nur das Hauptprogramm.
+Wenn das private INI-Generator-Projekt lokal vorhanden ist, erstellt
+`Build-SignedRelease.ps1 -Version <Version> -IncludeIniGeneratorPlugin`
+zusätzlich ein **separates** Plugin-ZIP mit eigener SHA-256-Datei unter `release`.
+Das Plugin gehört nicht in das Hauptprogramm-ZIP und wird nicht automatisch hochgeladen.
+
+Für das Plugin ausschließlich das vom Release-Build erzeugte ZIP aus
+`Plugins\IniGeneratorPlugin\dist` verwenden, nicht den vollständigen `bin`- oder
+Publish-Ordner packen: Dieser enthält auch große Abhängigkeiten des Hauptprogramms
+und native Bibliotheken für andere Plattformen.
+Das Plugin-ZIP enthält den Ordner `Dateiumbenenner.IniGenerator.Plugin` mit den
+Plugin-Dateien sowie `Server\dateiumbenenner_api.php` für die separate Installation
+auf dem Webserver. Der Plugin-Ordner wird unter `Plugins` neben der EXE installiert;
+die PHP-Datei gehört auf den Webserver, nicht in das Hauptprogramm-Verzeichnis.
+
 ## Integrität / Signatur
 Releases enthalten `SHA256SUMS.txt` (SHA-256 aller Dateien), die Signatur `SHA256SUMS.txt.p7s` und das öffentliche, selbst ausgestellte Zertifikat `Dateiumbenenner-CodeSigning.cer`. EXE/DLL des Projekts sind Authenticode-signiert.
 

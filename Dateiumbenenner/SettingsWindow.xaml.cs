@@ -6,12 +6,13 @@ namespace Dateiumbenenner
 {
     public partial class SettingsWindow : Window
     {
-        public SettingsWindow(bool askTemplates)
+        public SettingsWindow(bool askTemplates, bool autoApplyTemplates = false)
         {
             InitializeComponent();
             ChkDebug.IsChecked = DocumentEngine.DebugEnabled;
             CmbTheme.SelectedIndex = ThemeManager.Current == ThemeManager.Theme.WindowsXp ? 1 : 0;
             ChkAskTemplates.IsChecked = askTemplates;
+            ChkAutoApplyTemplates.IsChecked = autoApplyTemplates;
             TxtExclusions.Text = string.Join(Environment.NewLine, CompanyExclusions.Items);
             var own = OwnCompany.Current;
             TxtThreshold.Text = Math.Round(CompanyMatcher.Threshold * 100).ToString();
@@ -20,6 +21,7 @@ namespace Dateiumbenenner
         }
 
         public bool AskTemplates => ChkAskTemplates.IsChecked == true;
+        public bool AutoApplyTemplates => ChkAutoApplyTemplates.IsChecked == true;
 
         private void BtnOk_Click(object sender, RoutedEventArgs e)
         {

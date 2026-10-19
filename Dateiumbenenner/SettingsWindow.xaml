@@ -15,7 +15,8 @@
             </ComboBox>
         </StackPanel>
         <CheckBox x:Name="ChkDebug" DockPanel.Dock="Top" Content="Debug-Dateien schreiben (Daten\debug)" Margin="0,0,0,10"/>
-        <CheckBox x:Name="ChkAskTemplates" DockPanel.Dock="Top" Content="Vorlagen (Firma + Dokumenttyp) automatisch anbieten" Margin="0,0,0,10"/>
+        <CheckBox x:Name="ChkAskTemplates" DockPanel.Dock="Top" Content="Vorlagen (Firma + Dokumenttyp) automatisch anbieten" Margin="0,0,0,4"/>
+        <CheckBox x:Name="ChkAutoApplyTemplates" DockPanel.Dock="Top" Content="Vorlagen beim Laden ohne Rückfrage übernehmen" Margin="18,0,0,10" IsEnabled="{Binding IsChecked, ElementName=ChkAskTemplates}"/>
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10"
                     ToolTip="Ab dieser Ähnlichkeit gelten zwei Firmennamen als gleich (OCR-Fehler) – auch beim Umstellen weiterer Belege. Standard 82 %.">
             <TextBlock Text="Übereinstimmung Firmennamen (50–100 %):" VerticalAlignment="Center" Margin="0,0,6,0"/>

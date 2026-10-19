@@ -129,8 +129,13 @@ namespace Dateiumbenenner
         private void UpdateExternalEditors(PrefixRenameItem? item)
         {
             if (_extCompany == null || _extPrefix == null || _extNewName == null) return;
-            _extCompany.ItemsSource = item?.CompanyNameCandidates.ToList();
-            _extCompany.Text = item?.SelectedCompanyName ?? string.Empty;
+            var company = item?.SelectedCompanyName ?? string.Empty;
+            // Während der Benutzer im Feld tippt und der Wert schon stimmt, Liste/Text nicht neu setzen (Cursor bliebe sonst nicht stehen)
+            if (!(_extCompany.IsKeyboardFocusWithin && string.Equals(_extCompany.Text?.Trim(), company.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                _extCompany.ItemsSource = item?.CompanyNameCandidates.ToList();
+                _extCompany.Text = company;
+            }
             _extPrefix.Text = item?.NewPrefix ?? string.Empty;
             _extNewName.Text = item == null || string.IsNullOrEmpty(item.NewPrefix) ? string.Empty : item.NewFileName;
             if (_extSplitInfo != null)
@@ -170,7 +175,15 @@ namespace Dateiumbenenner
                 
                 // VERBESSERT: Alle Firmennamen-Kandidaten extrahieren
                 item.CompanyNameCandidates = ExtractAllCompanyNames(meta.FullText);
-                
+
+                // Firma des Belegs (gespeichert/bestätigt) hat Vorrang vor dem ersten Textkandidaten
+                var company = meta.CompanyName?.Trim();
+                if (!string.IsNullOrWhiteSpace(company))
+                {
+                    item.CompanyNameCandidates.RemoveAll(c => string.Equals(c, company, StringComparison.OrdinalIgnoreCase));
+                    item.CompanyNameCandidates.Insert(0, company);
+                }
+
                 // Ersten Kandidaten als Standard setzen
                 if (item.CompanyNameCandidates.Any())
                 {

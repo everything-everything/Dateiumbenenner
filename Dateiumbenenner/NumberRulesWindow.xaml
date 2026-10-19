@@ -1,7 +1,7 @@
 <Window x:Class="Dateiumbenenner.NumberRulesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Belegarten &amp; Nummernmuster" Height="560" Width="1000"
+        Title="Belegarten &amp; Nummernmuster" Height="640" Width="1000"
         WindowStartupLocation="CenterOwner">
     <DockPanel Margin="10">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
@@ -9,7 +9,17 @@
             <Button Content="Speichern" Padding="10,3" Margin="0,0,8,0" IsDefault="True" Click="BtnSave_Click"/>
             <Button Content="Abbrechen" Padding="10,3" IsCancel="True"/>
         </StackPanel>
-        <TabControl>
+        <Border x:Name="PnlDocument" DockPanel.Dock="Top" BorderBrush="LightGray" BorderThickness="1" Padding="6" Margin="0,0,0,8" Visibility="Collapsed">
+            <DockPanel>
+                <DockPanel DockPanel.Dock="Top">
+                    <Button DockPanel.Dock="Right" Content="Vorschau (PDF/TXT)" Padding="8,1" Click="BtnPreview_Click"
+                            ToolTip="Ausgew&#228;hlten Beleg in der Programm-Vorschau anzeigen"/>
+                    <TextBlock x:Name="TxtDocument" VerticalAlignment="Center" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+                <StackPanel x:Name="PnlSources" Margin="0,4,0,0"/>
+            </DockPanel>
+        </Border>
+        <TabControl x:Name="Tabs">
             <TabItem Header="Nummernmuster">
                 <DockPanel Margin="5">
                     <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="Gray"
@@ -82,7 +92,7 @@
                     </DataGrid>
                 </DockPanel>
             </TabItem>
-            <TabItem Header="Betrag">
+            <TabItem x:Name="TabAmount" Header="Betrag">
                 <DockPanel Margin="5">
                     <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="Gray"
                                Text="Bevorzugter Begriff f&#252;r den Betrag je Firma/Belegart (* = alle), z. B. Warenwert, Gesamtbetrag, Zahlbetrag. Lage: rechts daneben oder darunter (Spalte). Seite: erste oder letzte Seite. Ohne Treffer wird wie bisher der h&#246;chste Betrag genommen. Bei mehreren Belegen in einer Datei z&#228;hlen nur die Seiten der gew&#228;hlten Firma."/>
