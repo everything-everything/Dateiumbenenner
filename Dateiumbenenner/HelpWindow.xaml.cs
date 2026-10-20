@@ -712,10 +712,16 @@ Jede Erkennungsregel ist ein Parameter-Element. Das INI-Schlagwort steht als Att
 >   <Pattern>Rechnungs-Nr.  (+1Z) (Nummer(?$$$$/$$$$$))</Pattern>
 
 * Text vor dem Muster: Erkennungsmerkmal im Beleg
-* (+1Z): Wert steht eine Zeile unter dem Merkmal
-* (Nummer(...)): Nummernmaske, siehe [[nummernregeln|Nummernmuster]]
+* (+1Z): Wert steht eine Zeile unter dem Merkmal; ohne (+nZ) wird nur in derselben Zeile gesucht
+* (+1W): ab dem ersten Wort der Zeile
+(Nummer(+DL27 )($$ ?? $$)): fester Präfix DL27 vor der Maske (nur Archivmodus, selten)
 * (Datum), (Betrag): weitere Feldtypen
+* Betrag-Varianten: (BetragTSD) mit Tausenderpunkt, (BETRAG4NK) mit 4 Nachkommastellen, (BetragFrei(-Betrag-)) mit beliebigen Begrenzern
+* Datum-Varianten: (DatumJan) mit Monatsnamen, (DatumJMT) Jahr-Monat-Tag, (DatumUS) Monat/Tag/Jahr, (DatumFrei(TT?MM?JJJJ)) eigene Maske ($ oder T/M/J = Ziffer, ? = Trennzeichen)
 * Feste Werte (z. B. Belegart ""Rechnung"", Firmenname): Pattern leer, Wert im Unterelement Inhalt – wie im Archivprogramm. Ein Feldtyp (Text) existiert dort nicht; ältere Dateien mit (Text) wandelt der XML-Editor beim Öffnen um.
+
+# Betrag in der INI
+Der Betrag wird ohne Tausendertrennzeichen mit Dezimalkomma geschrieben, z. B. 1000,00 / 100000,00 / 1000000,00.
 
 Zusätzlich werden SchlagwortGruen und SchlagwortDatev als Attribute des Wurzelelements Parameters geschrieben."),
 
