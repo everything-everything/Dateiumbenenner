@@ -58,12 +58,20 @@ namespace Dateiumbenenner
             var list = new List<IndexEntry>();
             var idx = _topics.FirstOrDefault(t => t.Id == "index");
             if (idx.Id != null)
-                foreach (Match m in LinkRegex.Matches(idx.Body)) list.Add(new(m.Groups["text"].Value, m.Groups["target"].Value));
+                foreach (Match m in LinkRegex.Matches(idx.Body))
+                    if (Resolve(m.Groups["target"].Value) is string target) list.Add(new(m.Groups["text"].Value, target));
             foreach (var t in _topics.Where(t => t.Id is not "index" and not "inhalt"))
             {
                 list.Add(new(t.Title, t.Id));
-                foreach (var line in t.Body.Replace("\r", "").Split('\n').Where(l => l.StartsWith("# ")))
-                    list.Add(new($"{LinkRegex.Replace(line[2..].Trim(), "${text}")} ({t.Title})", t.Id));
+                foreach (var line in t.Body.Replace("\r", "").Split('\n'))
+                {
+                    if (line.StartsWith("# "))
+                        list.Add(new($"{LinkRegex.Replace(line[2..].Trim(), "${text}")} ({t.Title})", t.Id));
+                    // Plugins liefern Indexbegriffe als Zeile „Stichwörter: a, b, c“
+                    else if (line.StartsWith(KeywordLine))
+                        foreach (var k in line[KeywordLine.Length..].Split(',').Select(k => k.Trim()).Where(k => k.Length > 0))
+                            list.Add(new(k, t.Id));
+                }
             }
             return list.GroupBy(e => e.Keyword, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
                        .OrderBy(e => e.Keyword, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -121,8 +129,25 @@ namespace Dateiumbenenner
 
         #region Navigation
 
+        private const string KeywordLine = "Stichwörter:";
+
+        private static bool IsExternal(string target) =>
+            target.StartsWith("http", StringComparison.OrdinalIgnoreCase) || target.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Themen-ID auflösen; Kurz-IDs wie „inixml“ finden auch Plugin-Themen. null = Thema nicht vorhanden (Plugin nicht geladen).</summary>
+        private string? Resolve(string id) =>
+            _topics.Any(t => t.Id == id) ? id : _topics.FirstOrDefault(t => t.Id.StartsWith("plugin:") && t.Id.EndsWith(":" + id)).Id;
+
+        /// <summary>Zeile verweist nur auf nicht vorhandene Themen (Plugin nicht installiert) – wird ausgeblendet.</summary>
+        private bool IsDeadLinkLine(string line)
+        {
+            var targets = LinkRegex.Matches(line).Select(m => m.Groups["target"].Value).Where(t => !IsExternal(t)).ToList();
+            return targets.Count > 0 && targets.All(t => Resolve(t) == null);
+        }
+
         private void Show(string id, bool addToHistory = true)
         {
+            id = Resolve(id) ?? id;
             var topic = _topics.FirstOrDefault(t => t.Id == id);
             if (topic.Id == null) return;
             if (addToHistory && _current != id) _history.Push(_current);
@@ -352,6 +377,7 @@ namespace Dateiumbenenner
             {
                 var line = raw.TrimEnd();
                 if (line.Length == 0) { para = null; list = null; continue; }
+                if (IsDeadLinkLine(line)) continue;
 
                 if (line.StartsWith("# "))
                 {
@@ -391,7 +417,9 @@ namespace Dateiumbenenner
             foreach (Match m in LinkRegex.Matches(text))
             {
                 if (m.Index > pos) inlines.Add(new Run(text[pos..m.Index]));
-                inlines.Add(CreateLink(m.Groups["target"].Value, m.Groups["text"].Value));
+                var target = m.Groups["target"].Value;
+                if (IsExternal(target) || Resolve(target) != null) inlines.Add(CreateLink(target, m.Groups["text"].Value));
+                else inlines.Add(new Run(m.Groups["text"].Value));
                 pos = m.Index + m.Length;
             }
             if (pos < text.Length) inlines.Add(new Run(text[pos..]));
@@ -406,7 +434,7 @@ namespace Dateiumbenenner
             link.TextDecorations = new TextDecorationCollection { underline };
             link.Click += (_, _) =>
             {
-                if (target.StartsWith("http", StringComparison.OrdinalIgnoreCase) || target.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
+                if (IsExternal(target))
                     Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
                 else
                     Show(target);
@@ -437,11 +465,7 @@ Klicken Sie auf ein unterstrichenes Thema, um es anzuzeigen. Mit den Schaltfläc
 * [[nummernregeln|Nummernmuster und Belegarten]]
 * [[profile|Profile]]
 * [[listen|Listen: Kopieren, Markieren, Filtern]]
-
-# INI Erzeugen
-* [[inixml|INI- und XML-Export]]
 * [[firmauebertragen|Firma übertragen]]
-* [[partnersuche|Kreditor-/Debitorensuche]]
 
 # Technische Informationen
 * [[technik|Aufbau und verwendete NuGet-Pakete]]
@@ -700,46 +724,14 @@ Siehe auch: [[inixml|INI- und XML-Export]]"),
 # Filter
 Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt, die alle Wörter enthalten."),
 
-            ("inixml", "INI- und XML-Export", @"Das Plugin ""INI Erzeugen"" schreibt zu jedem Beleg eine INI-Datei und optional eine Erkennungs-XML.
-
-# Nummernfeld nach Belegart
-* Rechnungsarten (Rechnung, Sammelrechnung, Barverkauf, Gutschrift, Storno, Stornorechnung …) – INI-Schlagwort Rechnungsnummer
-* alle anderen Belege – INI-Schlagwort Belegnummer
-
-# Aufbau der XML
-Jede Erkennungsregel ist ein Parameter-Element. Das INI-Schlagwort steht als Attribut IniSchlagwort, das Muster im Unterelement Pattern:
-> <Parameter IniSchlagwort=""Rechnungsnummer"">
->   <Pattern>Rechnungs-Nr.  (+1Z) (Nummer(?$$$$/$$$$$))</Pattern>
-
-* Text vor dem Muster: Erkennungsmerkmal im Beleg
-* (+1Z): Wert steht eine Zeile unter dem Merkmal; ohne (+nZ) wird nur in derselben Zeile gesucht
-* (+1W): ab dem ersten Wort der Zeile
-(Nummer(+DL27 )($$ ?? $$)): fester Präfix DL27 vor der Maske (nur Archivmodus, selten)
-* (Datum), (Betrag): weitere Feldtypen
-* Betrag-Varianten: (BetragTSD) mit Tausenderpunkt, (BETRAG4NK) mit 4 Nachkommastellen, (BetragFrei(-Betrag-)) mit beliebigen Begrenzern
-* Datum-Varianten: (DatumJan) mit Monatsnamen, (DatumJMT) Jahr-Monat-Tag, (DatumUS) Monat/Tag/Jahr, (DatumFrei(TT?MM?JJJJ)) eigene Maske ($ oder T/M/J = Ziffer, ? = Trennzeichen)
-* Feste Werte (z. B. Belegart ""Rechnung"", Firmenname): Pattern leer, Wert im Unterelement Inhalt – wie im Archivprogramm. Ein Feldtyp (Text) existiert dort nicht; ältere Dateien mit (Text) wandelt der XML-Editor beim Öffnen um.
-
-# Betrag in der INI
-Der Betrag wird ohne Tausendertrennzeichen mit Dezimalkomma geschrieben, z. B. 1000,00 / 100000,00 / 1000000,00.
-
-Zusätzlich werden SchlagwortGruen und SchlagwortDatev als Attribute des Wurzelelements Parameters geschrieben."),
-
-            ("firmauebertragen", "Firma übertragen", @"Überträgt Firmenname, Nummer und Adresse auf mehrere Belege.
+            ("firmauebertragen", "Firma übertragen", @"Schaltfläche ""Namen übertragen"": überträgt den Firmennamen und die Adresse des aktuellen Belegs auf weitere Belege.
 
 * Oben: Gruppen gleich erkannter Firmen; ähnliche Einträge sind vorausgewählt. Leertaste schaltet die Auswahl um.
 * Spalte ""Treffer"": Grund der Vorauswahl.
 * Unten links: Dateien der markierten Gruppe, Firmenname direkt bearbeitbar.
 * Unten rechts: Vorschau (PDF oder Textmodus, Vollbildvorschau).
-* Filter: mehrere Wörter möglich."),
-
-            ("partnersuche", "Kreditor-/Debitorensuche", @"Sucht Firmen in der Datenbank (Adress-, Kreditoren- und Debitorentabellen) und übernimmt Name, Nummer und Adresse.
-
-* Suchbegriff eingeben; mehrere Wörter werden kombiniert.
-* Doppelklick bzw. ""Übernehmen"" überträgt den Treffer.
-* Große Tabellen werden zwischengespeichert, damit das Filtern schnell bleibt.
-
-Siehe auch: [[firmauebertragen|Firma übertragen]]"),
+* Filter: mehrere Wörter möglich.
+* Im Plugin [[inixml|INI Erzeugen]] funktioniert der Dialog gleich und überträgt zusätzlich die Adressnummer."),
 
             ("index", "Index", @"> A
 * [[technik|Aufbau des Programms]]
@@ -776,12 +768,6 @@ Siehe auch: [[firmauebertragen|Firma übertragen]]"),
 > R
 * [[kompression|Rasterisieren]]
 * [[umbenennen|Rechnungsnummer]]
-* [[inixml|Rechnungsnummer (INI/XML)]]
-* [[inixml|Belegnummer (INI/XML)]]
-* [[inixml|Pattern]]
-* [[inixml|IniSchlagwort]]
-* [[inixml|SchlagwortDatev]]
-* [[inixml|SchlagwortGruen]]
 * [[nummernregeln|Maske]]
 * [[nummernregeln|Belegarten]]
 * [[nummernregeln|Gutschrift]]
@@ -792,10 +778,6 @@ Siehe auch: [[firmauebertragen|Firma übertragen]]"),
 * [[listen|Kopieren]]
 * [[listen|Dateinamen kopieren]]
 * [[listen|Filter]]
-* [[firmauebertragen|Firma übertragen]]
-* [[partnersuche|Kreditor]]
-* [[partnersuche|Debitor]]
-* [[partnersuche|Datenbank]]
 > S
 * [[signatur|Signatur]]
 * [[system|Systemanforderungen]]
@@ -858,6 +840,25 @@ Siehe auch: [[firmauebertragen|Firma übertragen]]"),
             if (idx < 0) idx = _topics.Count;
             _topics.Insert(idx, ("plugins", "Plugins (Erweiterungen)", sb.ToString().TrimEnd()));
             _topics.InsertRange(idx + 1, extra);
+
+            // Inhaltsverzeichnis: je geladenem Plugin ein Abschnitt mit seinen Themen
+            var toc = new System.Text.StringBuilder();
+            foreach (var lp in LoadedPlugins)
+            {
+                var own = extra.Where(e => e.Id.StartsWith($"plugin:{lp.Plugin.Id}:")).ToList();
+                if (own.Count == 0) continue;
+                toc.Append($"# {lp.Plugin.Name}\n");
+                foreach (var e in own) toc.Append($"* [[{e.Id}|{e.Title}]]\n");
+                toc.Append('\n');
+            }
+            int home = _topics.FindIndex(t => t.Id == "inhalt");
+            if (home >= 0 && toc.Length > 0)
+            {
+                var body = _topics[home].Body.Replace("\r", "");
+                int at = body.IndexOf("# Technische Informationen", StringComparison.Ordinal);
+                body = at < 0 ? body + "\n\n" + toc : body.Insert(at, toc.ToString());
+                _topics[home] = (_topics[home].Id, _topics[home].Title, body);
+            }
         }
 
         #endregion
