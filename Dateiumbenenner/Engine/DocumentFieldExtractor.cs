@@ -77,9 +77,12 @@ namespace Dateiumbenenner.Engine
             var field = new Field();
             if (string.IsNullOrEmpty(text)) return field;
             var lines = text.Replace("\t", "    ").Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
+            var block = new LineBlock(lines);
+            var hit = block.Mark(PlainNumber, block.Mark(NumberLabel));
 
             for (int i = 0; i < lines.Length; i++)
             {
+                if (!hit[i]) continue;
                 foreach (Match m in NumberLabel.Matches(lines[i]))
                 {
                     double w = LabelWeight(m.Groups["label"].Value);
@@ -143,9 +146,11 @@ namespace Dateiumbenenner.Engine
             var field = new Field();
             if (string.IsNullOrEmpty(text)) return field;
             var lines = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
+            var hit = new LineBlock(lines).Mark(DateRegex);
 
             for (int i = 0; i < lines.Length; i++)
             {
+                if (!hit[i]) continue;
                 foreach (Match m in DateRegex.Matches(lines[i]))
                 {
                     if (!TryNormalize(m, out var date)) continue;
@@ -200,21 +205,31 @@ namespace Dateiumbenenner.Engine
             ("Schreiben",            new Regex(@"\bSchreiben\s+vom\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 3),
         };
 
+        private static readonly HashSet<string> BuiltInTypes = new(TypeRules.Select(r => r.Type), StringComparer.OrdinalIgnoreCase);
+
         public static Field ExtractDocumentType(string? text)
         {
             var field = new Field();
             if (string.IsNullOrEmpty(text)) return field;
             var lines = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
             var scores = new Dictionary<string, double>();
+            var block = new LineBlock(lines);
+            int n = TypeRules.Length;
+            var hit = new bool[lines.Length * n];
+            for (int r = 0; r < n; r++) block.Mark(TypeRules[r].Rx, hit, n, r);
 
             for (int i = 0; i < lines.Length; i++)
             {
                 double pos = i < 30 ? 1.5 : 0.5;          // Kopfbereich zählt mehr
-                foreach (var (type, rx, weight) in TypeRules)
+                for (int r = 0; r < n; r++)
+                {
+                    if (!hit[i * n + r]) continue;
+                    var (type, rx, weight) = TypeRules[r];
                     foreach (Match m in rx.Matches(lines[i]))
                         scores[type] = scores.GetValueOrDefault(type) + weight * pos * MatchFactor(lines[i], m);
+                }
             }
-            DocTypeStore.AddScores(lines, scores, new HashSet<string>(TypeRules.Select(r => r.Item1), StringComparer.OrdinalIgnoreCase));
+            DocTypeStore.AddScores(block, scores, BuiltInTypes);
             foreach (var kv in scores) field.Add(DocTypeStore.Canonical(kv.Key), kv.Value, "Schl\u00FCsselwort");
             return field;
         }

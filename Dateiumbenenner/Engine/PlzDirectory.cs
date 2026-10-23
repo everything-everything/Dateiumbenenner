@@ -20,6 +20,10 @@ namespace Dateiumbenenner.Engine
 
         public PlzDirectory() => Reload();
 
+        private int _version;
+        /// <summary>Erhöht sich bei jedem Neuladen (Zwischenspeicher der Adresserkennung werden dadurch ungültig).</summary>
+        public int Version => System.Threading.Volatile.Read(ref _version);
+
         /// <summary>Verzeichnis neu einlesen (z. B. nach Aktualisierung von DE.txt).</summary>
         public void Reload()
         {
@@ -32,6 +36,7 @@ namespace Dateiumbenenner.Engine
             catch { map.Clear(); }
             _map = map;
             _placeWords = null;
+            System.Threading.Interlocked.Increment(ref _version);
         }
 
         /// <summary>Lädt DE.zip von GeoNames, ersetzt DE.txt und liefert die Anzahl der PLZ.</summary>

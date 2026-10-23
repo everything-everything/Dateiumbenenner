@@ -89,18 +89,40 @@ namespace Dateiumbenenner.Engine
             lock (_ownZips)
             {
                 if (!_ownZips.Add(zip)) return;
+                _ownZipsVersion++;
                 try { System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(OwnZipFile)!); Dateiumbenenner.Engine.SecureStorage.WriteAllLines(OwnZipFile, _ownZips); } catch { }
             }
         }
 
-        [ThreadStatic] private static bool _suppressDebug;
+        private int _ownZipsVersion;
+
+        private sealed record SenderMemo(DocumentEngine Engine, string Text, int PlzVersion, int OwnZipsVersion,
+            OwnCompany Own, string OwnZip, string OwnStreet, AddressResult Result);
+        [ThreadStatic] private static SenderMemo? _senderMemo;
+
+        /// <summary>Absenderadresse ohne Firmenhinweis (nur lesend genutzt von IdentifySender/RankCompaniesByAddress).
+        /// Firmenerkennung und Plugin fragen sie je Beleg mehrfach ab; sie wird nur einmal berechnet, solange
+        /// Text, PLZ-Verzeichnis, eigene PLZ und eigene Firma unverändert sind.</summary>
+        private AddressResult SenderAddress(string? text, string? pdfPath)
+        {
+            var rawTxt = ReadSiblingTxt(pdfPath, out bool rawHasLayout);
+            text = AddressSourceText(text, pdfPath, rawTxt, rawHasLayout);
+            if (string.IsNullOrEmpty(text)) return new AddressResult();
+            var own = OwnCompany.Current;
+            int ownZipsVersion; lock (_ownZips) ownZipsVersion = _ownZipsVersion;
+            int plzVersion = Plz.Version;
+            var m = _senderMemo;
+            if (m != null && ReferenceEquals(m.Engine, this) && ReferenceEquals(m.Text, text) && m.PlzVersion == plzVersion &&
+                m.OwnZipsVersion == ownZipsVersion && ReferenceEquals(m.Own, own) && m.OwnZip == own.Zip && m.OwnStreet == own.Street)
+                return m.Result;
+            var result = ExtractAddressCore(text, null).Result;
+            _senderMemo = new SenderMemo(this, text, plzVersion, ownZipsVersion, own, own.Zip, own.Street, result);
+            return result;
+        }
 
         public SenderProfile? IdentifySender(string? text, string? pdfPath = null)
         {
-            AddressResult addr;
-            _suppressDebug = true;
-            try { addr = ExtractAddress(text, null, pdfPath); }
-            finally { _suppressDebug = false; }
+            var addr = SenderAddress(text, pdfPath);
             var fp = SenderProfileStore.ExtractFingerprints(text, addr.Street.Value, addr.Zip.Value);
             return _profiles.Identify(fp).Profile;
         }
@@ -117,15 +139,12 @@ namespace Dateiumbenenner.Engine
         {
             var list = candidates.ToList();
             if (list.Count < 2 || string.IsNullOrEmpty(text)) return list;
-            AddressResult addr;
-            _suppressDebug = true;
-            try { addr = ExtractAddress(text, null, pdfPath); }
-            finally { _suppressDebug = false; }
+            var addr = SenderAddress(text, pdfPath);
             var street = addr.Street.Value; var zip = addr.Zip.Value;
             if (string.IsNullOrEmpty(street) && string.IsNullOrEmpty(zip)) return list;
 
-            var raw = ReadSiblingTxt(pdfPath);
-            var lines = AddressTextNormalizer.Prepare(HasLayout(raw) ? raw! : text);
+            var raw = ReadSiblingTxt(pdfPath, out bool rawHasLayout);
+            var lines = PreparedLines(rawHasLayout ? raw! : text);
             var streetKey = string.IsNullOrEmpty(street) ? null : StreetKey(street);
             var anchors = new List<int>();
             for (int i = 0; i < lines.Count; i++)
@@ -191,8 +210,8 @@ namespace Dateiumbenenner.Engine
         // Formatierte TXT (Zeichenraster) bevorzugen: Werte unter der Bezeichnung werden so gefunden.
         private static string? LayoutText(string? text, string? pdfPath)
         {
-            var raw = ReadSiblingTxt(pdfPath);
-            return HasLayout(raw) ? raw : text;
+            var raw = ReadSiblingTxt(pdfPath, out bool rawHasLayout);
+            return rawHasLayout ? raw : text;
         }
 
         public Field ExtractNumber(string? text, string? pdfPath = null) =>
@@ -215,20 +234,46 @@ namespace Dateiumbenenner.Engine
 
         public AddressResult ExtractAddress(string? text, string? companyHint = null, string? pdfPath = null)
         {
-            var result = new AddressResult();
-            // Formatierter OCR-Text (A-Modus/TXT) enthält das Layout bereits als Zeichenraster -> direkt verwenden.
-            // Nur wenn kein Layout erkennbar ist (z. B. PdfPig-Fließtext), die Wortpositionen der PDF nutzen.
-            // Gleichnamige TXT (formatierter OCR-Modus) im Rohzustand bevorzugen –
-            // die OCR-Korrektur reduziert Mehrfach-Leerzeichen und zerstört damit das Layout.
-            var rawTxt = ReadSiblingTxt(pdfPath);
-            if (HasLayout(rawTxt)) text = rawTxt;
-            else if (!HasLayout(text))
+            var rawTxt = ReadSiblingTxt(pdfPath, out bool rawHasLayout);
+            text = AddressSourceText(text, pdfPath, rawTxt, rawHasLayout);
+            if (string.IsNullOrEmpty(text)) return new AddressResult();
+            var (result, lines) = ExtractAddressCore(text, companyHint);
+            if (!string.IsNullOrEmpty(pdfPath))
+                WriteDebug(pdfPath, rawHasLayout, lines, result);
+            return result;
+        }
+
+        /// <summary>Formatierter OCR-Text (A-Modus/TXT) enthält das Layout bereits als Zeichenraster -> direkt verwenden.
+        /// Nur wenn kein Layout erkennbar ist (z. B. PdfPig-Fließtext), die Wortpositionen der PDF nutzen.
+        /// Gleichnamige TXT (formatierter OCR-Modus) im Rohzustand bevorzugen –
+        /// die OCR-Korrektur reduziert Mehrfach-Leerzeichen und zerstört damit das Layout.</summary>
+        private static string? AddressSourceText(string? text, string? pdfPath, string? rawTxt, bool rawHasLayout)
+        {
+            if (rawHasLayout) return rawTxt;
+            if (!HasLayout(text))
             {
                 var layout = PdfLayoutReader.ReadLayoutText(pdfPath);
-                if (!string.IsNullOrEmpty(layout)) text = layout;
+                if (!string.IsNullOrEmpty(layout)) return layout;
             }
-            if (string.IsNullOrEmpty(text)) return result;
+            return text;
+        }
+
+        [ThreadStatic] private static string? _preparedSource;
+        [ThreadStatic] private static List<string>? _preparedLines;
+
+        /// <summary>Aufbereitete Adresszeilen (nur lesen!); derselbe Text wird je Thread nur einmal aufbereitet.</summary>
+        private static List<string> PreparedLines(string text)
+        {
+            if (_preparedLines != null && ReferenceEquals(_preparedSource, text)) return _preparedLines;
             var lines = AddressTextNormalizer.Prepare(text);
+            _preparedSource = text; _preparedLines = lines;
+            return lines;
+        }
+
+        private (AddressResult Result, List<string> Lines) ExtractAddressCore(string text, string? companyHint)
+        {
+            var result = new AddressResult();
+            var lines = new List<string>(PreparedLines(text));
             int n = lines.Count;
             var absLines = new HashSet<int>();
             for (int j = 0; j < n; j++)
@@ -308,9 +353,7 @@ namespace Dateiumbenenner.Engine
                     if (sm.Success) result.Street.Add(FormatStreet(sm), score, "Straße vor PLZ");
                 }
             }
-            if (!string.IsNullOrEmpty(pdfPath) && !_suppressDebug)
-                WriteDebug(pdfPath, rawTxt != null && HasLayout(rawTxt), lines, result);
-            return result;
+            return (result, lines);
         }
 
         private static string DebugFlagPath => System.IO.Path.Combine(Dateiumbenenner.Plugins.PluginManager.BaseDirectory, "debug.on");
@@ -361,21 +404,49 @@ namespace Dateiumbenenner.Engine
             catch { }
         }
 
-        private static string? ReadSiblingTxt(string? path)
+        [ThreadStatic] private static string? _siblingPath;
+        [ThreadStatic] private static DateTime _siblingWrite;
+        [ThreadStatic] private static long _siblingLength;
+        [ThreadStatic] private static string? _siblingText;
+        [ThreadStatic] private static bool _siblingHasLayout;
+
+        /// <summary>Gleichnamige TXT lesen; Nummer, Datum, Belegart und Adresse desselben Belegs teilen sich das Ergebnis
+        /// (erneut gelesen wird nur, wenn sich Pfad, Größe oder Änderungszeit der Datei unterscheiden).</summary>
+        private static string? ReadSiblingTxt(string? path, out bool hasLayout)
         {
+            hasLayout = false;
             try
             {
                 if (string.IsNullOrEmpty(path)) return null;
                 var txt = System.IO.Path.ChangeExtension(path, ".txt");
-                return System.IO.File.Exists(txt) ? System.IO.File.ReadAllText(txt) : null;
+                var fi = new System.IO.FileInfo(txt);
+                if (!fi.Exists) return null;
+                if (_siblingText != null && string.Equals(_siblingPath, fi.FullName, StringComparison.Ordinal) &&
+                    _siblingWrite == fi.LastWriteTimeUtc && _siblingLength == fi.Length)
+                {
+                    hasLayout = _siblingHasLayout;
+                    return _siblingText;
+                }
+                var content = System.IO.File.ReadAllText(txt);
+                hasLayout = HasLayout(content);
+                _siblingPath = fi.FullName; _siblingWrite = fi.LastWriteTimeUtc; _siblingLength = fi.Length;
+                _siblingText = content; _siblingHasLayout = hasLayout;
+                return content;
             }
-            catch { return null; }
+            catch { hasLayout = false; return null; }
         }
 
-        /// <summary>true, wenn der Text Spaltenabstände (3+ Leerzeichen/Tab) enthält.</summary>
-        private static bool HasLayout(string? text) =>
-            !string.IsNullOrEmpty(text) &&
-            Regex.Matches(text, @"\S(?: {3,}|\t)\S").Count >= 3;
+        private static readonly Regex LayoutGapRegex = new(@"\S(?: {3,}|\t)\S", RegexOptions.Compiled);
+
+        /// <summary>true, wenn der Text Spaltenabstände (3+ Leerzeichen/Tab) enthält (Suche endet nach dem 3. Treffer).</summary>
+        private static bool HasLayout(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            int count = 0;
+            for (var m = LayoutGapRegex.Match(text); m.Success; m = m.NextMatch())
+                if (++count >= 3) return true;
+            return false;
+        }
 
         private static readonly Regex StreetSuffixWord = new(@"^(straße|strasse|str\.?|weg|platz|allee|gasse|ring|damm|chaussee|ufer|markt)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 

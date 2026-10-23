@@ -1437,11 +1437,16 @@ namespace Dateiumbenenner
             var invoiceNumbers=new List<(string num,int pos)>(); 
             var documentNumbers=new List<(string num,int pos)>(); 
             var datesWithPos=new List<(string date,int pos)>(); 
+            var block=new Dateiumbenenner.Engine.LineBlock(lines);
+            var invoiceHit=block.Mark(KeyInvoice);
+            var docNumHit=block.Mark(KeyDocNum);
+            var dateHit=new bool[lines.Length];
+            foreach(var rx in new[]{_dateNumeric1,_dateNumeric2,_dateSpelledDayMonthYear,_dateSpelledMonthYear}) block.Mark(rx,dateHit);
             for(int i=0;i<lines.Length;i++)
             { 
-                ScanForValuesWithPosition(lines,i,KeyInvoice,invoiceNumbers); 
-                ScanForValuesWithPosition(lines,i,KeyDocNum,documentNumbers); 
-                ScanForDatesWithPosition(lines,i,KeyDate,meta.FullText!, datesWithPos); 
+                if(invoiceHit[i]) ScanForValuesWithPosition(lines,i,KeyInvoice,invoiceNumbers); 
+                if(docNumHit[i]) ScanForValuesWithPosition(lines,i,KeyDocNum,documentNumbers); 
+                ScanForDatesWithPosition(lines,i,KeyDate,meta.FullText!, datesWithPos, dateHit); 
             } 
             invoiceNumbers=invoiceNumbers.OrderBy(x=>x.pos).ToList(); 
             documentNumbers=documentNumbers.OrderBy(x=>x.pos).ToList(); 
@@ -1612,12 +1617,14 @@ namespace Dateiumbenenner
         [ThreadStatic] private static string[]? _offsetLines;
         [ThreadStatic] private static int[]? _lineOffsets;
         private static int[] GetLineOffsets(string[] lines){ if(!ReferenceEquals(_offsetLines,lines)||_lineOffsets==null){ var offs=new int[lines.Length+1]; int nl=Environment.NewLine.Length; for(int j=0;j<lines.Length;j++) offs[j+1]=offs[j]+lines[j].Length+nl; _lineOffsets=offs; _offsetLines=lines; } return _lineOffsets; }
-        private void ScanForDatesWithPosition(string[] lines,int i,Regex keyRegex,string fullText,List<(string,int)> results)
+        private void ScanForDatesWithPosition(string[] lines,int i,Regex keyRegex,string fullText,List<(string,int)> results,bool[]? dateHit=null)
         {
             var offsets=GetLineOffsets(lines);
             var dateRegexes=new[]{_dateNumeric1,_dateNumeric2,_dateSpelledDayMonthYear,_dateSpelledMonthYear};
-            void addMatches(string text,int start)
+            void addMatches(int line)
             {
+                if(dateHit!=null && !dateHit[line]) return;
+                var text=lines[line]; int start=offsets[line];
                 foreach(var rx in dateRegexes)
                     foreach(Match m in rx.Matches(text))
                     {
@@ -1625,10 +1632,10 @@ namespace Dateiumbenenner
                         if(!results.Any(x=>x.Item1==ds)) results.Add((ds,start+m.Index));
                     }
             }
-            addMatches(lines[i],offsets[i]);
+            addMatches(i);
             if(keyRegex.IsMatch(lines[i]))
                 for(int off=1;off<=2 && (i+off)<lines.Length;off++)
-                    addMatches(lines[i+off],offsets[i+off]);
+                    addMatches(i+off);
         }
         private bool _propagatingCompany;
 

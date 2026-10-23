@@ -416,24 +416,55 @@ namespace Dateiumbenenner.Engine
         public static string? Canonical(string? t) => Get(t)?.Name ?? t?.Trim();
 
         /// <summary>Belegarten-Bewertung aus Namen und Umschreibungen (Kopfbereich und kurze Zeilen z\u00E4hlen mehr).</summary>
-        public static void AddScores(string[] lines, Dictionary<string, double> scores, ISet<string> builtIn)
+        public static void AddScores(string[] lines, Dictionary<string, double> scores, ISet<string> builtIn) =>
+            AddScores(new LineBlock(lines), scores, builtIn);
+
+        private sealed record TermSet(string Culture, (string Type, string Word)[] Words, (string Type, Regex Rx, bool AllLines)[] Terms);
+        private static TermSet? _terms;
+
+        /// <summary>Suchbegriffe nur bei geänderten Belegarten/Umschreibungen neu aufbauen (statt bei jedem Beleg).</summary>
+        private static (string Type, Regex Rx, bool AllLines)[] Terms(ISet<string> builtIn)
         {
-            var terms = new List<(string Type, Regex Rx)>();
+            var words = new List<(string Type, string Word)>();
             foreach (var d in Items)
             {
                 if (string.IsNullOrWhiteSpace(d.Name)) continue;
-                var words = d.Synonyms.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
-                if (!builtIn.Contains(d.Name)) words.Add(d.Name);
-                foreach (var w in words)
-                    terms.Add((d.Name, new Regex(@"(?<!\p{L})" + Regex.Escape(w.Trim()) + @"(?!\p{L})", RegexOptions.IgnoreCase)));
+                var ws = d.Synonyms.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+                if (!builtIn.Contains(d.Name)) ws.Add(d.Name);
+                foreach (var w in ws) words.Add((d.Name, w.Trim()));
             }
-            if (terms.Count == 0) return;
+            var culture = System.Globalization.CultureInfo.CurrentCulture.Name;
+            var cached = _terms;
+            if (cached != null && cached.Culture == culture && cached.Words.SequenceEqual(words)) return cached.Terms;
+            var terms = words.Select(w => (w.Type,
+                new Regex(@"(?<!\p{L})" + Regex.Escape(w.Word) + @"(?!\p{L})", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+                w.Word.IndexOfAny(new[] { LineBlock.Separator, '\r', '\n' }) >= 0)).ToArray();
+            _terms = new TermSet(culture, words.ToArray(), terms);
+            return terms;
+        }
+
+        internal static void AddScores(LineBlock block, Dictionary<string, double> scores, ISet<string> builtIn)
+        {
+            var terms = Terms(builtIn);
+            if (terms.Length == 0) return;
+            var lines = block.Lines;
+            int n = terms.Length;
+            var hit = new bool[lines.Length * n];
+            for (int t = 0; t < n; t++)
+            {
+                if (terms[t].AllLines) block.MarkAll(hit, n, t);
+                else block.Mark(terms[t].Rx, hit, n, t);
+            }
             for (int i = 0; i < lines.Length; i++)
             {
                 double pos = i < 30 ? 1.5 : 0.5;
-                foreach (var (type, rx) in terms)
+                for (int t = 0; t < n; t++)
+                {
+                    if (!hit[i * n + t]) continue;
+                    var (type, rx, _) = terms[t];
                     foreach (Match m in rx.Matches(lines[i]))
                         scores[type] = scores.GetValueOrDefault(type) + 4 * pos * DocumentFieldExtractor.MatchFactor(lines[i], m);
+                }
             }
         }
     }
