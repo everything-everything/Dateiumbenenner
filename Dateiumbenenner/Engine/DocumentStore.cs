@@ -701,40 +701,119 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Ticks=$t,Data=$d
         }
 
         /// <summary>Pfad nach Umbenennen aktualisieren (Datensatz bleibt erhalten).</summary>
-        public static void Move(string oldPath, string newPath)
+        public static void Move(string oldPath, string newPath) => MoveMany(new[] { (oldPath, newPath) });
+
+        /// <summary>Pfade nach Umbenennen/Verschieben aktualisieren (Datensätze bleiben erhalten) – alle Dateien in einer Transaktion
+        /// und mit nur einem Durchlauf durch den Volltextindex (vorher zwei vollständige Durchläufe je Datei).</summary>
+        public static void MoveMany(IEnumerable<(string OldPath, string NewPath)> moves)
         {
             try
             {
-                string o = Path.GetFullPath(oldPath), n = Path.GetFullPath(newPath);
-                // Noch nicht geschriebene Plugin-Daten wandern mit
+                var pairs = new List<(string O, string N)>();
+                foreach (var (op, np) in moves)
+                    try { pairs.Add((Path.GetFullPath(op), Path.GetFullPath(np))); } catch { }
+                if (pairs.Count == 0) return;
+                // Noch nicht geschriebene Daten wandern mit
                 lock (PendingSync)
                 {
-                    foreach (var k in Pending.Where(kv => kv.Value.FullPath.Equals(n, StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Key).ToList()) Pending.Remove(k);
-                    foreach (var (k, w) in Pending.Where(kv => kv.Value.FullPath.Equals(o, StringComparison.OrdinalIgnoreCase)).ToList())
+                    foreach (var (o, n) in pairs)
                     {
-                        Pending.Remove(k);
-                        Pending[PendingKey(w.PluginId, n)] = w with { FullPath = n };
+                        bool sameFile = o.Equals(n, StringComparison.OrdinalIgnoreCase);
+                        if (!sameFile)
+                            foreach (var k in Pending.Where(kv => kv.Value.FullPath.Equals(n, StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Key).ToList()) Pending.Remove(k);
+                        foreach (var (k, w) in Pending.Where(kv => kv.Value.FullPath.Equals(o, StringComparison.OrdinalIgnoreCase)).ToList())
+                        {
+                            Pending.Remove(k);
+                            Pending[PendingKey(w.PluginId, n)] = w with { FullPath = n };
+                        }
+                        if (!sameFile) PendingDocs.Remove(n);
+                        if (PendingDocs.Remove(o, out var doc)) PendingDocs[n] = doc with { FullPath = n };
                     }
-                    PendingDocs.Remove(n);
-                    if (PendingDocs.Remove(o, out var doc)) PendingDocs[n] = doc with { FullPath = n };
                 }
                 lock (Sync)
                 {
                     _ = ConnectionString;
-                    using var c = Open();
-                    using var cmd = c.CreateCommand();
-                    cmd.CommandText = "DELETE FROM Documents WHERE Path=$n; UPDATE Documents SET Path=$n WHERE Path=$o; DELETE FROM PluginData WHERE Path=$n; UPDATE PluginData SET Path=$n WHERE Path=$o";
                     EnsurePluginTable();
-                    cmd.Parameters.AddWithValue("$o", o);
-                    cmd.Parameters.AddWithValue("$n", n);
-                    cmd.ExecuteNonQuery();
-                    ForgetPath(o);
-                    ForgetPath(n);
-                    if (EnsureFts(c))
+                    using var c = Open();
+                    bool fts = EnsureFts(c);
+                    using var tx = c.BeginTransaction();
+                    var pluginIds = new List<string>();
+                    using (var q = c.CreateCommand())
                     {
-                        cmd.CommandText = "DELETE FROM DocText WHERE Path=$n; UPDATE DocText SET Path=$n WHERE Path=$o";
-                        cmd.ExecuteNonQuery();
+                        q.Transaction = tx;
+                        q.CommandText = "SELECT DISTINCT PluginId FROM PluginData";
+                        using var r = q.ExecuteReader();
+                        while (r.Read()) pluginIds.Add(r.GetString(0));
                     }
+                    // Volltextindex: Pfad steht dort ohne Index – Zeilennummern einmal für alle Dateien ermitteln
+                    var ftsRows = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
+                    if (fts)
+                    {
+                        using var q = c.CreateCommand();
+                        q.Transaction = tx;
+                        q.CommandText = "SELECT rowid, Path FROM DocText";
+                        using var r = q.ExecuteReader();
+                        while (r.Read())
+                        {
+                            if (r.IsDBNull(1)) continue;
+                            var p = r.GetString(1);
+                            if (!ftsRows.TryGetValue(p, out var l)) ftsRows[p] = l = new List<long>();
+                            l.Add(r.GetInt64(0));
+                        }
+                    }
+                    using var del = c.CreateCommand();
+                    del.Transaction = tx;
+                    del.CommandText = "DELETE FROM Documents WHERE Path=$n";
+                    var dn = del.Parameters.Add("$n", SqliteType.Text);
+                    using var upd = c.CreateCommand();
+                    upd.Transaction = tx;
+                    upd.CommandText = "UPDATE Documents SET Path=$n WHERE Path=$o";
+                    var uo = upd.Parameters.Add("$o", SqliteType.Text);
+                    var un = upd.Parameters.Add("$n", SqliteType.Text);
+                    using var pdel = c.CreateCommand();
+                    pdel.Transaction = tx;
+                    pdel.CommandText = "DELETE FROM PluginData WHERE PluginId=$id AND Path=$n";
+                    var pdi = pdel.Parameters.Add("$id", SqliteType.Text);
+                    var pdn = pdel.Parameters.Add("$n", SqliteType.Text);
+                    using var pupd = c.CreateCommand();
+                    pupd.Transaction = tx;
+                    pupd.CommandText = "UPDATE PluginData SET Path=$n WHERE PluginId=$id AND Path=$o";
+                    var pui = pupd.Parameters.Add("$id", SqliteType.Text);
+                    var puo = pupd.Parameters.Add("$o", SqliteType.Text);
+                    var pun = pupd.Parameters.Add("$n", SqliteType.Text);
+                    using var fdel = c.CreateCommand();
+                    fdel.Transaction = tx;
+                    fdel.CommandText = "DELETE FROM DocText WHERE rowid=$r";
+                    var fdr = fdel.Parameters.Add("$r", SqliteType.Integer);
+                    using var fupd = c.CreateCommand();
+                    fupd.Transaction = tx;
+                    fupd.CommandText = "UPDATE DocText SET Path=$n WHERE rowid=$r";
+                    var fun = fupd.Parameters.Add("$n", SqliteType.Text);
+                    var fur = fupd.Parameters.Add("$r", SqliteType.Integer);
+                    foreach (var (o, n) in pairs)
+                    {
+                        // Nur Groß-/Kleinschreibung geändert: nicht vorher löschen (wäre derselbe Datensatz)
+                        bool sameFile = o.Equals(n, StringComparison.OrdinalIgnoreCase);
+                        if (!sameFile) { dn.Value = n; del.ExecuteNonQuery(); }
+                        uo.Value = o; un.Value = n; upd.ExecuteNonQuery();
+                        foreach (var id in pluginIds)
+                        {
+                            if (!sameFile) { pdi.Value = id; pdn.Value = n; pdel.ExecuteNonQuery(); }
+                            pui.Value = id; puo.Value = o; pun.Value = n; pupd.ExecuteNonQuery();
+                        }
+                        if (fts)
+                        {
+                            if (!sameFile && ftsRows.Remove(n, out var old))
+                                foreach (var r in old) { fdr.Value = r; fdel.ExecuteNonQuery(); }
+                            if (ftsRows.Remove(o, out var rows))
+                            {
+                                foreach (var r in rows) { fun.Value = n; fur.Value = r; fupd.ExecuteNonQuery(); }
+                                ftsRows[n] = rows;
+                            }
+                        }
+                    }
+                    tx.Commit();
+                    foreach (var (o, n) in pairs) { ForgetPath(o); ForgetPath(n); }
                 }
             }
             catch

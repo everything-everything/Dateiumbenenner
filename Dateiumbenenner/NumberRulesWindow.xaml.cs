@@ -20,6 +20,20 @@ namespace Dateiumbenenner
         private readonly ObservableCollection<NumberRule> _rules;
         private readonly ObservableCollection<DocTypeRow> _docTypes;
         private readonly ObservableCollection<AmountRule> _amountRules;
+        private readonly ObservableCollection<DateRule> _dateRules;
+
+        /// <summary>Anzeige der Schreibweisen in der Datum-Tabelle.</summary>
+        public sealed record FormatChoice(DateFormatKind Value, string Label);
+
+        private static readonly FormatChoice[] FormatChoices =
+        {
+            new(DateFormatKind.Beliebig, "(beliebig)"),
+            new(DateFormatKind.Numerisch, "TT.MM.JJJJ – (Datum)"),
+            new(DateFormatKind.Monatsname, "TT. Monat JJJJ – (DatumJan)"),
+            new(DateFormatKind.JahrMonatTag, "JJJJ-MM-TT – (DatumJMT)"),
+            new(DateFormatKind.US, "MM/TT/JJJJ – (DatumUS)"),
+            new(DateFormatKind.Frei, "eigene Maske – (DatumFrei)"),
+        };
 
         /// <summary>true, wenn nach dem Speichern die Belegnummern neu ermittelt werden sollen.</summary>
         public bool Recalculate { get; private set; }
@@ -42,6 +56,7 @@ namespace Dateiumbenenner
         {
             var f = TxtCompanyFilter.Text.Trim();
             var names = _samples.Select(s => s.Company).Concat(_rules.Select(r => r.Company))
+                .Concat(_dateRules.Select(r => r.Company)).Concat(_amountRules.Select(r => r.Company))
                 .Where(c => !string.IsNullOrWhiteSpace(c) && c != "*").Distinct(StringComparer.OrdinalIgnoreCase)
                 .Where(c => f.Length == 0 || c.Contains(f, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
@@ -55,18 +70,36 @@ namespace Dateiumbenenner
         private void LstCompanies_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             var c = LstCompanies.SelectedItem as string;
-            var view = System.Windows.Data.CollectionViewSource.GetDefaultView(_rules);
             GridRules.CommitEdit(DataGridEditingUnit.Row, true);
-            if (c == null || c == AllCompanies) { view.Filter = null; return; }
+            GridDateRules.CommitEdit(DataGridEditingUnit.Row, true);
+            GridAmountRules.CommitEdit(DataGridEditingUnit.Row, true);
+            var views = new (System.ComponentModel.ICollectionView View, Func<object, string?> Company)[]
+            {
+                (System.Windows.Data.CollectionViewSource.GetDefaultView(_rules), o => (o as NumberRule)?.Company),
+                (System.Windows.Data.CollectionViewSource.GetDefaultView(_dateRules), o => (o as DateRule)?.Company),
+                (System.Windows.Data.CollectionViewSource.GetDefaultView(_amountRules), o => (o as AmountRule)?.Company),
+            };
+            if (c == null || c == AllCompanies) { foreach (var v in views) v.View.Filter = null; return; }
             AddSuggestions(c);
             TxtTestCompany.Text = c;
-            view.Filter = o => o is NumberRule r && (string.Equals(r.Company?.Trim(), c, StringComparison.OrdinalIgnoreCase) || r.Company?.Trim() == "*");
+            foreach (var v in views)
+            {
+                var get = v.Company;
+                v.View.Filter = o => get(o)?.Trim() is { } rc && (string.Equals(rc, c, StringComparison.OrdinalIgnoreCase) || rc == "*");
+            }
+        }
+
+        private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!ReferenceEquals(e.OriginalSource, Tabs) || TabDocTypes == null) return;
+            // Belegarten gelten für alle Firmen
+            PnlCompanies.IsEnabled = !TabDocTypes.IsSelected;
         }
 
         private void BtnSuggest_Click(object sender, RoutedEventArgs e)
         {
             var c = TxtTestCompany.Text.Trim();
-            if (c.Length == 0) { System.Windows.MessageBox.Show(this, "Bitte unten bei Firma einen Namen eingeben.", Title); return; }
+            if (c.Length == 0) { System.Windows.MessageBox.Show(this, "Bitte oben bei Firma einen Namen eingeben.", Title); return; }
             if (AddSuggestions(c) == 0) System.Windows.MessageBox.Show(this, $"Keine neuen Vorschl\u00E4ge f\u00FCr \u201E{c}\u201C.", Title);
         }
 
@@ -120,6 +153,13 @@ namespace Dateiumbenenner
                 Company = r.Company, DocType = r.DocType, Keyword = r.Keyword, Position = r.Position, KeywordEnd = r.KeywordEnd, Page = r.Page, Priority = r.Priority
             }));
             GridAmountRules.ItemsSource = _amountRules;
+            ColDatePos.ItemsSource = Enum.GetValues(typeof(DatePosition));
+            ColDateFormat.ItemsSource = FormatChoices;
+            _dateRules = new ObservableCollection<DateRule>(DateRuleStore.Rules.Select(r => new DateRule
+            {
+                Company = r.Company, DocType = r.DocType, Keyword = r.Keyword, Position = r.Position, Format = r.Format, Mask = r.Mask, Priority = r.Priority
+            }));
+            GridDateRules.ItemsSource = _dateRules;
             TxtTestCompany.Text = company ?? "";
             TxtTestDocType.Text = docType ?? "";
         }
@@ -179,6 +219,87 @@ namespace Dateiumbenenner
             foreach (var r in GridAmountRules.SelectedItems.OfType<AmountRule>().ToList()) _amountRules.Remove(r);
         }
 
+        private void BtnAddDateRule_Click(object sender, RoutedEventArgs e)
+        {
+            AddDateRule(new DateRule
+            {
+                Company = string.IsNullOrWhiteSpace(TxtTestCompany.Text) ? "*" : TxtTestCompany.Text.Trim(),
+                DocType = string.IsNullOrWhiteSpace(TxtTestDocType.Text) ? "*" : TxtTestDocType.Text.Trim(),
+                Keyword = "Rechnungsdatum"
+            });
+        }
+
+        private void AddDateRule(DateRule r)
+        {
+            _dateRules.Insert(0, r);
+            System.Windows.Data.CollectionViewSource.GetDefaultView(_dateRules).Refresh();
+            GridDateRules.SelectedItem = r;
+            GridDateRules.ScrollIntoView(r);
+            UpdateDateTest();
+        }
+
+        private void BtnDeleteDateRule_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var r in GridDateRules.SelectedItems.OfType<DateRule>().ToList()) _dateRules.Remove(r);
+            UpdateDateTest();
+        }
+
+        /// <summary>Begriff (gleiche Zeile links bzw. Spalte darüber) und Schreibweise des Datums aus dem angezeigten Beleg als Regel anlegen.</summary>
+        private void BtnDateFromDocument_Click(object sender, RoutedEventArgs e)
+        {
+            var target = DateRuleStore.FindDates(_docDate ?? "").FirstOrDefault().Date;
+            if (string.IsNullOrEmpty(_docText) || target == null)
+            {
+                System.Windows.MessageBox.Show(this, "Kein Beleg mit erkanntem Datum geöffnet – den Dialog über einen Beleg („…“ neben Nummer, Datum oder Betrag) öffnen.", Title);
+                return;
+            }
+            var rule = SuggestDateRule(_docText, target);
+            if (rule == null)
+            {
+                System.Windows.MessageBox.Show(this, $"Das Datum {_docDate} wurde im Belegtext nicht gefunden.", Title);
+                return;
+            }
+            rule.Company = string.IsNullOrWhiteSpace(TxtTestCompany.Text) ? "*" : TxtTestCompany.Text.Trim();
+            rule.DocType = string.IsNullOrWhiteSpace(TxtTestDocType.Text) ? "*" : TxtTestDocType.Text.Trim();
+            var same = _dateRules.FirstOrDefault(r => string.Equals(r.Company, rule.Company, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(r.DocType, rule.DocType, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(r.Keyword?.Trim(), rule.Keyword, StringComparison.OrdinalIgnoreCase));
+            if (same != null)
+            {
+                same.Position = rule.Position; same.Format = rule.Format; same.Mask = rule.Mask;
+                GridDateRules.Items.Refresh();
+                GridDateRules.SelectedItem = same;
+                UpdateDateTest();
+                return;
+            }
+            AddDateRule(rule);
+        }
+
+        /// <summary>Regel zum Datum im Text: Begriff links in der Zeile (Lage Rechts) oder in der Spalte darüber (Lage Darunter), Schreibweise wie im Text.</summary>
+        public static DateRule? SuggestDateRule(string text, string date)
+        {
+            var lines = text.Split(new[] { "\r\n", "\n", "\r", "\f" }, StringSplitOptions.None);
+            var labelRx = new System.Text.RegularExpressions.Regex(@"(?<t>\p{L}[\p{L}\-]{2,})\.?\s*[.:]?\s*$");
+            DateRule? fallback = null;
+            for (int i = 0; i < lines.Length; i++)
+                foreach (var hit in DateRuleStore.FindDates(lines[i]).Where(h => h.Date == date))
+                {
+                    var format = DateRuleStore.DetectFormat(hit.Raw);
+                    var left = labelRx.Match(lines[i].Substring(0, hit.Index));
+                    if (left.Success)
+                        return new DateRule { Keyword = left.Groups["t"].Value, Position = DatePosition.Rechts, Format = format };
+                    for (int j = i - 1; j >= Math.Max(0, i - 2); j--)
+                    {
+                        var above = System.Text.RegularExpressions.Regex.Matches(lines[j], @"\p{L}[\p{L}\-]{2,}")
+                            .Where(m => m.Index <= hit.Index + hit.Length + 6 && m.Index + m.Length >= hit.Index - 6)
+                            .OrderBy(m => Math.Abs(m.Index + m.Length / 2.0 - (hit.Index + hit.Length / 2.0))).FirstOrDefault();
+                        if (above != null) return new DateRule { Keyword = above.Value, Position = DatePosition.Darunter, Format = format };
+                    }
+                    fallback ??= new DateRule { Format = format };
+                }
+            return fallback;
+        }
+
         private void BtnAddDocType_Click(object sender, RoutedEventArgs e)
         {
             var row = new DocTypeRow { Name = "Neue Belegart" };
@@ -193,9 +314,24 @@ namespace Dateiumbenenner
         }
 
         private void GridRules_CellEditEnding(object? sender, DataGridCellEditEndingEventArgs e) =>
-            Dispatcher.BeginInvoke(new Action(UpdateTest), System.Windows.Threading.DispatcherPriority.Background);
+            Dispatcher.BeginInvoke(new Action(() => { UpdateTest(); UpdateDateTest(); }), System.Windows.Threading.DispatcherPriority.Background);
 
-        private void Test_Changed(object sender, TextChangedEventArgs e) => UpdateTest();
+        private void Test_Changed(object sender, TextChangedEventArgs e) { UpdateTest(); UpdateDateTest(); }
+
+        /// <summary>Datumsregeln testen: Textzeile (oder Text des angezeigten Belegs) mit den Regeln der Firma/Belegart.</summary>
+        private void UpdateDateTest()
+        {
+            if (TxtDateTestResult == null || _dateRules == null) return;
+            var text = string.IsNullOrWhiteSpace(TxtDateTest.Text) ? _docText : TxtDateTest.Text;
+            string company = TxtTestCompany.Text.Trim(), docType = TxtTestDocType.Text.Trim();
+            var fn = DateRuleStore.ArchiveFunction(DateRuleStore.FormatFor(company, docType, _dateRules));
+            var xml = fn == null ? "" : $"XML: ({fn})";
+            if (string.IsNullOrWhiteSpace(text)) { TxtDateTestResult.Text = xml; return; }
+            var field = new Field();
+            var hit = DateRuleStore.Apply(field, company, docType, text, _dateRules);
+            var source = hit == null ? null : field.Candidates.FirstOrDefault(c => c.Value == hit)?.Source;
+            TxtDateTestResult.Text = (hit == null ? "Keine Datumsregel findet ein Datum" : $"Datum {hit} ({source})") + (xml.Length > 0 ? "  ·  " + xml : "");
+        }
 
         private void UpdateTest()
         {
@@ -248,17 +384,23 @@ namespace Dateiumbenenner
 
         private string? _docPath;
         private string? _docText;
+        private string? _docDate;
         private PdfPreviewWindow? _preview;
         private readonly List<ValueHit> _hits = new();
 
         /// <summary>Betrag-Reiter vorwählen.</summary>
         public void ShowAmountTab() => TabAmount.IsSelected = true;
 
+        /// <summary>Datum-Reiter vorwählen.</summary>
+        public void ShowDateTab() => TabDate.IsSelected = true;
+
         /// <summary>Ausgewählten Beleg anzeigen: Vorschau (PDF/TXT) und Fundstellen von Nummer, Datum und Betrag.</summary>
         public void SetDocument(string? filePath, string? fullText, string? number, string? date, string? amount)
         {
             _docPath = filePath;
             _docText = fullText;
+            _docDate = date;
+            UpdateDateTest();
             if (string.IsNullOrEmpty(filePath)) { PnlDocument.Visibility = Visibility.Collapsed; return; }
             PnlDocument.Visibility = Visibility.Visible;
             TxtDocument.Text = "Beleg: " + System.IO.Path.GetFileName(filePath);
@@ -326,6 +468,7 @@ namespace Dateiumbenenner
             GridRules.CommitEdit(DataGridEditingUnit.Row, true);
             GridDocTypes.CommitEdit(DataGridEditingUnit.Row, true);
             GridAmountRules.CommitEdit(DataGridEditingUnit.Row, true);
+            GridDateRules.CommitEdit(DataGridEditingUnit.Row, true);
             var empty = _rules.Count(r => r.Kind == NumberRuleKind.Maske && string.IsNullOrWhiteSpace(r.Mask));
             bool keepEmpty = true;
             if (askEmpty && empty > 0)
@@ -357,6 +500,14 @@ namespace Dateiumbenenner
             {
                 r.Company = string.IsNullOrWhiteSpace(r.Company) ? "*" : r.Company.Trim();
                 r.DocType = string.IsNullOrWhiteSpace(r.DocType) ? "*" : r.DocType.Trim();
+                return r;
+            }));
+            DateRuleStore.Save(_dateRules.Select(r =>
+            {
+                r.Company = string.IsNullOrWhiteSpace(r.Company) ? "*" : r.Company.Trim();
+                r.DocType = string.IsNullOrWhiteSpace(r.DocType) ? "*" : r.DocType.Trim();
+                r.Keyword = r.Keyword?.Trim() ?? "";
+                r.Mask = string.IsNullOrWhiteSpace(r.Mask) ? null : r.Mask.Trim();
                 return r;
             }));
             return true;

@@ -149,9 +149,9 @@ namespace Dateiumbenenner
             // Bekannte Firmen direkt im Text suchen (Zeilen/Fenster vergleichen)
             if (!string.IsNullOrEmpty(fullText))
             {
-                // Zeilen nur einmal normalisieren (vorher pro bekannter Firma erneut)
-                var lines = fullText.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(Normalize).ToArray();
+                // Zeilen und ihre Zeichenhäufigkeiten nur einmal je Text berechnen
+                var index = GetTextIndex(fullText);
+                var lines = index.Lines;
                 double threshold = Threshold;
                 Span<int> histK = stackalloc int[HistSize];
                 Span<int> histW = stackalloc int[HistSize];
@@ -161,10 +161,14 @@ namespace Dateiumbenenner
                     var nk = knownNorm[ki];
                     if (nk.Length < 4) continue;
                     FillHistogram(nk, histK);
+                    var bins = UsedBins(histK);
                     double bestLine = 0;
-                    foreach (var nl in lines)
+                    for (int li = 0; li < lines.Length; li++)
                     {
+                        var nl = lines[li];
                         if (nl.Length < nk.Length / 2) continue;
+                        // Fehlen der ganzen Zeile zu viele Zeichen des Namens, erreicht auch kein Fenster daraus den Schwellwert
+                        if (1.0 - (double)MissingChars(histK, bins, index.LineHistogram(li)) / nk.Length < threshold) continue;
                         if (nl.Contains(nk)) { bestLine = 1; break; }
                         // Gleitendes Fenster in Länge des Firmennamens
                         for (int i = 0; i + nk.Length <= nl.Length; i += Math.Max(1, nk.Length / 4))
@@ -192,17 +196,75 @@ namespace Dateiumbenenner
             if (string.IsNullOrWhiteSpace(company) || string.IsNullOrEmpty(fullText)) return false;
             var nk = Normalize(company);
             if (nk.Length == 0) return false;
-            if (Normalize(fullText).Contains(nk)) return true;
+            var index = GetTextIndex(fullText);
+            if (index.Normalized.Contains(nk)) return true;
             if (nk.Length < 4) return false;
-            foreach (var line in fullText.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries))
+            double threshold = Threshold;
+            Span<int> histK = stackalloc int[HistSize];
+            FillHistogram(nk, histK);
+            var bins = UsedBins(histK);
+            for (int li = 0; li < index.Lines.Length; li++)
             {
-                var nl = Normalize(line);
+                var nl = index.Lines[li];
                 if (nl.Length < nk.Length / 2) continue;
+                if (1.0 - (double)MissingChars(histK, bins, index.LineHistogram(li)) / nk.Length < threshold) continue;
                 if (nl.Length <= nk.Length) { if (Similarity(nk, nl) >= Threshold) return true; continue; }
                 for (int i = 0; i + nk.Length <= nl.Length; i += Math.Max(1, nk.Length / 4))
                     if (Similarity(nk, nl.Substring(i, nk.Length)) >= Threshold) return true;
             }
             return false;
+        }
+
+        /// <summary>Normalisierter Text, normalisierte Zeilen und deren Zeichenhäufigkeiten – je Thread für den zuletzt geprüften Text zwischengespeichert
+        /// (Firmenerkennung prüft dutzende Namen gegen denselben Belegtext).</summary>
+        private sealed class TextIndex
+        {
+            public string Source = "";
+            public string[] Lines = Array.Empty<string>();
+            private int[]? _hists;
+            private string? _normalized;
+            public string Normalized => _normalized ??= Normalize(Source);
+
+            public ReadOnlySpan<int> LineHistogram(int line)
+            {
+                if (_hists == null)
+                {
+                    var h = new int[Lines.Length * HistSize];
+                    for (int i = 0; i < Lines.Length; i++) FillHistogram(Lines[i], h.AsSpan(i * HistSize, HistSize));
+                    _hists = h;
+                }
+                return _hists.AsSpan(line * HistSize, HistSize);
+            }
+        }
+
+        [ThreadStatic] private static TextIndex? _textIndex;
+
+        private static TextIndex GetTextIndex(string text)
+        {
+            var ix = _textIndex;
+            if (ix != null && ReferenceEquals(ix.Source, text)) return ix;
+            ix = new TextIndex
+            {
+                Source = text,
+                Lines = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries).Select(Normalize).ToArray()
+            };
+            _textIndex = ix;
+            return ix;
+        }
+
+        private static int[] UsedBins(ReadOnlySpan<int> hist)
+        {
+            var bins = new List<int>();
+            for (int i = 0; i < hist.Length; i++) if (hist[i] > 0) bins.Add(i);
+            return bins.ToArray();
+        }
+
+        /// <summary>Zeichen des Namens, die in der Zeile fehlen = untere Schranke der Levenshtein-Distanz zu jedem Teilstück der Zeile.</summary>
+        private static int MissingChars(ReadOnlySpan<int> name, int[] bins, ReadOnlySpan<int> line)
+        {
+            int missing = 0;
+            foreach (var b in bins) if (name[b] > line[b]) missing += name[b] - line[b];
+            return missing;
         }
 
         private static void Add(List<(string Name, double Score)> list, string name, double score)

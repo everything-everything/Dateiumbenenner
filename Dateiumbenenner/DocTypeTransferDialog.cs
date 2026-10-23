@@ -101,6 +101,9 @@ namespace Dateiumbenenner
                     if (srcShape.Length > 0 && g.Key.Shape == srcShape) reasons.Add("Nummernaufbau");
                     if (srcRange != null && g.Any(i => Range(i.SelectedNumber) == srcRange)) reasons.Add("Nummernkreis " + srcRange + "…");
                     if (best >= ContentThreshold) reasons.Add($"Inhalt {best:P0}");
+                    bool structure = reasons.Any(r => r != "Firma");
+                    if (company && structure && targetType.Length > 0 && string.Equals(g.Key.Type, targetType, StringComparison.OrdinalIgnoreCase))
+                        reasons.Add("bereits " + targetType);
                     var grp = new Group
                     {
                         Company = g.Key.Company.Length == 0 ? "(leer)" : g.Key.Company,
@@ -109,10 +112,9 @@ namespace Dateiumbenenner
                         Match = string.Join(", ", reasons),
                     };
                     grp.Rows.AddRange(rows);
-                    // Firma muss passen, dazu gleicher Nummernaufbau/-kreis oder ähnlicher Inhalt
-                    bool structure = reasons.Any(r => r != "Firma");
-                    if (company && structure && !string.Equals(g.Key.Type, targetType, StringComparison.OrdinalIgnoreCase))
-                        grp.Selected = true;
+                    // Firma muss passen, dazu gleicher Nummernaufbau/-kreis oder ähnlicher Inhalt – auch wenn die Gruppe
+                    // schon die Belegart der Quelle hat (z. B. für eine Gruppenzuweisung auf eine andere Belegart)
+                    if (company && structure) grp.Selected = true;
                     foreach (var r in grp.Rows) { var gg = grp; r.SelectionChanged = () => { gg.Notify(); UpdateInfo(); }; }
                     return grp;
                 })
@@ -128,7 +130,7 @@ namespace Dateiumbenenner
             {
                 Text = $"Quelle: {source.FileName} – {source.CompanyName} – {(string.IsNullOrWhiteSpace(source.DocumentType) ? "(leer)" : source.DocumentType)}"
                     + (srcShape.Length > 0 ? $"  (Nummer {source.SelectedNumber}, Aufbau {srcShape})" : "")
-                    + "\nGruppiert nach Firma, Nummernaufbau und bisheriger Belegart. Vorausgewählt: gleiche Firma und gleicher Nummernaufbau/-kreis oder ähnlicher Inhalt."
+                    + "\nGruppiert nach Firma, Nummernaufbau und bisheriger Belegart. Vorausgewählt: gleiche Firma und gleicher Nummernaufbau/-kreis oder ähnlicher Inhalt (auch Gruppen, die die Belegart schon haben – „bereits …“)."
                     + "\nGruppenzuweisung: Belegart wählen, Gruppen/Belege markieren, „Markierten zuweisen“ – beliebig oft mit anderen Belegarten wiederholen.",
                 TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4)
             });
@@ -137,6 +139,7 @@ namespace Dateiumbenenner
             _target = new ComboBox { IsEditable = true, Width = 220, Text = targetType, HorizontalAlignment = HorizontalAlignment.Left };
             foreach (var t in docTypes.Append(targetType).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase)) _target.Items.Add(t);
             _target.Text = targetType;
+            _target.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent, new TextChangedEventHandler((_, _) => UpdateInfo()));
             tp.Children.Add(_target);
             var btnAssign = new Button { Content = "Markierten zuweisen", Padding = new Thickness(10, 2, 10, 2), Margin = new Thickness(6, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
             tp.Children.Add(btnAssign);
@@ -302,7 +305,10 @@ namespace Dateiumbenenner
         {
             if (_info == null) return;
             var rows = _groups.SelectMany(g => g.Rows).ToList();
-            _info.Text = $"{rows.Count(r => r.Selected)} markiert, {rows.Count(r => r.Pending.Length > 0)} zugewiesen";
+            var type = _target?.Text?.Trim() ?? "";
+            int already = type.Length == 0 ? 0 : rows.Count(r => r.Selected && string.Equals(r.Item.DocumentType?.Trim(), type, StringComparison.OrdinalIgnoreCase));
+            _info.Text = $"{rows.Count(r => r.Selected)} markiert" + (already > 0 ? $" (davon {already} schon „{type}“)" : "")
+                + $", {rows.Count(r => r.Pending.Length > 0)} zugewiesen";
         }
 
         private static DataTemplate CheckTemplate(string path)

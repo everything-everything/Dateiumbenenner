@@ -518,26 +518,54 @@ namespace Dateiumbenenner
         {
             var sel = LvFiles.SelectedItems.OfType<DocumentMetadata>().ToList();
             if (sel.Count == 0) { MessageBoxWpf.Show("Bitte zuerst Dateien in der Liste markieren.", "Markierte verschieben / kopieren"); return; }
-            var r = MessageBoxWpf.Show($"{sel.Count:N0} markierte Datei(en):\n\nJa = Verschieben\nNein = Kopieren", "Markierte verschieben / kopieren", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-            if (r == MessageBoxResult.Cancel) return;
-            bool move = r == MessageBoxResult.Yes;
-            var dlg = new System.Windows.Forms.FolderBrowserDialog { Description = move ? "Zielordner zum Verschieben" : "Zielordner zum Kopieren", UseDescriptionForTitle = true, ClientGuid = new Guid("7C4D2E91-0A3B-4F6E-8D15-2B9E6C1F4A73") };
-            if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
-            var target = dlg.SelectedPath;
-            if (!string.IsNullOrEmpty(TxtFolder.Text) && string.Equals(Path.GetFullPath(target).TrimEnd('\\'), Path.GetFullPath(TxtFolder.Text).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-            { TxtStatus.Text = "Zielordner ist der aktuelle Ordner."; return; }
+            var dlg = new MoveCopyDialog(sel, _items.ToList(), TxtFolder.Text, LoadSessionValue("MoveCopy.Target"),
+                LoadSessionValue("MoveCopy.Move") != "0", LoadSessionValue("MoveCopy.Xml") == "1", LoadSessionValue("MoveCopy.XmlMove") == "1") { Owner = this };
+            if (dlg.ShowDialog() != true) return;
+            bool move = dlg.Move;
+            var target = dlg.Target;
+            SaveSessionValue("MoveCopy.Target", target);
+            SaveSessionValue("MoveCopy.Move", move ? "1" : "0");
+            SaveSessionValue("MoveCopy.Xml", dlg.WithXml ? "1" : "0");
+            SaveSessionValue("MoveCopy.XmlMove", dlg.XmlMove ? "1" : "0");
+            var xmlFiles = dlg.WithXml ? dlg.XmlFiles : new List<(string Path, bool Shared)>();
+            var xmlTarget = dlg.XmlTarget; bool xmlMove = dlg.XmlMove;
             var paths = sel.Select(m => m.FilePath).ToList();
             int total = paths.Count;
-            var progress = new Progress<int>(n => TxtStatus.Text = $"{(move ? "Verschiebe" : "Kopiere")} {n:N0} / {total:N0}...");
-            var (done, errors) = await Task.Run(() => Dateiumbenenner.Engine.FileTransfer.Run(paths, target, move, progress));
-            if (move)
+            var progress = new Progress<int>(n => TxtStatus.Text = n < total
+                ? $"{(move ? "Verschiebe" : "Kopiere")} {n:N0} / {total:N0}..."
+                : move ? "Datenbank wird aktualisiert..." : $"{n:N0} Datei(en) kopiert...");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var (done, errors, xml) = await Task.Run(() =>
             {
-                var set = new HashSet<string>(done, StringComparer.OrdinalIgnoreCase);
-                foreach (var m in _items.Where(m => set.Contains(m.FilePath)).ToList()) _items.Remove(m);
+                var res = Dateiumbenenner.Engine.FileTransfer.Run(paths, target, move, progress);
+                (int Moved, int Copied, int Same, List<string> Messages) x = xmlFiles.Count > 0 ? Dateiumbenenner.Engine.FileTransfer.TransferXml(xmlFiles, xmlTarget, xmlMove) : (0, 0, 0, new List<string>());
+                return (res.Done, res.Errors, x);
+            });
+            if (move) RemoveItems(new HashSet<string>(done, StringComparer.OrdinalIgnoreCase));
+            var status = $"{done.Count:N0} Datei(en) {(move ? "verschoben" : "kopiert")} nach {target} ({sw.Elapsed.TotalSeconds:0.0} s).";
+            if (xmlFiles.Count > 0)
+                status += $" XML: {xml.Moved} verschoben, {xml.Copied} kopiert" + (xml.Same > 0 ? $", {xml.Same} bereits vorhanden" : "") + $" nach {xmlTarget}.";
+            if (errors.Count > 0) status += $" {errors.Count} Fehler.";
+            TxtStatus.Text = status;
+            var messages = errors.Concat(xml.Messages).ToList();
+            if (messages.Count > 0)
+                MessageBoxWpf.Show(string.Join("\n", messages.Take(25)) + (messages.Count > 25 ? $"\n... und {messages.Count - 25} weitere" : ""), (errors.Count > 0 ? "Fehler beim " : "Hinweise zum ") + (move ? "Verschieben" : "Kopieren"), MessageBoxButton.OK, errors.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+        }
+
+        /// <summary>Einträge gesammelt aus der Liste entfernen; die Liste ist dabei abgekoppelt, damit nicht jede einzelne
+        /// Entfernung Auswahl-/Vorschau-Ereignisse auslöst.</summary>
+        private void RemoveItems(ISet<string> paths)
+        {
+            if (paths.Count == 0) return;
+            var bound = LvFiles.ItemsSource; LvFiles.ItemsSource = null;
+            var keep = _items.Where(m => !paths.Contains(m.FilePath)).ToList();
+            if (keep.Count < _items.Count)
+            {
+                if (keep.Count < _items.Count / 2) { _items.Clear(); foreach (var m in keep) _items.Add(m); }
+                else foreach (var m in _items.Where(m => paths.Contains(m.FilePath)).ToList()) _items.Remove(m);
             }
-            TxtStatus.Text = $"{done.Count:N0} Datei(en) {(move ? "verschoben" : "kopiert")} nach {target}." + (errors.Count > 0 ? $" {errors.Count} Fehler." : "");
-            if (errors.Count > 0)
-                MessageBoxWpf.Show(string.Join("\n", errors.Take(20)) + (errors.Count > 20 ? $"\n... und {errors.Count - 20} weitere" : ""), "Fehler beim " + (move ? "Verschieben" : "Kopieren"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (bound is List<DocumentMetadata> shown) shown.RemoveAll(m => paths.Contains(m.FilePath));
+            LvFiles.ItemsSource = bound ?? _items;
         }
         protected override async void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e){ base.OnPreviewKeyDown(e); if(e.Key==System.Windows.Input.Key.F5 && !e.Handled){ e.Handled=true; await RefreshFolderAsync(); } }
 
@@ -573,7 +601,7 @@ namespace Dateiumbenenner
             var (gone,added)=await Task.Run(()=>{ var now=new HashSet<string>(Directory.EnumerateFiles(folder).Where(f=>exts.Contains(Path.GetExtension(f).ToLowerInvariant())),StringComparer.OrdinalIgnoreCase); var k=new HashSet<string>(known,StringComparer.OrdinalIgnoreCase); return (known.Where(p=>!now.Contains(p)).ToHashSet(StringComparer.OrdinalIgnoreCase), now.Count(p=>!k.Contains(p))); });
             if(added>0){ TxtStatus.Text=$"{added:N0} neue Datei(en) erkannt – Liste wird aktualisiert..."; await RefreshFolderAsync(); return; }
             if(gone.Count==0) return;
-            foreach(var m in _items.Where(i=>gone.Contains(i.FilePath)).ToList()) _items.Remove(m);
+            RemoveItems(gone);
             TxtStatus.Text=$"{gone.Count:N0} Datei(en) aus dem Ordner entfernt/verschoben – Liste angepasst ({_items.Count:N0} Dateien).";
         }
 
@@ -1528,6 +1556,8 @@ namespace Dateiumbenenner
 
             // Gelerntes Nummernformat, Regeln und Fundstelle (Firma + Belegtyp): passende Kandidaten nach vorne
             ApplyNumberField(meta, number, docType.Value ?? meta.DocumentType);
+            // Datumsregeln (Begriff/Schreibweise je Firma + Belegart)
+            Dateiumbenenner.Engine.DateRuleStore.Apply(date, meta.CompanyName, docType.Value ?? meta.DocumentType, meta.FullText);
             for (int i = date.Values.Count - 1; i >= 0; i--)
             { meta.DateCandidates.Remove(date.Values[i]); meta.DateCandidates.Insert(0, date.Values[i]); }
 

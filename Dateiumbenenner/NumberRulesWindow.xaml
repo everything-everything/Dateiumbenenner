@@ -1,8 +1,33 @@
 <Window x:Class="Dateiumbenenner.NumberRulesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Belegarten &amp; Nummernmuster" Height="640" Width="1000"
+        Title="Belegarten &amp; Nummernmuster" Height="700" Width="1150"
         WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <Style x:Key="HintBox" TargetType="Border">
+            <Setter Property="Background" Value="#FFF3F7FB"/>
+            <Setter Property="BorderBrush" Value="#FFD3E0EC"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="DockPanel.Dock" Value="Top"/>
+        </Style>
+        <Style x:Key="HintText" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Foreground" Value="#FF3E4C5E"/>
+        </Style>
+        <Style x:Key="BarButton" TargetType="Button">
+            <Setter Property="Padding" Value="8,2"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+        </Style>
+        <Style x:Key="TestBox" TargetType="Border">
+            <Setter Property="BorderBrush" Value="LightGray"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="6"/>
+            <Setter Property="Margin" Value="0,6,0,0"/>
+            <Setter Property="DockPanel.Dock" Value="Bottom"/>
+        </Style>
+    </Window.Resources>
     <DockPanel Margin="10">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button Content="Speichern &amp; Belegnummern neu ermitteln" Padding="10,3" Margin="0,0,8,0" Click="BtnSaveRecalc_Click"/>
@@ -19,32 +44,41 @@
                 <StackPanel x:Name="PnlSources" Margin="0,4,0,0"/>
             </DockPanel>
         </Border>
-        <TabControl x:Name="Tabs">
-            <TabItem Header="Nummernmuster">
+        <Border DockPanel.Dock="Top" BorderBrush="LightGray" BorderThickness="1" Padding="6,4" Margin="0,0,0,8">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Firma:" VerticalAlignment="Center" Margin="0,0,4,0" FontWeight="SemiBold"/>
+                <TextBox x:Name="TxtTestCompany" Width="220" TextChanged="Test_Changed"/>
+                <TextBlock Text="Belegart:" VerticalAlignment="Center" Margin="12,0,4,0" FontWeight="SemiBold"/>
+                <TextBox x:Name="TxtTestDocType" Width="150" TextChanged="Test_Changed"/>
+                <TextBlock Text="gilt f&#252;r &#8222;Regel hinzuf&#252;gen&#8220;, Vorschl&#228;ge und Tests (leer = alle)" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="Gray"/>
+            </StackPanel>
+        </Border>
+        <DockPanel x:Name="PnlCompanies" DockPanel.Dock="Left" Width="210" Margin="0,0,8,0">
+            <TextBlock DockPanel.Dock="Top" Text="Firmen" FontWeight="SemiBold" Margin="0,0,0,4"/>
+            <TextBox x:Name="TxtCompanyFilter" DockPanel.Dock="Top" Margin="0,0,0,4" ToolTip="Firmen filtern" TextChanged="TxtCompanyFilter_TextChanged"/>
+            <ListBox x:Name="LstCompanies" SelectionChanged="LstCompanies_SelectionChanged"
+                     ToolTip="Firma w&#228;hlen: Nummern-, Datums- und Betragsregeln dieser Firma (und * = alle) anzeigen"/>
+        </DockPanel>
+        <TabControl x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged">
+            <TabItem x:Name="TabNumber" Header="Nummernmuster">
                 <DockPanel Margin="5">
-                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="Gray"
+                    <Border Style="{StaticResource HintBox}">
+                        <TextBlock Style="{StaticResource HintText}"
                                Text="Maske: $ = Ziffer, ? = Buchstabe, # = Ziffer oder Buchstabe, * = beliebiges Zeichen, Leerzeichen = Leerzeichen, sonst w&#246;rtlich (z. B. RE-$$$$$$ oder ???$$$$ $$$?). Merkmale: ungef&#228;hre L&#228;nge und erlaubte Zeichen. Firma/Belegart * = alle. H&#246;here Priorit&#228;t gewinnt; Abweichungen (l&#228;nger/k&#252;rzer) werden schw&#228;cher bewertet."/>
-                    <Border DockPanel.Dock="Bottom" BorderBrush="LightGray" BorderThickness="1" Padding="6" Margin="0,6,0,0">
+                    </Border>
+                    <Border Style="{StaticResource TestBox}">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Test &#8211; Firma:" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                            <TextBox x:Name="TxtTestCompany" Width="150" TextChanged="Test_Changed"/>
-                            <TextBlock Text="Belegart:" VerticalAlignment="Center" Margin="10,0,4,0"/>
-                            <TextBox x:Name="TxtTestDocType" Width="120" TextChanged="Test_Changed"/>
-                            <TextBlock Text="Nummer:" VerticalAlignment="Center" Margin="10,0,4,0"/>
-                            <TextBox x:Name="TxtTestValue" Width="150" TextChanged="Test_Changed"/>
+                            <TextBlock Text="Test &#8211; Nummer:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <TextBox x:Name="TxtTestValue" Width="180" TextChanged="Test_Changed"/>
                             <TextBlock x:Name="TxtTestResult" VerticalAlignment="Center" Margin="10,0,0,0" FontWeight="Bold"/>
                         </StackPanel>
                     </Border>
                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
-                        <Button Content="Regel hinzuf&#252;gen" Padding="8,2" Margin="0,0,6,0" Click="BtnAddRule_Click"/>
-                        <Button Content="Vorschl&#228;ge f&#252;r Firma" Padding="8,2" Margin="0,0,6,0" Click="BtnSuggest_Click" ToolTip="Je Belegart eine Regel f&#252;r die unten eingetragene Firma anlegen (Maske aus bisher erkannten Nummern)"/>
-                        <Button Content="Markierte l&#246;schen" Padding="8,2" Margin="0,0,6,0" Click="BtnDeleteRule_Click"/>
-                        <Button Content="Gelernte Regeln l&#246;schen" Padding="8,2" Click="BtnDeleteLearned_Click"/>
+                        <Button Content="Regel hinzuf&#252;gen" Style="{StaticResource BarButton}" Click="BtnAddRule_Click"/>
+                        <Button Content="Vorschl&#228;ge f&#252;r Firma" Style="{StaticResource BarButton}" Click="BtnSuggest_Click" ToolTip="Je Belegart eine Regel f&#252;r die oben eingetragene Firma anlegen (Maske aus bisher erkannten Nummern)"/>
+                        <Button Content="Markierte l&#246;schen" Style="{StaticResource BarButton}" Click="BtnDeleteRule_Click"/>
+                        <Button Content="Gelernte Regeln l&#246;schen" Style="{StaticResource BarButton}" Click="BtnDeleteLearned_Click"/>
                     </StackPanel>
-                    <DockPanel DockPanel.Dock="Left" Width="200" Margin="0,0,6,0">
-                        <TextBox x:Name="TxtCompanyFilter" DockPanel.Dock="Top" Margin="0,0,0,4" ToolTip="Firmen filtern" TextChanged="TxtCompanyFilter_TextChanged"/>
-                        <ListBox x:Name="LstCompanies" SelectionChanged="LstCompanies_SelectionChanged"/>
-                    </DockPanel>
                     <DataGrid x:Name="GridRules" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column" CellEditEnding="GridRules_CellEditEnding">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Firma" Binding="{Binding Company, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
@@ -75,30 +109,49 @@
                     </DataGrid>
                 </DockPanel>
             </TabItem>
-            <TabItem Header="Belegarten">
+            <TabItem x:Name="TabDate" Header="Datum">
                 <DockPanel Margin="5">
-                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="Gray"
-                               Text="Eigene Belegarten festlegen. Umschreibungen werden bei der Erkennung der Belegart zugeordnet (z. B. Sendeinformation &#8594; Lieferschein). Nummer-Schl&#252;sselw&#246;rter: Begriffe, hinter denen die Belegnummer steht. Mehrere Eintr&#228;ge mit ; trennen."/>
+                    <Border Style="{StaticResource HintBox}">
+                        <TextBlock Style="{StaticResource HintText}"
+                               Text="Belegdatum je Firma/Belegart (* = alle): Begriff, bei dem das Datum steht (z. B. Rechnungsdatum, Lieferdatum, Belegdatum), Lage rechts daneben, links davor oder darunter (Spalte), und die Schreibweise im Beleg. Die Schreibweise (Datumsformat) gilt auch f&#252;r die XML-Erzeugung und den XML-Editor: TT.MM.JJJJ = (Datum), Monatsname = (DatumJan), JJJJ-MM-TT = (DatumJMT), MM/TT/JJJJ = (DatumUS), eigene Maske = (DatumFrei(&#8230;)). Ohne Begriff wird nur die Schreibweise festgelegt. Ohne Treffer bleibt die bisherige Erkennung."/>
+                    </Border>
+                    <Border Style="{StaticResource TestBox}">
+                        <DockPanel>
+                            <TextBlock Text="Test &#8211; Textzeile:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <TextBox x:Name="TxtDateTest" Width="280" TextChanged="Test_Changed"
+                                     ToolTip="z. B. &#8222;Lieferdatum: 3. M&#228;rz 2024&#8220;; leer = Text des oben angezeigten Belegs"/>
+                            <TextBlock x:Name="TxtDateTestResult" VerticalAlignment="Center" Margin="10,0,0,0" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                    </Border>
                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
-                        <Button Content="Belegart hinzuf&#252;gen" Padding="8,2" Margin="0,0,6,0" Click="BtnAddDocType_Click"/>
-                        <Button Content="Markierte l&#246;schen" Padding="8,2" Click="BtnDeleteDocType_Click"/>
+                        <Button Content="Regel hinzuf&#252;gen" Style="{StaticResource BarButton}" Click="BtnAddDateRule_Click"/>
+                        <Button Content="Aus aktuellem Beleg &#252;bernehmen" Style="{StaticResource BarButton}" Click="BtnDateFromDocument_Click"
+                                ToolTip="Begriff, Lage und Schreibweise des Datums aus dem oben angezeigten Beleg als Regel f&#252;r Firma/Belegart anlegen"/>
+                        <Button Content="Markierte l&#246;schen" Style="{StaticResource BarButton}" Click="BtnDeleteDateRule_Click"/>
                     </StackPanel>
-                    <DataGrid x:Name="GridDocTypes" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                    <DataGrid x:Name="GridDateRules" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column" CellEditEnding="GridRules_CellEditEnding">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Belegart" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
-                            <DataGridTextColumn Header="Umschreibungen (;-getrennt)" Binding="{Binding Synonyms, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                            <DataGridTextColumn Header="Nummer-Schl&#252;sselw&#246;rter (;-getrennt)" Binding="{Binding Keywords, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            <DataGridTextColumn Header="Firma" Binding="{Binding Company, UpdateSourceTrigger=PropertyChanged}" Width="180"/>
+                            <DataGridTextColumn Header="Belegart" Binding="{Binding DocType, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
+                            <DataGridTextColumn Header="Begriff" Binding="{Binding Keyword, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
+                            <DataGridComboBoxColumn x:Name="ColDatePos" Header="Lage Begriff" SelectedItemBinding="{Binding Position}" Width="100"/>
+                            <DataGridComboBoxColumn x:Name="ColDateFormat" Header="Schreibweise (Datumsformat)" SelectedValueBinding="{Binding Format}"
+                                                    SelectedValuePath="Value" DisplayMemberPath="Label" Width="210"/>
+                            <DataGridTextColumn Header="Eigene Maske" Binding="{Binding Mask, UpdateSourceTrigger=PropertyChanged}" Width="110" FontFamily="Consolas"/>
+                            <DataGridTextColumn Header="Priorit&#228;t" Binding="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
             </TabItem>
             <TabItem x:Name="TabAmount" Header="Betrag">
                 <DockPanel Margin="5">
-                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="Gray"
+                    <Border Style="{StaticResource HintBox}">
+                        <TextBlock Style="{StaticResource HintText}"
                                Text="Bevorzugter Begriff f&#252;r den Betrag je Firma/Belegart (* = alle), z. B. Warenwert, Gesamtbetrag, Zahlbetrag. Lage: rechts daneben oder darunter (Spalte). Seite: erste oder letzte Seite. Ohne Treffer wird wie bisher der h&#246;chste Betrag genommen. Bei mehreren Belegen in einer Datei z&#228;hlen nur die Seiten der gew&#228;hlten Firma."/>
+                    </Border>
                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
-                        <Button Content="Regel hinzuf&#252;gen" Padding="8,2" Margin="0,0,6,0" Click="BtnAddAmountRule_Click"/>
-                        <Button Content="Markierte l&#246;schen" Padding="8,2" Click="BtnDeleteAmountRule_Click"/>
+                        <Button Content="Regel hinzuf&#252;gen" Style="{StaticResource BarButton}" Click="BtnAddAmountRule_Click"/>
+                        <Button Content="Markierte l&#246;schen" Style="{StaticResource BarButton}" Click="BtnDeleteAmountRule_Click"/>
                     </StackPanel>
                     <DataGrid x:Name="GridAmountRules" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
                         <DataGrid.Columns>
@@ -109,6 +162,25 @@
                             <DataGridTextColumn Header="Begriff Ende" Binding="{Binding KeywordEnd, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
                             <DataGridComboBoxColumn x:Name="ColAmountPage" Header="Seite" SelectedItemBinding="{Binding Page}" Width="100"/>
                             <DataGridTextColumn Header="Priorit&#228;t" Binding="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+            <TabItem x:Name="TabDocTypes" Header="Belegarten">
+                <DockPanel Margin="5">
+                    <Border Style="{StaticResource HintBox}">
+                        <TextBlock Style="{StaticResource HintText}"
+                               Text="Eigene Belegarten festlegen (gilt f&#252;r alle Firmen). Umschreibungen werden bei der Erkennung der Belegart zugeordnet (z. B. Sendeinformation &#8594; Lieferschein). Nummer-Schl&#252;sselw&#246;rter: Begriffe, hinter denen die Belegnummer steht. Mehrere Eintr&#228;ge mit ; trennen."/>
+                    </Border>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Belegart hinzuf&#252;gen" Style="{StaticResource BarButton}" Click="BtnAddDocType_Click"/>
+                        <Button Content="Markierte l&#246;schen" Style="{StaticResource BarButton}" Click="BtnDeleteDocType_Click"/>
+                    </StackPanel>
+                    <DataGrid x:Name="GridDocTypes" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Belegart" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
+                            <DataGridTextColumn Header="Umschreibungen (;-getrennt)" Binding="{Binding Synonyms, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            <DataGridTextColumn Header="Nummer-Schl&#252;sselw&#246;rter (;-getrennt)" Binding="{Binding Keywords, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>

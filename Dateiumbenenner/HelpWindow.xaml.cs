@@ -521,6 +521,12 @@ Siehe auch: [[system|Systemanforderungen]]"),
 * MB/KB umschalten: ändert die Anzeige der Dateigröße.
 * Zur Liste Zusammenfügen hinzufügen: übernimmt Dateien in die Registerkarte [[zusammenfuehren|PDF Zusammenführen]].
 
+# Markierte verschieben / kopieren
+* Markieren Sie die Dateien in der Liste und klicken Sie auf ""Markierte verschieben / kopieren"".
+* Wählen Sie Verschieben oder Kopieren und den Zielordner. Gleichnamige .txt/.ini/.xml werden immer mitgenommen, vorhandene Dateien nie überschrieben (Zusatz _2, _3 …).
+* Optional ""Zugehörige XML-Belegdefinitionen mitnehmen"": Aus dem XML-Quellordner (Standard: Unterordner XML des Belegordners) werden die BE_….xml gesucht, deren Erkennungsmerkmale alle im Text eines markierten Belegs stehen (ohne Merkmale: gleiche Firma). Die Liste zeigt Firma, Kategorie und die Anzahl passender Belege (Tooltip: welche); Haken mit Maus oder Leertaste setzen.
+* Die XML-Dateien landen im XML-Zielordner (Standard: Unterordner XML des Zielordners) und können kopiert oder verschoben werden. Passt eine Definition noch zu weiteren, nicht markierten Belegen der Liste, wird sie nur kopiert. Existiert sie im Ziel schon mit anderem Inhalt, wird sie nicht überschrieben und gemeldet.
+
 Wichtig: Umbenennungen erfolgen direkt im Dateisystem. Legen Sie vorher eine Sicherung an."),
 
             ("praefix", "Präfix-Umbenennung", @"Registerkarte ""Präfix-Umbenennung"":
@@ -685,7 +691,10 @@ Siehe auch: [[haftung|Haftungsausschluss]], [[lizenzen|Lizenzen und Drittanbiete
             ("nummernregeln", "Nummernmuster und Belegarten", @"Menü bzw. Schaltfläche ""Nummernregeln"": legt fest, wie Rechnungs- und Belegnummern je Firma und Belegart erkannt werden.
 
 # Firmenübersicht
-Links stehen alle Firmen mit Regeln oder geladenen Belegen. Das Filterfeld schränkt die Liste ein; ein Klick zeigt nur die Regeln dieser Firma.
+Links stehen alle Firmen mit Regeln oder geladenen Belegen. Das Filterfeld schränkt die Liste ein; ein Klick zeigt nur die Regeln dieser Firma – in den Reitern Nummernmuster, Datum und Betrag gleichermaßen. Firma und Belegart in der Leiste oben gelten für neue Regeln und den Test.
+
+# Reiter
+Nummernmuster, Datum, Betrag und ganz rechts Belegarten. Jeder Reiter hat oben einen Hinweis, unten eine Testzeile und die Schaltflächen.
 
 # Maske
 * $ = Ziffer
@@ -703,8 +712,16 @@ In der Spalte ""Beispielnummer"" kann eine erkannte Nummer ausgewählt werden; d
 # Priorität
 Passende Masken werden zuerst im Text gesucht und vor der allgemeinen Nummernerkennung bevorzugt. Regeln für Firma und Belegart gehen allgemeinen Regeln vor.
 
+# Datum
+Im Reiter ""Datum"" wird – im Stil der Nummernmuster – je Firma und Belegart festgelegt, welches Datum gilt:
+* Begriff: Bezeichnung beim Datum, z. B. Rechnungsdatum, Belegdatum, Lieferdatum
+* Lage: Datum rechts neben dem Begriff, darunter (Spaltenüberschrift) oder links davor; beliebig = alle
+* Datumsformat: TT.MM.JJJJ, TT. Monat JJJJ, JJJJ-MM-TT, MM/TT/JJJJ oder eigene Maske (TT?MM?JJJJ, ? = Trennzeichen); beliebig = alle Schreibweisen
+* Ohne Begriff wertet die Regel nur Daten in diesem Format auf.
+* ""Aus Beleg vorschlagen"" liest Begriff, Lage und Schreibweise aus dem geöffneten Beleg; die Testzeile zeigt, welches Datum die Regeln finden.
+
 # Belegarten
-Im Reiter ""Belegarten"" werden Bezeichnungen und Synonyme gepflegt (z. B. Sammelrechnung, Barverkauf, Gutschrift, Storno).
+Im Reiter ""Belegarten"" (ganz rechts) werden Bezeichnungen und Synonyme gepflegt (z. B. Sammelrechnung, Barverkauf, Gutschrift, Storno). Sie gelten für alle Firmen.
 
 Siehe auch: [[inixml|INI- und XML-Export]]"),
 
@@ -731,7 +748,11 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 * Unten links: Dateien der markierten Gruppe, Firmenname direkt bearbeitbar.
 * Unten rechts: Vorschau (PDF oder Textmodus, Vollbildvorschau).
 * Filter: mehrere Wörter möglich.
-* Im Plugin [[inixml|INI Erzeugen]] funktioniert der Dialog gleich und überträgt zusätzlich die Adressnummer."),
+* Im Plugin [[inixml|INI Erzeugen]] funktioniert der Dialog gleich und überträgt zusätzlich die Adressnummer.
+
+# Belegart übertragen
+* Gruppen nach Firma, Nummernaufbau und bisheriger Belegart. Vorausgewählt sind Gruppen der gleichen Firma mit gleichem Nummernaufbau/-kreis oder ähnlichem Inhalt – auch Gruppen, die die Belegart schon haben (Treffer ""bereits …""), damit sie bei einer Gruppenzuweisung mitwechseln.
+* Die Statuszeile zeigt, wie viele markierte Belege die gewählte Belegart schon haben."),
 
             ("index", "Index", @"> A
 * [[technik|Aufbau des Programms]]

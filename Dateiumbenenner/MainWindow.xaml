@@ -83,7 +83,7 @@
                     <Button x:Name="BtnSelectFolder" Grid.Row="0" Grid.Column="0" Content="Ordner wählen" Width="145" HorizontalAlignment="Left" Click="BtnSelectFolder_Click"/>
                     <DockPanel Grid.Row="0" Grid.Column="2">
                         <CheckBox x:Name="ChkWatchFolder" DockPanel.Dock="Right" Content="Ordner überwachen" VerticalAlignment="Center" Margin="8,0,0,0" Checked="ChkWatchFolder_Changed" Unchecked="ChkWatchFolder_Changed" ToolTip="Liste automatisch anpassen, wenn Dateien im Ordner hinzukommen, verschoben oder gelöscht werden (auf Netzlaufwerken ggf. unzuverlässig – dann Aktualisieren verwenden)"/>
-                        <Button x:Name="BtnMoveCopy" DockPanel.Dock="Right" Content="Markierte verschieben / kopieren" Padding="8,0" Margin="8,0,0,0" Click="BtnMoveCopy_Click" ToolTip="Markierte Dateien (inkl. gleichnamiger .txt/.ini/.xml) verschieben oder kopieren"/>
+                        <Button x:Name="BtnMoveCopy" DockPanel.Dock="Right" Content="Markierte verschieben / kopieren" Padding="8,0" Margin="8,0,0,0" Click="BtnMoveCopy_Click" ToolTip="Markierte Dateien (inkl. gleichnamiger .txt/.ini/.xml) verschieben oder kopieren – optional mit den zugehörigen XML-Belegdefinitionen in einen Ordner nach Wahl"/>
                         <Button x:Name="BtnRefreshFolder" DockPanel.Dock="Right" Content="Aktualisieren" Padding="8,0" Margin="8,0,0,0" Click="BtnRefreshFolder_Click" ToolTip="Ordner neu einlesen (F5). Bereits ausgewertete Belege kommen aus der Datenbank."/>
                         <TextBox x:Name="TxtFolder" Margin="0" IsReadOnly="True" HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
                     </DockPanel>
