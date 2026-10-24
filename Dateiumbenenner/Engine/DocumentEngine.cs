@@ -384,7 +384,7 @@ namespace Dateiumbenenner.Engine
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine($"Datei: {pdfPath}");
                 sb.AppendLine($"Quelle: {(usedTxt ? "gleichnamige TXT (roh)" : "übergebener Text/PDF")}");
-                sb.AppendLine($"PLZ-Verzeichnis: {Plz.Count} Einträge");
+                sb.AppendLine($"PLZ-Verzeichnis: {Plz.Count} Einträge, {Plz.Source}");
                 sb.AppendLine("--- Aufbereitete Zeilen ---");
                 for (int i = 0; i < lines.Count; i++) sb.AppendLine($"[{i}] {lines[i]}");
                 void Dump(string name, Field f)

@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <Version>5.1.2618</Version>
+    <Version>5.1.2619</Version>
     <Authors>everything-everything</Authors>
     <Product>Dateiumbenenner</Product>
     <Copyright>Copyright (c) 2026 everything-everything</Copyright>
@@ -25,6 +25,11 @@
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
     <PackageReference Include="WeCantSpell.Hunspell" Version="7.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- GeoNames postal codes DE (CC BY 4.0), embedded unchanged so it is covered by the code signature -->
+    <EmbeddedResource Include="Data\GeoNames-DE.zip" LogicalName="Dateiumbenenner.Data.GeoNames-DE.zip" />
   </ItemGroup>
 
 </Project>

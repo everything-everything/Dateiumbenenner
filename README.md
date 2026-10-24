@@ -8,6 +8,7 @@ Version 3.12 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen
 - PDFs zusammenführen
 - PDF-Vorschau (WebView2)
 - OCR-Korrektur (Hunspell), PDF-Komprimierung
+- PLZ-Prüfung mit mitgelieferter Postleitzahlen-Liste (GeoNames, CC BY 4.0), optional geprüfte Aktualisierung
 
 NuGet-Pakete und Lizenzen
 Paket	Version	Lizenz

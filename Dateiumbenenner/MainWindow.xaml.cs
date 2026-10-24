@@ -2303,29 +2303,76 @@ namespace Dateiumbenenner
 
         private async void MenuPlzUpdate_Click(object sender, RoutedEventArgs e)
         {
-            var before = Dateiumbenenner.Engine.DocumentEngine.PlzCount;
-            if (MessageBoxWpf.Show($"PLZ-Verzeichnis von GeoNames (download.geonames.org) laden und Daten\\DE.txt ersetzen?\n\nAktuell geladen: {before} PLZ.",
-                "PLZ-Verzeichnis aktualisieren", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+            var plz = Dateiumbenenner.Engine.DocumentEngine.Plz;
+            var before = plz.Count;
+            var info = $"Aktiv: {before:N0} PLZ – {plz.Source}" + (plz.Warning != null ? $"\n\nAchtung: {plz.Warning}" : "");
+            if (MessageBoxWpf.Show($"{info}\n\nAktualisierung prüfen?\nQuelle (fest, nur HTTPS, keine Umleitung):\n{Dateiumbenenner.Engine.PlzDirectory.SourceUrl}\n\n"
+                + "Die Daten werden zuerst geprüft und mit der aktiven Liste verglichen. Übernommen wird erst nach deiner Bestätigung.",
+                "PLZ-Verzeichnis", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
             var old = Cursor;
             Cursor = System.Windows.Input.Cursors.Wait;
-            if (TxtStatus != null) TxtStatus.Text = "PLZ-Verzeichnis wird geladen...";
+            if (TxtStatus != null) TxtStatus.Text = "PLZ-Verzeichnis wird geladen und geprüft...";
+            Dateiumbenenner.Engine.PlzDirectory.PlzUpdate? update = null;
             try
             {
-                await Dateiumbenenner.Engine.PlzDirectory.DownloadGeoNamesAsync();
-                var count = await Task.Run(Dateiumbenenner.Engine.DocumentEngine.ReloadPlz);
-                foreach (var m in _items.Where(i => !i.AddressManuallySet)) m.AddressLoaded = false;
-                if (_currentMeta != null) ShowDetails(_currentMeta);
-                MessageBoxWpf.Show($"PLZ-Verzeichnis aktualisiert: {count} PLZ (vorher {before}).", "PLZ-Verzeichnis", MessageBoxButton.OK, MessageBoxImage.Information);
+                update = await plz.DownloadGeoNamesAsync();
+                Cursor = old;
+                var u = update;
+                var msg = $"Quelle: {u.Url}\n"
+                    + (u.LastModified is { } lm ? $"Datenstand laut Server: {lm.LocalDateTime:dd.MM.yyyy HH:mm}\n" : "")
+                    + $"Größe: {u.Size:N0} Byte\nSHA-256: {u.Sha256}\n\n"
+                    + $"Prüfung bestanden: {u.Zips:N0} PLZ (aktiv: {u.Before:N0})\n"
+                    + $"Neu: {u.Added:N0}   Entfallen: {u.Removed:N0}   Ort geändert: {u.Changed:N0}"
+                    + (u.Unusual > 0 ? $"\nUngewöhnliche Ortsnamen (auch im Original vorhanden): {u.Unusual}" : "")
+                    + (u.Suspicious ? "\n\nWARNUNG: Ungewöhnlich viele Abweichungen gegenüber der aktiven Liste. Nur übernehmen, wenn du der Quelle sicher vertraust." : "")
+                    + "\n\nDiese Daten übernehmen?";
+                if (MessageBoxWpf.Show(msg, "PLZ-Verzeichnis – Prüfergebnis", MessageBoxButton.YesNo,
+                        u.Suspicious ? MessageBoxImage.Warning : MessageBoxImage.Question, u.Suspicious ? MessageBoxResult.No : MessageBoxResult.Yes) != MessageBoxResult.Yes)
+                {
+                    Dateiumbenenner.Engine.PlzDirectory.Discard(u);
+                    return;
+                }
+                Dateiumbenenner.Engine.PlzDirectory.Activate(u);
+                await ReloadPlzAndRefreshAsync();
+                MessageBoxWpf.Show($"PLZ-Verzeichnis aktualisiert: {plz.Count:N0} PLZ (vorher {before:N0}).\n{plz.Source}", "PLZ-Verzeichnis", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBoxWpf.Show("Aktualisierung fehlgeschlagen:\n" + ex.Message + "\n\nDie bisherige DE.txt bleibt erhalten.", "PLZ-Verzeichnis", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (update != null) Dateiumbenenner.Engine.PlzDirectory.Discard(update);
+                MessageBoxWpf.Show("Aktualisierung abgebrochen:\n" + ex.Message + "\n\nDie bisherige PLZ-Liste bleibt aktiv.", "PLZ-Verzeichnis", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             finally
             {
                 Cursor = old;
                 UpdateStandardStatus();
             }
+        }
+
+        private async void MenuPlzRestore_Click(object sender, RoutedEventArgs e)
+        {
+            var plz = Dateiumbenenner.Engine.DocumentEngine.Plz;
+            var date = Dateiumbenenner.Engine.PlzDirectory.BundledDate;
+            if (MessageBoxWpf.Show($"Aktiv: {plz.Count:N0} PLZ – {plz.Source}\n\nAuf die mitgelieferte PLZ-Liste (GeoNames{(date is { } d ? $", Stand {d:dd.MM.yyyy}" : "")}) zurückstellen?\n"
+                + "Eine heruntergeladene Aktualisierung (Daten\\DE.txt) wird entfernt; eigene Ergänzungen in plz.csv bleiben erhalten.",
+                "PLZ-Verzeichnis", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+            try
+            {
+                Dateiumbenenner.Engine.PlzDirectory.RestoreBundled();
+                await ReloadPlzAndRefreshAsync();
+                MessageBoxWpf.Show($"Aktiv: {plz.Count:N0} PLZ – {plz.Source}", "PLZ-Verzeichnis", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBoxWpf.Show("Zurückstellen fehlgeschlagen:\n" + ex.Message, "PLZ-Verzeichnis", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            finally { UpdateStandardStatus(); }
+        }
+
+        private async Task ReloadPlzAndRefreshAsync()
+        {
+            await Task.Run(Dateiumbenenner.Engine.DocumentEngine.ReloadPlz);
+            foreach (var m in _items.Where(i => !i.AddressManuallySet)) m.AddressLoaded = false;
+            if (_currentMeta != null) ShowDetails(_currentMeta);
         }
 
         private async void MenuOcrTest_Click(object sender, RoutedEventArgs e)

@@ -23,6 +23,14 @@ Dateiumbenenner (MIT) verwendet folgende Komponenten. Diese werden per NuGet bez
 | Microsoft.Extensions.Logging.Abstractions (transitiv über MySqlConnector) | 8.0.2 | MIT | https://github.com/dotnet/runtime |
 | Microsoft.Extensions.DependencyInjection.Abstractions (transitiv über MySqlConnector) | 8.0.2 | MIT | https://github.com/dotnet/runtime |
 
+### Daten
+
+| Daten | Stand | Lizenz | Quelle |
+|---|---|---|---|
+| GeoNames Postleitzahlen Deutschland (`Dateiumbenenner/Data/GeoNames-DE.zip`, unverändert in die Programmdatei eingebettet) | 24.10.2026 | CC BY 4.0 | https://www.geonames.org/ (https://download.geonames.org/export/zip/DE.zip) |
+
+- **GeoNames**: Postleitzahlen-Daten von GeoNames (www.geonames.org), lizenziert unter Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/). Die Daten werden unverändert mitgeliefert (SHA-256 der ZIP: `295DC0017D2DA8C633C748A24DF989A50F039DCD96187B3F0C6EBB30DA10D15C`); Aktualisierungen im Programm laden ausschließlich von der oben genannten Adresse.
+
 ## Hinweise
 
 - **Microsoft.Web.WebView2**: Copyright (C) Microsoft Corporation. All rights reserved. Lizenztext siehe unten.

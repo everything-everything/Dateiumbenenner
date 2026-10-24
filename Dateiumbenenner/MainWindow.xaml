@@ -20,7 +20,8 @@
             <Separator/>
             <MenuItem Header="_OCR-/Parallel-Vergleichstest" Click="MenuOcrTest_Click"/>
             <Separator/>
-            <MenuItem Header="_PLZ-Verzeichnis (DE) aktualisieren" Click="MenuPlzUpdate_Click"/>
+            <MenuItem Header="_PLZ-Verzeichnis (DE) prüfen und aktualisieren..." Click="MenuPlzUpdate_Click" ToolTip="Eine PLZ-Liste ist mitgeliefert. Optional: Aktualisierung von download.geonames.org mit Prüfung und Vorschau vor der Übernahme."/>
+            <MenuItem Header="PLZ-Verzeichnis: _mitgelieferte Liste verwenden..." Click="MenuPlzRestore_Click"/>
             <Separator/>
             <MenuItem x:Name="MenuClearOnExit" Header="Datenbank und _Lerndaten beim Schließen leeren" IsCheckable="True" Click="MenuClearOnExit_Click" ToolTip="Beim Beenden werden Dokument-Datenbank und gelernte Daten des aktiven Profils gelöscht. Einstellungen bleiben erhalten."/>
             <MenuItem Header="Datenbank und Lerndaten _jetzt leeren..." Click="MenuClearNow_Click"/>
