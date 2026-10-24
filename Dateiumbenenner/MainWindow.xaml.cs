@@ -970,6 +970,9 @@ namespace Dateiumbenenner
             AddDomainNames(dn, fullText);
             foreach (var d in dn)
                 if (!secured.Any(c => c.Equals(d, StringComparison.OrdinalIgnoreCase))) secured.Add(d);
+            // Menge/Gewicht ("0,78 KG" – "KG" ist hier keine Rechtsform) ist als Firma sehr unwahrscheinlich: nur ganz hinten anbieten
+            var quantities = secured.Where(CompanyMatcher.IsQuantity).ToList();
+            if (quantities.Count > 0 && quantities.Count < secured.Count) { secured.RemoveAll(CompanyMatcher.IsQuantity); secured.AddRange(quantities); }
             return secured;
         }
 

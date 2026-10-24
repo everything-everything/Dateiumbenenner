@@ -129,7 +129,7 @@ namespace Dateiumbenenner.Engine
 
         public void ConfirmSender(string? text, string company, string? street = null, string? zip = null, string? city = null)
         {
-            if (string.IsNullOrWhiteSpace(company)) return;
+            if (string.IsNullOrWhiteSpace(company) || CompanyMatcher.IsQuantity(company)) return;
             CompanyMatcher.Learn(company);
             var fp = SenderProfileStore.ExtractFingerprints(text, street, zip);
             _profiles.Learn(company, fp, street, zip, city);

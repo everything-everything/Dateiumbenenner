@@ -108,11 +108,27 @@ namespace Dateiumbenenner
             }
         }
 
+        private const string Units = @"(?:kg|g|gr|mg|t|to|l|ltr|ml|m|lfm|m²|m2|qm|m³|m3|cbm|km|cm|mm|st|stk|stck|stück|pck|pkt|pal|rol|kart|krt|h|std|min|%|€|eur|euro)";
+        private static readonly System.Text.RegularExpressions.Regex QuantityRegex = new(
+            @"^[-+]?\d[\d.,\s]*(?:x\s*\d[\d.,]*\s*)?" + Units + @"?\.?$"
+            + @"|\d+[.,]\d+\s*" + Units + @"\.?$"
+            + @"|^(?:Gewicht|Netto\w*|Brutto\w*|Menge|Gesamt\w*|Summe|Anzahl|Liefermenge|Tara)\b[^\p{L}]*\d",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        /// <summary>Menge, Gewicht oder reine Zahl („0,78 KG“, „12 Stk“, „1.250,00 €“, „Gewicht: 3 kg“) – als Firmenname sehr unwahrscheinlich
+        /// (wird nur ganz hinten angeboten), auch wenn „KG“ wie eine Rechtsform aussieht.</summary>
+        public static bool IsQuantity(string? s)
+        {
+            var t = s?.Trim();
+            return !string.IsNullOrEmpty(t) && QuantityRegex.IsMatch(t);
+        }
+
         /// <summary>Bestätigten Firmennamen lernen (z. B. bei Auswahl durch den Benutzer).</summary>
         public static void Learn(string? company)
         {
             company = company?.Trim();
             if (string.IsNullOrEmpty(company) || company.Length < 3 || company.Equals("Stop", StringComparison.OrdinalIgnoreCase)) return;
+            if (IsQuantity(company)) return;
             if (Engine.DocumentEngine.Plz.IsPlaceName(company)) return;
             lock (_lock)
             {
@@ -139,8 +155,11 @@ namespace Dateiumbenenner
         public static List<string> Improve(List<string> candidates, string? fullText, out List<string> replaced)
         {
             replaced = new List<string>();
-            var known = KnownSnapshot().Where(k => !Engine.DocumentEngine.Plz.IsPlaceName(k)).ToList();
-            if (known.Count == 0) return candidates;
+            // Menge/Gewicht ("0,78 KG") nicht unscharf mit bekannten Firmen abgleichen, nur als unwahrscheinliche Alternative hinten anbieten
+            var quantities = candidates.Where(IsQuantity).ToList();
+            candidates = candidates.Where(c => !IsQuantity(c)).ToList();
+            var known = KnownSnapshot().Where(k => !Engine.DocumentEngine.Plz.IsPlaceName(k) && !IsQuantity(k)).ToList();
+            if (known.Count == 0) return candidates.Concat(quantities).ToList();
 
             var knownNorm = known.Select(Normalize).ToArray();
             var result = new List<(string Name, double Score)>();
@@ -197,12 +216,13 @@ namespace Dateiumbenenner
                 }
             }
 
-            return result.OrderByDescending(r => r.Score).Select(r => r.Name).ToList();
+            return result.OrderByDescending(r => r.Score).Select(r => r.Name)
+                .Concat(quantities.Where(q => !result.Any(r => r.Name.Equals(q, StringComparison.OrdinalIgnoreCase)))).ToList();
         }
 
         private static string[] KnownSnapshot()
         {
-            lock (_lock) return Known.ToArray();
+            lock (_lock) return Known.Where(k => !IsQuantity(k)).ToArray();
         }
 
         /// <summary>True, wenn der Name (normalisiert) wörtlich im Text steht – ohne Unschärfe.</summary>
