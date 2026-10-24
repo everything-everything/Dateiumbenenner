@@ -668,9 +668,10 @@ namespace Dateiumbenenner
                     // Datei neu/geändert: neu auswerten, manuell gesetzte Werte aus der Datenbank übernehmen
                     if(rec!=null) ApplyManualValues(x.m, rec);
                     await LoadMetadataAsync(x.m);
+                    if(rec!=null) confirmedArr[x.i]=KeepFittingManualValues(x.m, rec);
                     // Firmenerkennung ebenfalls parallel (vorher seriell auf dem UI-Thread -> Hänger)
                     try{ companiesByMeta[x.i]=ExtractCompanyNames(x.m.FullText, x.m.FilePath); } catch{ }
-                    if(rec?.CompanyConfirmed==true) storedCompany[x.i]=rec.CompanyName;
+                    if(confirmedArr[x.i]) storedCompany[x.i]=rec!.CompanyName;
                     toSave[x.i]=true;
                 }
                 int done=Interlocked.Increment(ref processed); if((done&15)==0 || done==total) ((IProgress<int>)progress).Report(done); });
@@ -701,6 +702,38 @@ namespace Dateiumbenenner
             if(r.DateManuallySet){ m.SelectedDate=r.SelectedDate; m.Date=r.Date; m.DateManuallySet=true; }
             if(r.DocTypeManuallySet){ m.DocumentType=r.DocumentType; m.DocTypeManuallySet=true; }
             ApplyStoredLayout(m, r);
+        }
+
+        /// <summary>
+        /// Nach dem Neuauswerten einer geänderten/ersetzten Datei: übernommene Handwerte des alten Stands nur behalten, wenn sie zum neuen Inhalt passen
+        /// (gleichnamige neue Datei darf keine Werte des Vorgängers erben). Liefert, ob die bestätigte Firma weiter gilt.
+        /// </summary>
+        private bool KeepFittingManualValues(DocumentMetadata m, DocumentStore.Record r)
+        {
+            var text = m.FullText ?? "";
+            bool sameDoc = SameDocumentText(r.FullText, text);
+            bool reextract = false;
+            if (m.NumberManuallySet && !FitsContent(m.SelectedNumber, m.NumberCandidates, text)) { m.NumberManuallySet = false; m.SelectedNumber = null; reextract = true; }
+            if (m.DateManuallySet && !FitsContent(m.SelectedDate, m.DateCandidates, text)) { m.DateManuallySet = false; m.SelectedDate = null; m.Date = null; reextract = true; }
+            if (m.DocTypeManuallySet && !sameDoc) { m.DocTypeManuallySet = false; m.DocumentType = null; reextract = true; }
+            if (reextract && !string.IsNullOrEmpty(m.FullText)) { m.NumberCandidates.Clear(); m.DateCandidates.Clear(); ExtractCandidates(m); }
+            return r.CompanyConfirmed && !string.IsNullOrWhiteSpace(r.CompanyName) && (sameDoc || CompanyMatcher.AppearsInText(r.CompanyName!, text));
+        }
+
+        private static bool FitsContent(string? value, List<string> candidates, string text) =>
+            !string.IsNullOrWhiteSpace(value) && (candidates.Contains(value) || text.Contains(value, StringComparison.OrdinalIgnoreCase));
+
+        private static readonly Regex DocWordRegex = new(@"[\p{L}\d]{3,}", RegexOptions.Compiled);
+
+        /// <summary>Gleicher Beleg (z. B. neu gespeichert/OCR wiederholt): nahezu gleicher Wortbestand.</summary>
+        private static bool SameDocumentText(string? oldText, string? newText)
+        {
+            if (string.IsNullOrWhiteSpace(oldText) || string.IsNullOrWhiteSpace(newText)) return false;
+            if (string.Equals(oldText, newText, StringComparison.Ordinal)) return true;
+            static HashSet<string> Words(string t) => DocWordRegex.Matches(t).Select(x => x.Value.ToLowerInvariant()).ToHashSet();
+            var a = Words(oldText); var b = Words(newText);
+            if (a.Count == 0 || b.Count == 0) return false;
+            return a.Count(b.Contains) >= 0.85 * Math.Max(a.Count, b.Count);
         }
 
         private void ApplyStoredLayout(DocumentMetadata m, DocumentStore.Record r)
@@ -887,9 +920,10 @@ namespace Dateiumbenenner
             }
             if (rec != null) ApplyManualValues(meta, rec);
             await LoadMetadataAsync(meta);
+            bool confirmed = rec != null && KeepFittingManualValues(meta, rec);
             AutoAssignNumbers(meta);
             meta.Loaded = true;
-            var key = StoreSettingsKey(filePath); bool confirmed = rec?.CompanyConfirmed == true;
+            var key = StoreSettingsKey(filePath);
             _ = Task.Run(() => SaveToStore(meta, key, confirmed));
             return meta;
         }
@@ -898,7 +932,7 @@ namespace Dateiumbenenner
 
         public List<string> ExtractCompanyNames(string? fullText, string? pdfPath = null)
         {
-            var list = CompanyMatcher.Improve(PrefixRenamerTab?.ExtractAllCompanyNames(fullText) ?? new List<string>(), fullText);
+            var list = CompanyMatcher.Improve(PrefixRenamerTab?.ExtractAllCompanyNames(fullText) ?? new List<string>(), fullText, out var replaced);
             list = CleanCandidates(list);
             list = PreferLegalFormNames(list, fullText);
             AddIndustryNames(list, fullText);
@@ -920,13 +954,17 @@ namespace Dateiumbenenner
             if (profile != null && !Dateiumbenenner.Engine.CompanyExclusions.IsExcluded(profile.Company) && !own.Matches(profile.Company))
             {
                 list.RemoveAll(c => string.Equals(c, profile.Company, StringComparison.OrdinalIgnoreCase));
-                // Profil-Name steht nicht im Beleg (z. B. falsch gelerntes Merkmal): nur als Alternative anbieten
-                if (list.Count > 0 && !CompanyMatcher.AppearsInText(profile.Company, fullText)) list.Add(profile.Company);
+                // Profil-Name steht nicht im Beleg (z. B. falsch gelerntes Merkmal) oder nur ähnlich, während eine andere ähnliche Firma wörtlich dasteht: nur als Alternative anbieten
+                if (list.Count > 0 && !CompanyMatcher.AppearsInTextExclusive(profile.Company, fullText)) list.Add(profile.Company);
                 // Kurzform wie "DFH" nicht vor vollständigen Namen mit Rechtsform ("DFH Haus GmbH") setzen
                 else if (list.Count > 0 && HasLegalForm(list[0]) && !HasLegalForm(profile.Company) && !list[0].StartsWith(profile.Company, StringComparison.OrdinalIgnoreCase)) list.Insert(1, profile.Company);
                 else list.Insert(0, profile.Company);
             }
             var secured = SecureCandidates(list, fullText);
+            // Von einer nur ähnlichen bekannten Firma verdrängte Namen (kann eine andere Firma sein) hinten zur Auswahl anbieten
+            foreach (var r in replaced)
+                if (!secured.Any(c => c.Equals(r, StringComparison.OrdinalIgnoreCase)) && !Dateiumbenenner.Engine.CompanyExclusions.IsExcluded(r)
+                    && !IsNoiseCandidate(r) && !own.Matches(r) && CompanyMatcher.AppearsLiterally(r, fullText)) secured.Add(r);
             // Firmenname aus Webadresse/E-Mail immer anbieten (wird sonst evtl. von Filtern entfernt)
             var dn = new List<string>();
             AddDomainNames(dn, fullText);

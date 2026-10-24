@@ -58,6 +58,7 @@ namespace Dateiumbenenner
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Pending)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Count)));
             }
         }
 
@@ -227,6 +228,13 @@ namespace Dateiumbenenner
                 e.Handled = true;
             };
             bottom.Children.Add(files);
+            GroupTools.Attach(lv, files, _groups, g => g.Rows, (g, rows, single) =>
+            {
+                var ng = new Group { Company = g.Company, Shape = g.Shape, Current = g.Current, Match = single ? $"{g.Match} – {rows[0].FileName}".TrimStart(' ', '–') : "herausgelöst" + (g.Match.Length > 0 ? ": " + g.Match : "") };
+                ng.Rows.AddRange(rows);
+                foreach (var r in rows) r.SelectionChanged = () => { ng.Notify(); UpdateInfo(); };
+                return ng;
+            }, g => g.Notify(), UpdateInfo);
             var vsplit = new GridSplitter { Width = 5, HorizontalAlignment = HorizontalAlignment.Stretch };
             Grid.SetColumn(vsplit, 1);
             bottom.Children.Add(vsplit);
@@ -240,17 +248,20 @@ namespace Dateiumbenenner
             previewHost.Children.Add(preview);
 
             Microsoft.Web.WebView2.Wpf.WebView2? web = null;
-            var text = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new System.Windows.Media.FontFamily("Consolas") };
+            var text = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new System.Windows.Media.FontFamily("Consolas"), IsInactiveSelectionHighlightEnabled = true };
+            TextSearchBar? search = null;
             async System.Threading.Tasks.Task ShowPreview()
             {
-                if (files.SelectedItem is not Row { Item: var it }) { preview.Children.Clear(); return; }
+                if (files.SelectedItem is not Row { Item: var it }) { preview.Children.Clear(); search?.DocumentChanged("", null, false); return; }
                 if (chkText.IsChecked != true && System.IO.Path.GetExtension(it.FilePath).Equals(".pdf", StringComparison.OrdinalIgnoreCase) && System.IO.File.Exists(it.FilePath))
                 {
                     try
                     {
                         web ??= new Microsoft.Web.WebView2.Wpf.WebView2();
                         if (!preview.Children.Contains(web)) { preview.Children.Clear(); preview.Children.Add(web); }
+                        search?.DocumentChanged(it.FullText, null, false);
                         await web.EnsureCoreWebView2Async();
+                        search?.SetWeb(web);
                         web.Source = new Uri(it.FilePath);
                         return;
                     }
@@ -258,7 +269,18 @@ namespace Dateiumbenenner
                 }
                 if (!preview.Children.Contains(text)) { preview.Children.Clear(); preview.Children.Add(text); }
                 text.Text = it.FullText ?? "";
+                search?.DocumentChanged(text.Text, text, true);
             }
+            search = new TextSearchBar(async () =>
+            {
+                if (files.SelectedItem is not Row) return null;
+                if (!preview.Children.Contains(text)) { chkText.IsChecked = true; await ShowPreview(); }
+                return text;
+            });
+            DockPanel.SetDock(search, Dock.Top);
+            previewHost.Children.Insert(1, search);
+            search.AttachShortcut(this);
+            search.FollowFilter(_filter);
             lv.SelectionChanged += (_, _) =>
             {
                 files.ItemsSource = (lv.SelectedItem as Group)?.Rows;

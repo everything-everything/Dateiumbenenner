@@ -132,9 +132,14 @@ namespace Dateiumbenenner
         /// Ersetzt Kandidaten durch bekannte Firmen (falls ähnlich genug), sortiert bekannte Treffer nach vorne
         /// und sucht zusätzlich im Volltext nach bekannten Firmen (auch mit OCR-Fehlern).
         /// </summary>
-        public static List<string> Improve(List<string> candidates, string? fullText)
+        public static List<string> Improve(List<string> candidates, string? fullText) => Improve(candidates, fullText, out _);
+
+        /// <param name="replaced">Kandidaten, die durch eine nur ähnliche bekannte Firma ersetzt wurden (z. B. eine andere Firma mit ähnlichem Namen) –
+        /// der Aufrufer kann sie als Alternative hinten anbieten.</param>
+        public static List<string> Improve(List<string> candidates, string? fullText, out List<string> replaced)
         {
-            var known = Known.Where(k => !Engine.DocumentEngine.Plz.IsPlaceName(k)).ToList();
+            replaced = new List<string>();
+            var known = KnownSnapshot().Where(k => !Engine.DocumentEngine.Plz.IsPlaceName(k)).ToList();
             if (known.Count == 0) return candidates;
 
             var knownNorm = known.Select(Normalize).ToArray();
@@ -142,7 +147,11 @@ namespace Dateiumbenenner
             foreach (var c in candidates)
             {
                 var (best, score) = BestMatch(c, known, knownNorm);
-                if (best != null && score >= Threshold) Add(result, best, 1.0 + score);  // bekannte Firma bevorzugen
+                if (best != null && score >= Threshold)
+                {
+                    Add(result, best, 1.0 + score);  // bekannte Firma bevorzugen
+                    if (score < 1 && !string.Equals(Normalize(c), Normalize(best), StringComparison.Ordinal)) replaced.Add(c);
+                }
                 else Add(result, c, 0.5);
             }
 
@@ -183,11 +192,56 @@ namespace Dateiumbenenner
                             if (s > bestLine) bestLine = s;
                         }
                     }
-                    if (bestLine >= Threshold) Add(result, k, 1.0 + bestLine);
+                    // nur unscharf gefunden, aber eine andere ähnliche bekannte Firma steht wörtlich da → das ist die andere Firma
+                    if (bestLine >= Threshold && (bestLine >= 1 || SimilarRivalInText(k, fullText) == null)) Add(result, k, 1.0 + bestLine);
                 }
             }
 
             return result.OrderByDescending(r => r.Score).Select(r => r.Name).ToList();
+        }
+
+        private static string[] KnownSnapshot()
+        {
+            lock (_lock) return Known.ToArray();
+        }
+
+        /// <summary>True, wenn der Name (normalisiert) wörtlich im Text steht – ohne Unschärfe.</summary>
+        public static bool AppearsLiterally(string? company, string? fullText)
+        {
+            if (string.IsNullOrWhiteSpace(company) || string.IsNullOrEmpty(fullText)) return false;
+            var nk = Normalize(company);
+            return nk.Length > 0 && GetTextIndex(fullText).Normalized.Contains(nk, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Wie <see cref="AppearsInText"/>, aber eine nur unscharf gefundene Firma zählt nicht, wenn eine andere, ähnlich geschriebene
+        /// bekannte Firma (oder einer der <paramref name="rivals"/>) wörtlich im Text steht – z. B. „Müller Bau GmbH“ bei „Möller Bau GmbH“ im Beleg.
+        /// </summary>
+        public static bool AppearsInTextExclusive(string? company, string? fullText, IEnumerable<string?>? rivals = null)
+        {
+            if (!AppearsInText(company, fullText)) return false;
+            if (AppearsLiterally(company, fullText)) return true;
+            return SimilarRivalInText(company!, fullText!, rivals) == null;
+        }
+
+        /// <summary>Andere, ähnlich geschriebene Firma (bekannt oder aus <paramref name="rivals"/>), die wörtlich im Text steht; sonst null.
+        /// Kurz-/Langformen derselben Firma (einer enthält den anderen) gelten nicht als andere Firma.</summary>
+        public static string? SimilarRivalInText(string company, string fullText, IEnumerable<string?>? rivals = null)
+        {
+            if (string.IsNullOrWhiteSpace(company) || string.IsNullOrEmpty(fullText)) return null;
+            var nc = Normalize(company);
+            if (nc.Length < 4) return null;
+            var text = GetTextIndex(fullText).Normalized;
+            IEnumerable<string?> all = KnownSnapshot();
+            if (rivals != null) all = all.Concat(rivals);
+            foreach (var r in all)
+            {
+                if (string.IsNullOrWhiteSpace(r)) continue;
+                var nr = Normalize(r);
+                if (nr.Length < 4 || nr == nc || nr.Contains(nc, StringComparison.Ordinal) || nc.Contains(nr, StringComparison.Ordinal)) continue;
+                if (Similarity(nc, nr) >= Threshold && text.Contains(nr, StringComparison.Ordinal)) return r;
+            }
+            return null;
         }
 
         /// <summary>True, wenn der Firmenname (normalisiert, unscharf ab <see cref="Threshold"/>) in einer Textzeile vorkommt.</summary>

@@ -282,7 +282,7 @@
                             <!-- Präfix (Firmenname) - aus dem Präfix-Bereich hierher verlagert -->
                             <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,10,0,5">
                                 <TextBlock Text="Firma:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                                <ComboBox x:Name="CmbMainCompany" IsEditable="True" Width="170" Margin="0,0,4,0" ToolTip="Firmenname auswählen oder eingeben"/>
+                                <ComboBox x:Name="CmbMainCompany" IsEditable="True" IsTextSearchEnabled="False" Width="170" Margin="0,0,4,0" ToolTip="Firmenname auswählen oder eingeben"/>
                                 <Button x:Name="BtnMainTransferName" Content="&#220;bertragen&#8230;" Padding="6,0" Margin="0,0,4,0" Click="BtnMainTransferName_Click" ToolTip="Firmennamen auf weitere Dateien &#252;bertragen (Auswahl in &#220;bersicht)"/>
                                 <Button Content="Aus INI Erzeugen übernehmen" Padding="6,0" Margin="0,0,10,0" Click="BtnMainFromIni_Click" ToolTip="Firma, Dokumenttyp, Nummer und Datum aus der Registerkarte INI Erzeugen (zuletzt erzeugte INI) für die markierten bzw. alle Dateien übernehmen"/>
                                 <TextBlock Text="Neuer Pr&#228;fix:" VerticalAlignment="Center" Margin="0,0,5,0"/>
@@ -297,7 +297,7 @@
 
                             <TextBlock Text="Dokumenttyp (Auswahl):" Grid.Row="5" Grid.Column="0" Margin="0,4,5,5"/>
                             <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
-                                <ComboBox x:Name="CmbDocType" IsEditable="True" SelectionChanged="CmbDocType_SelectionChanged" 
+                                <ComboBox x:Name="CmbDocType" IsEditable="True" IsTextSearchEnabled="False" SelectionChanged="CmbDocType_SelectionChanged" 
                                           LostFocus="EditableCombo_DropDownClosed" MaxDropDownHeight="180" KeyDown="EditableCombo_KeyDown" 
                                           Width="170" Margin="0,0,4,0"/>
                                 <Button Content="&#220;bertragen&#8230;" Padding="6,0" Margin="0,0,10,0" Click="BtnMainTransferDocType_Click" ToolTip="Belegart auf weitere Belege &#252;bertragen: gleiche Firma und gleicher Nummernaufbau/-kreis oder &#228;hnlicher Inhalt; Gruppenzuweisung m&#246;glich"/>
@@ -312,7 +312,7 @@
 
                             <TextBlock Text="Nummer (Auswahl / editierbar):" Grid.Row="6" Grid.Column="0" Margin="0,4,5,5"/>
                             <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
-                                <ComboBox x:Name="CmbNumberCandidates" IsEditable="True" SelectionChanged="CmbNumberCandidates_SelectionChanged" 
+                                <ComboBox x:Name="CmbNumberCandidates" IsEditable="True" IsTextSearchEnabled="False" SelectionChanged="CmbNumberCandidates_SelectionChanged" 
                                           LostFocus="CmbNumberCandidates_LostFocus" TextBoxBase.TextChanged="CmbNumberCandidates_TextChanged" 
                                           PreviewMouseLeftButtonDown="EditableCombo_PreviewMouseLeftButtonDown" 
                                           DropDownClosed="EditableCombo_DropDownClosed" KeyDown="EditableCombo_KeyDown" MaxDropDownHeight="180" 
@@ -354,7 +354,7 @@
 
                             <TextBlock Text="Datum (Auswahl / editierbar):" Grid.Row="7" Grid.Column="0" Margin="0,4,5,5"/>
                             <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
-                                <ComboBox x:Name="CmbDateCandidates" IsEditable="True" SelectionChanged="CmbDateCandidates_SelectionChanged" 
+                                <ComboBox x:Name="CmbDateCandidates" IsEditable="True" IsTextSearchEnabled="False" SelectionChanged="CmbDateCandidates_SelectionChanged" 
                                           LostFocus="CmbDateCandidates_LostFocus" TextBoxBase.TextChanged="CmbDateCandidates_TextChanged" 
                                           PreviewMouseLeftButtonDown="EditableCombo_PreviewMouseLeftButtonDown" 
                                           DropDownClosed="EditableCombo_DropDownClosed" KeyDown="EditableCombo_KeyDown" MaxDropDownHeight="180" 
