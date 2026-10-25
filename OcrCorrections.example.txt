@@ -20,30 +20,22 @@ Ange bot=Angebot
 # Trenne lange Nummern von Datum/Jahr-Angaben
 @regex=(\d{6,})(\d{4}/\d{1,2})=>$1 $2
 
-# === WÖRTERBUCH FÜR SCHNELLE RECHTSCHREIBPRÜFUNG ===
-# Häufig verwendete Begriffe die NICHT durch Hunspell geprüft werden sollen
+# === EIGENE WÖRTER ===
+# Werden von der Wortkorrektur nie verändert und dienen als Korrekturziel
+# (z. B. Firmen- und Fachbegriffe, die oft falsch erkannt werden)
 @dictionary=Rechnung,Gutschrift,Lieferschein,Bestellung,Angebot,Mahnung,Sammelrechnung,Stornorechnung,Beleg,Auftrag,Lieferung,Widmann,GmbH,KG,AG,UG,OHG,Rechnungsnummer,Belegnummer,Auftragsnummer,Kundennummer
 
-# === HUNSPELL RECHTSCHREIBPRÜFUNG ===
-# Aktiviert Duden-basierte Rechtschreibprüfung
-# WICHTIG: Benötigt .dic/.aff Dateien im Dictionaries-Ordner!
-# 
-# Verfügbare Sprachen (wenn Wörterbücher installiert):
-#   de_DE = Deutsch (Deutschland)
-#   de_AT = Deutsch (Österreich)
-#   de_CH = Deutsch (Schweiz)
-#   en_US = Englisch (USA)
-#   en_GB = Englisch (UK)
-#
-# Zum Aktivieren, entfernen Sie das # vor der nächsten Zeile:
-# @spellcheck=de_DE,en_US
+# === WORTKORREKTUR ===
+# Einzelne Wörter werden nur korrigiert, wenn der Fehler eine typische OCR-Verwechslung ist
+# (rn/m, cl/d, 1/l/i, 0/o, 5/s, 8/b, q/g, a/ä, o/ö, u/ü ...) und das richtige Wort in der
+# mitgelieferten Fachwortliste oder in @dictionary steht. Wörter, die die Windows-Rechtschreibprüfung
+# (installierte Sprachpakete) kennt oder die häufig in den eigenen Belegen vorkommen, bleiben unverändert.
+# Kein Download nötig. Ausschalten mit:
+# @wortkorrektur=aus
 
 # === HÄUFIGE OCR-FEHLER ===
-# Zahlen/Buchstaben Verwechslungen
-0=O
-O=0
-l=1
-I=1
+# Zahlen/Buchstaben-Verwechslungen in Wörtern (z. B. "Liefersche1n") korrigiert die Wortkorrektur.
+# Keine Regeln wie 0=O eintragen - sie würden jede Zahl im Text verändern.
 
 # Häufige deutsche Begriffe
 Rechnungs nummer=Rechnungsnummer
@@ -77,7 +69,7 @@ Schm idt=Schmidt
 # 4. WÖRTERBUCH ERWEITERN:
 #    @dictionary=Wort1,Wort2,Wort3
 #
-# 5. SPRACHE AKTIVIEREN:
-#    @spellcheck=de_DE,en_US
+# 5. WORTKORREKTUR AUSSCHALTEN:
+#    @wortkorrektur=aus
 #
 # ====================================================

@@ -7,7 +7,7 @@ Version 3.12 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen
 - Präfix-Umbenennung
 - PDFs zusammenführen
 - PDF-Vorschau (WebView2)
-- OCR-Korrektur (Hunspell), PDF-Komprimierung
+- OCR-Korrektur (SymSpell, mitgelieferte Fachwortliste, gelernte Wörter, Windows-Rechtschreibprüfung – ohne Download), PDF-Komprimierung
 - PLZ-Prüfung mit mitgelieferter Postleitzahlen-Liste (GeoNames, CC BY 4.0), optional geprüfte Aktualisierung
 
 NuGet-Pakete und Lizenzen
@@ -16,7 +16,7 @@ Microsoft.Data.Sqlite	8.0.11	MIT
 SQLitePCLRaw.bundle_e_sqlite3 (transitiv)	2.1.6	Apache-2.0
 Microsoft.Web.WebView2	1.0.4258.31	Microsoft WebView2 SDK License (BSD-artig)
 UglyToad.PdfPig	1.7.0-custom-5	Apache-2.0
-WeCantSpell.Hunspell	7.0.1	MPL-1.1 / GPL-2.0 / LGPL-2.1 (hier LGPL)
+SymSpell	6.7.3	MIT
 System.Drawing.Common	10.0.12	MIT
 System.Net.Http	4.3.4	MIT
 System.Text.RegularExpressions	4.3.1	MIT
@@ -29,7 +29,7 @@ Dateiumbenenner selbst steht unter MIT-Lizenz. Details: THIRD-PARTY-NOTICES.md.
 - Windows 10 (1809+) / 11, x64
 - .NET 8 Desktop Runtime
 - Microsoft Edge WebView2 Runtime
-- Optional: Ghostscript, Hunspell-Wörterbücher (`Download-Dictionaries.ps1`)
+- Optional: Ghostscript
 
 ## Build
 ```

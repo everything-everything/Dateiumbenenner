@@ -225,6 +225,11 @@ namespace Dateiumbenenner
             lock (_lock) return Known.Where(k => !IsQuantity(k)).ToArray();
         }
 
+        /// <summary>Bestätigte Firmennamen (z. B. damit die OCR-Wortkorrektur sie nicht verändert).</summary>
+        public static string[] KnownNames() => KnownSnapshot();
+
+        public static int KnownCount { get { lock (_lock) return Known.Count; } }
+
         /// <summary>True, wenn der Name (normalisiert) wörtlich im Text steht – ohne Unschärfe.</summary>
         public static bool AppearsLiterally(string? company, string? fullText)
         {

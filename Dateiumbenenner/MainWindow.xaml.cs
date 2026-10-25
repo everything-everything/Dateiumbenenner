@@ -351,6 +351,8 @@ namespace Dateiumbenenner
                 // rechenintensive Textkorrektur parallel im Hintergrund
                 var texts = await Task.Run(() =>
                 {
+                    // erst den Wortschatz aller Belege lernen, damit die Wortkorrektur ihn schon beim ersten Beleg kennt
+                    if (value) OcrTextCorrector.Learn(sources);
                     var r = new string[sources.Length];
                     Parallel.For(0, sources.Length, i => r[i] = value && !string.IsNullOrWhiteSpace(sources[i]) ? OcrTextCorrector.Fix(sources[i]) : sources[i]);
                     return r;
@@ -694,7 +696,7 @@ namespace Dateiumbenenner
         }
 
         private string StoreSettingsKey(string path) =>
-            $"{AMode}|{_enableOcrCorrection}|{Dateiumbenenner.Engine.TextReflow.Width}|{Dateiumbenenner.Engine.TextReflow.GetFileWidth(path)}";
+            $"{AMode}|{(_enableOcrCorrection ? "True|" + OcrTextCorrector.AlgorithmTag : "False")}|{Dateiumbenenner.Engine.TextReflow.Width}|{Dateiumbenenner.Engine.TextReflow.GetFileWidth(path)}";
 
         private void ApplyManualValues(DocumentMetadata m, DocumentStore.Record r)
         {

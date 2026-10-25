@@ -5,7 +5,7 @@ using Dateiumbenenner;
 namespace OcrCorrectionTest
 {
     /// <summary>
-    /// Einfaches Testprogramm für die OCR-Korrektur mit Hunspell
+    /// Einfaches Testprogramm für die OCR-Korrektur (Fachwortliste, gelernte Wörter, Windows-Rechtschreibprüfung)
     /// Kann als Konsolenanwendung kompiliert werden
     /// </summary>
     class Program
@@ -13,7 +13,7 @@ namespace OcrCorrectionTest
         static void Main(string[] args)
         {
             Console.WriteLine("====================================================");
-            Console.WriteLine("  OCR-Korrektur Test mit Hunspell");
+            Console.WriteLine("  OCR-Korrektur Test");
             Console.WriteLine("====================================================");
             Console.WriteLine();
 
@@ -26,7 +26,14 @@ namespace OcrCorrectionTest
             // Test 2: Mehrere Fehler
             TestCorrection("Rechnu ng vom 12. Juni 2024", "Rechnung vom 12. Juni 2024");
 
-            // Test 3: Komplexer Text
+            // Test 3: OCR-Verwechslungen in Wörtern
+            TestCorrection("Liefersche1n", "Lieferschein");
+            TestCorrection("Rechnunq", "Rechnung");
+            TestCorrection("Muster GrnbH", "Muster GmbH");
+            TestCorrection("Empfanger", "Empfänger");
+            TestCorrection("Kerstin Hahn", "Kerstin Hahn");
+
+            // Test 4: Komplexer Text
             var complexText = @"
 Rechnu ng
 Widma nn GmbH

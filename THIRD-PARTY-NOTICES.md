@@ -6,7 +6,7 @@ Dateiumbenenner (MIT) verwendet folgende Komponenten. Diese werden per NuGet bez
 |---|---|---|---|
 | Microsoft.Web.WebView2 | 1.0.4258.31 | Microsoft WebView2 SDK License (BSD-artig) | https://www.nuget.org/packages/Microsoft.Web.WebView2/ |
 | UglyToad.PdfPig | 1.7.0-custom-5 | Apache-2.0 | https://github.com/UglyToad/PdfPig |
-| WeCantSpell.Hunspell | 7.0.1 | MPL-1.1 / GPL-2.0 / LGPL-2.1 (hier LGPL) | https://github.com/aarondandy/WeCantSpell.Hunspell |
+| SymSpell | 6.7.3 | MIT | https://github.com/wolfgarbe/SymSpell |
 | System.Drawing.Common | 10.0.12 | MIT | https://github.com/dotnet/runtime |
 | System.Net.Http | 4.3.4 | MIT | https://github.com/dotnet/runtime |
 | System.Text.RegularExpressions | 4.3.1 | MIT | https://github.com/dotnet/runtime |
@@ -28,18 +28,19 @@ Dateiumbenenner (MIT) verwendet folgende Komponenten. Diese werden per NuGet bez
 | Daten | Stand | Lizenz | Quelle |
 |---|---|---|---|
 | GeoNames Postleitzahlen Deutschland (`Dateiumbenenner/Data/GeoNames-DE.zip`, unverändert in die Programmdatei eingebettet) | 24.10.2026 | CC BY 4.0 | https://www.geonames.org/ (https://download.geonames.org/export/zip/DE.zip) |
+| OCR-Fachwortliste (`Dateiumbenenner/Data/OcrFachwoerter.txt`, in die Programmdatei eingebettet) | – | MIT (eigene Zusammenstellung, Teil von Dateiumbenenner) | – |
 
 - **GeoNames**: Postleitzahlen-Daten von GeoNames (www.geonames.org), lizenziert unter Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/). Die Daten werden unverändert mitgeliefert (SHA-256 der ZIP: `295DC0017D2DA8C633C748A24DF989A50F039DCD96187B3F0C6EBB30DA10D15C`); Aktualisierungen im Programm laden ausschließlich von der oben genannten Adresse.
 
 ## Hinweise
 
 - **Microsoft.Web.WebView2**: Copyright (C) Microsoft Corporation. All rights reserved. Lizenztext siehe unten.
-- **WeCantSpell.Hunspell**: Wird unverändert als separate DLL dynamisch eingebunden (LGPL-konform). Quellcode: siehe NuGet-Projektseite.
+- **SymSpell**: Copyright (C) 2025 Wolf Garbe, MIT. Lizenztext siehe unten. Die englischen Beispiel-Wörterbücher des Pakets werden nicht mitgeliefert.
 - **PdfPig**: Apache-2.0 – Copyright-Hinweise und NOTICE der Originalautoren bleiben erhalten.
 
 ## Nicht enthalten
 
-- **Hunspell-Wörterbücher** (`Dictionaries/`, de_DE / en_US): GPL/LGPL/MPL bzw. eigene Lizenzen – werden nicht im Repository mitgeliefert. Download über `Download-Dictionaries.ps1`.
+- **Windows-Rechtschreibprüfung** (Spell Checking API, Sprachpakete): Bestandteil von Windows, wird von der OCR-Korrektur nur genutzt.
 - **Ghostscript**: AGPL-3.0 / kommerziell (Artifex) – wird nicht mitgeliefert, nur optional als externes Programm aufgerufen.
 - **Microsoft Edge WebView2 Runtime**: Bestandteil von Windows.
 
@@ -73,5 +74,31 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+## Lizenztext SymSpell
+
+```
+MIT License
+
+Copyright (C) 2025 Wolf Garbe
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 

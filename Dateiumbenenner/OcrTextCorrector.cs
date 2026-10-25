@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using WeCantSpell.Hunspell;
+using Dateiumbenenner.Engine;
 
 namespace Dateiumbenenner
 {
@@ -13,7 +13,7 @@ namespace Dateiumbenenner
     ///   @labels=A,B,C             (Liste von Label-Wörtern für automatische Abstandskorrektur)
     ///   @regex=pattern=>replacement (optionale Regex Ersetzung)
     ///   @dictionary=wort1,wort2   (Wörterbuch für Rechtschreibprüfung)
-    ///   @spellcheck=de_DE,en_US   (Hunspell-Wörterbücher aktivieren)
+    ///   @wortkorrektur=aus        (Wortkorrektur ausschalten; früheres @spellcheck wird ignoriert)
     /// </summary>
     [Flags]
     public enum GenericOcrRules
@@ -44,14 +44,14 @@ namespace Dateiumbenenner
         private static readonly List<(Regex rx, string repl)> _regexReplacements = new();
         private static readonly HashSet<string> _dictionary = new(StringComparer.OrdinalIgnoreCase);
         
-        // Hunspell Spell Checker
-        private static readonly List<WordList> _spellCheckers = new();
-        private static bool _useSpellCheck = false;
+        // Wortkorrektur: Fachwortliste, eigene Wörter, gelernte Wörter, Windows-Rechtschreibprüfung (kein Download nötig)
+        private static bool _wordCorrection = true;
+
+        /// <summary>Version des Korrekturverfahrens (Teil des Datenbank-Schlüssels, damit Belege nach einer Änderung einmal neu ausgewertet werden).</summary>
+        public const string AlgorithmTag = "ocr2";
 
         private static bool _loaded;
         private static readonly object _lock = new();
-        // Hunspell (WordList) wird zur Sicherheit nur von einem Thread gleichzeitig benutzt
-        private static readonly object _spellLock = new();
 
         public static string Fix(string input, bool applyGenericRules = true)
         {
@@ -62,14 +62,15 @@ namespace Dateiumbenenner
             if (!OcrEnabled || !applyGenericRules)
                 return input;
 
+            if (_wordCorrection) OcrWordCorrector.Learn(input);
             var text = input;
             foreach (var kv in Corrections)
                 text = text.Replace(kv.Key, kv.Value);
             foreach (var (rx, repl) in _regexReplacements)
                 text = rx.Replace(text, repl);
             text = FixSpacesInWords(text);
-            if (_useSpellCheck && _spellCheckers.Any())
-                text = FixSpellingErrors(text);
+            if (_wordCorrection)
+                text = OcrWordCorrector.Correct(text, _dictionary);
             text = ApplyGenericRules(text, GenericOcrRules.All);
             return text;
         }
@@ -84,16 +85,25 @@ namespace Dateiumbenenner
             if (!OcrEnabled || rules == GenericOcrRules.None)
                 return input;
 
+            if (_wordCorrection) OcrWordCorrector.Learn(input);
             var text = input;
             foreach (var kv in Corrections)
                 text = text.Replace(kv.Key, kv.Value);
             foreach (var (rx, repl) in _regexReplacements)
                 text = rx.Replace(text, repl);
             text = FixSpacesInWords(text);
-            if (_useSpellCheck && _spellCheckers.Any())
-                text = FixSpellingErrors(text);
+            if (_wordCorrection)
+                text = OcrWordCorrector.Correct(text, _dictionary);
             text = ApplyGenericRules(text, rules);
             return text;
+        }
+
+        /// <summary>Wortschatz mehrerer Belege vorab lernen (z. B. bevor die Korrektur auf alle Belege angewendet wird).</summary>
+        public static void Learn(IEnumerable<string?> texts)
+        {
+            EnsureLoaded();
+            if (!OcrEnabled || !_wordCorrection) return;
+            foreach (var t in texts) OcrWordCorrector.Learn(t);
         }
 
         private static void EnsureLoaded()
@@ -107,9 +117,7 @@ namespace Dateiumbenenner
                 _regexReplacements.Clear();
                 _dictionary.Clear();
                 
-                // Alte Spell Checker freigeben
-                _spellCheckers.Clear();
-                _useSpellCheck = false;
+                _wordCorrection = true;
                 
                 // Standard-Wörterbuch mit häufigen OCR-relevanten Wörtern
                 InitializeDefaultDictionary();
@@ -161,17 +169,16 @@ namespace Dateiumbenenner
                                 continue;
                             }
 
-                            // @spellcheck=de_DE,en_US (NEU)
+                            // @spellcheck=... (früher Hunspell) wird ignoriert
                             if (line.StartsWith("@spellcheck=", StringComparison.OrdinalIgnoreCase))
+                                continue;
+
+                            // @wortkorrektur=aus schaltet die Wortkorrektur ab (Fachwortliste/gelernte Wörter)
+                            if (line.StartsWith("@wortkorrektur=", StringComparison.OrdinalIgnoreCase))
                             {
-                                var languages = line.Substring(12)
-                                               .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                                               .Select(s => s.Trim())
-                                               .Where(s => s.Length > 0);
-                                foreach (var lang in languages)
-                                {
-                                    LoadHunspellDictionary(lang);
-                                }
+                                var v = line.Substring(15).Trim();
+                                _wordCorrection = !(v.Equals("aus", StringComparison.OrdinalIgnoreCase) || v.Equals("off", StringComparison.OrdinalIgnoreCase)
+                                    || v.Equals("nein", StringComparison.OrdinalIgnoreCase) || v.Equals("false", StringComparison.OrdinalIgnoreCase) || v == "0");
                                 continue;
                             }
 
@@ -191,9 +198,8 @@ namespace Dateiumbenenner
                             "# Einfach: falsch=richtig\n" +
                             "# Labels (Abstände automatisch): @labels=Auftragsnummer,Datum,Kundennummer,Belegnummer,Standort,Lieferdatum,Besteller,Seite\n" +
                             "# Regex: @regex=(\\d{6,})(\\d{4}/\\d{1,2})=>$1 $2\n" +
-                            "# Wörterbuch für Rechtschreibprüfung: @dictionary=Rechnung,Gutschrift,Lieferschein\n" +
-                            "# Hunspell Rechtschreibprüfung (benötigt .dic/.aff Dateien im Dictionaries-Ordner):\n" +
-                            "# @spellcheck=de_DE,en_US\n" +
+                            "# Eigene Wörter (werden nicht verändert und dienen als Korrekturziel): @dictionary=Rechnung,Gutschrift,Lieferschein\n" +
+                            "# Wortkorrektur ausschalten: @wortkorrektur=aus\n" +
                             "# Direkte Korrekturen für häufige OCR-Fehler:\n" +
                             "Rechnu ng=Rechnung\n" +
                             "Gu tschrift=Gutschrift\n" +
@@ -202,28 +208,6 @@ namespace Dateiumbenenner
                 }
                 catch { }
                 _loaded = true;
-            }
-        }
-
-        private static void LoadHunspellDictionary(string language)
-        {
-            try
-            {
-                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                var dictDir = Path.Combine(baseDir, "Dictionaries");
-                var affFile = Path.Combine(dictDir, $"{language}.aff");
-                var dicFile = Path.Combine(dictDir, $"{language}.dic");
-
-                if (File.Exists(affFile) && File.Exists(dicFile))
-                {
-                    var hunspell = WordList.CreateFromFiles(dicFile, affFile);
-                    _spellCheckers.Add(hunspell);
-                    _useSpellCheck = true;
-                }
-            }
-            catch
-            {
-                // Fehler beim Laden ignorieren
             }
         }
 
@@ -291,19 +275,11 @@ namespace Dateiumbenenner
                             return combinedCapitalized;
                         }
                         
-                        // Falls Hunspell aktiv ist, auch dort prüfen
-                        if (_useSpellCheck)
+                        // Fachwortliste, eigene Wörter, bekannte Firmen und häufige Wörter aus den eigenen Belegen
+                        if (_wordCorrection && OcrWordCorrector.IsKnownWord(combined, _dictionary))
                         {
-                            if (IsCorrectSpelling(combined))
-                            {
-                                changed = true;
-                                return combined;
-                            }
-                            if (IsCorrectSpelling(combinedCapitalized))
-                            {
-                                changed = true;
-                                return combinedCapitalized;
-                            }
+                            changed = true;
+                            return combined;
                         }
                     }
                     
@@ -315,81 +291,6 @@ namespace Dateiumbenenner
             }
             
             return text;
-        }
-
-        private static string FixSpellingErrors(string text)
-        {
-            if (!_useSpellCheck || !_spellCheckers.Any())
-                return text;
-
-            // Wort für Wort durchgehen und Rechtschreibfehler korrigieren
-            var wordPattern = @"\b([A-Za-zÄÖÜäöüß]+)\b";
-            
-            return Regex.Replace(text, wordPattern, match =>
-            {
-                var word = match.Groups[1].Value;
-                
-                // Nur Wörter mit mindestens 4 Buchstaben prüfen (zu kurze Wörter überspringen)
-                if (word.Length < 4)
-                    return word;
-                
-                // Zahlen und gemischte Wörter überspringen
-                if (word.Any(char.IsDigit))
-                    return word;
-                
-                // Prüfe ob das Wort korrekt ist
-                if (IsCorrectSpelling(word))
-                    return word;
-                
-                // Hole Korrekturvorschläge
-                var suggestions = GetSuggestions(word);
-                if (suggestions.Any())
-                {
-                    // Nimm den ersten (wahrscheinlichsten) Vorschlag
-                    return suggestions.First();
-                }
-                
-                return word; // Keine Änderung wenn keine Vorschläge
-            });
-        }
-
-        private static bool IsCorrectSpelling(string word)
-        {
-            if (!_useSpellCheck || !_spellCheckers.Any())
-                return false;
-
-            // Prüfe in allen geladenen Wörterbüchern
-            lock (_spellLock)
-            {
-                foreach (var checker in _spellCheckers)
-                {
-                    if (checker.Check(word))
-                        return true;
-                }
-            }
-            
-            return false;
-        }
-
-        private static List<string> GetSuggestions(string word)
-        {
-            var allSuggestions = new List<string>();
-            
-            if (!_useSpellCheck || !_spellCheckers.Any())
-                return allSuggestions;
-
-            // Sammle Vorschläge aus allen Wörterbüchern
-            lock (_spellLock)
-            foreach (var checker in _spellCheckers)
-            {
-                var suggestions = checker.Suggest(word).ToList();
-                if (suggestions != null && suggestions.Count > 0)
-                {
-                    allSuggestions.AddRange(suggestions);
-                }
-            }
-            
-            return allSuggestions.Distinct().ToList();
         }
 
         private static string ApplyGenericRules(string text)

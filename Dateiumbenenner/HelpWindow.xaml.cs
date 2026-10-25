@@ -502,7 +502,7 @@ Siehe auch: [[system|Systemanforderungen]]"),
 
 # Optional
 * Ghostscript – nur für den Kompressionsmodus ""Ghostscript (extern)"", siehe [[kompression|Kompressionseinstellungen]]
-* Hunspell-Wörterbücher im Ordner ""Dictionaries"" – nur für die [[ocr|OCR-Korrektur]]
+* Windows-Sprachpakete Deutsch/Englisch – werden von der [[ocr|OCR-Korrektur]] zur Bestätigung richtiger Wörter genutzt, falls vorhanden (kein Download)
 * PLZ-Liste: mitgeliefert, kein Download nötig, siehe [[plz|PLZ-Verzeichnis]]
 
 # Hardware
@@ -574,15 +574,27 @@ Jede Seite wird mit dem in Windows eingebauten PDF-Renderer (Windows.Data.Pdf) a
 > Druckqualität    300 dpi, 85 %
 > Hochauflösend    450-600 dpi, 90 %"),
 
-            ("ocr", "OCR-Korrektur und Wörterbücher", @"Die OCR-Korrektur verbessert Texte, die durch Texterkennung (OCR) entstanden sind, z. B. verwechselte Zeichen wie 0/O oder 1/l. Sie arbeitet mit der Rechtschreibprüfung Hunspell.
+            ("ocr", "OCR-Korrektur", @"Die OCR-Korrektur verbessert Texte aus der Texterkennung (OCR). Sie wird über ""OCR Korrektur"" bzw. das Menü ein- und ausgeschaltet und braucht keinen Download.
 
-# Wörterbücher installieren
-Die Hunspell-Wörterbücher (de_DE, en_US) stehen unter eigenen Lizenzen (GPL/LGPL/MPL) und sind deshalb nicht im Programmpaket enthalten. Führen Sie Download-Dictionaries.ps1 oder Download-Dictionaries.bat aus; die Dateien werden im Ordner ""Dictionaries"" abgelegt.
+# Was korrigiert wird
+* Getrennte Wörter wie ""Rechnu ng"" werden zusammengefügt, wenn das ganze Wort bekannt ist.
+* Einzelne Wörter mit typischen OCR-Verwechslungen, z. B. ""Liefersche1n"" → ""Lieferschein"", ""Rechnunq"" → ""Rechnung"", ""GrnbH"" → ""GmbH"", ""Empfanger"" → ""Empfänger"" (rn/m, cl/d, 1/l/i, 0/o, 5/s, 8/b, q/g, a/ä, o/ö, u/ü …).
+* Abstände nach Doppelpunkten und Feldbezeichnungen, mehrfache Leerzeichen und Leerzeilen.
+* Eigene Regeln aus OcrCorrections.txt.
 
-Das gilt nur für die Wörterbücher. Die Postleitzahlen-Liste ist dagegen mitgeliefert, siehe [[plz|PLZ-Verzeichnis]].
+# Woher die Wörter kommen
+* Mitgelieferte Fachwortliste (Belegarten, Feldbezeichnungen, Zahlungs-, Steuer- und Logistikbegriffe, Monate, Rechtsformen) – eigene Zusammenstellung unter MIT-Lizenz.
+* Eigene Wörter aus OcrCorrections.txt (@dictionary=…) und bestätigte Firmennamen.
+* Gelernte Wörter aus den eigenen Belegen: Das Programm zählt, in wie vielen Belegen ein Wort vorkommt. Die Liste bleibt lokal (Datei ocr_woerter.json im Profilordner, bei Passwortschutz verschlüsselt) und wird mit den gelernten Daten gelöscht. Häufige Wörter – etwa Namen – werden dadurch nicht verändert.
+* Windows-Rechtschreibprüfung (installierte Sprachpakete Deutsch/Englisch): Kennt Windows ein Wort, bleibt es unverändert. Fehlt sie, arbeitet die Korrektur ohne sie weiter.
+
+# Vorsichtig statt aggressiv
+Ein Wort wird nur ersetzt, wenn der Unterschied durch OCR-Verwechslungen erklärbar ist (bei kurzen Wörtern höchstens eine, sonst höchstens zwei), genau ein passendes Wort in Frage kommt und das Original weder bekannt noch häufig ist. Zahlen, Beträge, IBAN sowie E-Mail- und Web-Adressen werden nicht verändert.
 
 # Eigene Korrekturen
-Eigene Ersetzungsregeln können nach dem Muster der Datei OcrCorrections.example.txt angelegt werden.
+Eigene Ersetzungsregeln und Wörter können nach dem Muster der Datei OcrCorrections.example.txt in OcrCorrections.txt (Programmordner) eingetragen werden. Mit @wortkorrektur=aus wird nur die Wortkorrektur abgeschaltet.
+
+Die Postleitzahlen-Liste ist ebenfalls mitgeliefert, siehe [[plz|PLZ-Verzeichnis]].
 
 Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
 
@@ -623,7 +635,7 @@ Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
 # NuGet-Pakete (Name, Version, Zweck)
 > Microsoft.Web.WebView2          1.0.4258.31     PDF-Vorschau
 > UglyToad.PdfPig                 1.7.0-custom-5  Text lesen, zusammenführen, PDF erzeugen
-> WeCantSpell.Hunspell            7.0.1           Rechtschreibprüfung (OCR-Korrektur)
+> SymSpell                        6.7.3           Wortsuche für die OCR-Korrektur
 > System.Drawing.Common           10.0.12         Grafikfunktionen
 > System.Net.Http                 4.3.4           HTTP-Zugriffe
 > System.Text.RegularExpressions  4.3.1           Mustererkennung
@@ -638,6 +650,7 @@ Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
 
 # Ohne Zusatzpaket (in Windows bzw. .NET enthalten)
 * Windows.Data.Pdf – Rendern von PDF-Seiten beim Rasterisieren
+* Windows-Rechtschreibprüfung (Spell Checking API) – Bestätigung richtiger Wörter bei der OCR-Korrektur
 * WPF JpegBitmapEncoder – JPEG-Kompression
 
 Lizenzen der Pakete: siehe [[lizenzen|Lizenzen und Drittanbieter]]"),
@@ -662,7 +675,7 @@ Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2026 
 # Mitgelieferte Komponenten
 > Microsoft.Web.WebView2   Microsoft BSD-artige Lizenz
 > UglyToad.PdfPig          Apache License 2.0
-> WeCantSpell.Hunspell     MPL 1.1/GPL 2/LGPL 2.1, genutzt unter LGPL
+> SymSpell                 MIT (Wolf Garbe)
 > System.Drawing.Common    MIT (.NET Foundation)
 > System.Net.Http          MIT (.NET Foundation)
 > System.Text.RegularExpr. MIT (.NET Foundation)
@@ -676,10 +689,9 @@ Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2026 
 > Microsoft.Extensions.Logging.Abstractions             MIT (.NET Foundation)
 > Microsoft.Extensions.DependencyInjection.Abstractions MIT (.NET Foundation)
 
-WeCantSpell.Hunspell wird unverändert als eigenständige DLL eingebunden (LGPL-konform).
-
 # Mitgelieferte Daten
 > GeoNames-Postleitzahlen DE   CC BY 4.0, unverändert eingebettet
+> OCR-Fachwortliste            MIT, eigene Zusammenstellung
 
 Postleitzahlen-Daten von GeoNames (www.geonames.org), lizenziert unter Creative Commons Attribution 4.0 (creativecommons.org/licenses/by/4.0). Siehe [[plz|PLZ-Verzeichnis]].
 
@@ -694,7 +706,6 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS ""AS IS"" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # Nicht enthalten (separat zu beziehen)
-* Hunspell-Wörterbücher – GPL/LGPL/MPL; Download per Skript, siehe [[ocr|OCR-Korrektur]]
 * Ghostscript – AGPL 3.0 oder kommerziell (Artifex); wird nur als externes Programm aufgerufen
 * Microsoft Edge WebView2 Runtime – Bestandteil von Windows
 
@@ -793,7 +804,6 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 * [[technik|Aufbau des Programms]]
 > D
 * [[ueber|Datenschutz / Kontakt]]
-* [[ocr|Dictionaries (Wörterbücher)]]
 * [[kompression|DPI]]
 > G
 * [[plz|GeoNames]]
@@ -802,7 +812,6 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 > H
 * [[haftung|Haftungsausschluss]]
 * [[signatur|Hash (SHA-256)]]
-* [[ocr|Hunspell]]
 > I
 * [[ueber|Impressum]]
 > J
@@ -846,6 +855,8 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 * [[technik|Version]]
 > W
 * [[system|WebView2]]
+* [[ocr|Wortkorrektur]]
+* [[ocr|Wörterbuch]]
 > Z
 * [[signatur|Zertifikat]]
 * [[zusammenfuehren|Zusammenführen]]")

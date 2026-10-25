@@ -22,6 +22,7 @@ namespace Dateiumbenenner.Engine
             "doc_templates.json",
             "address_debug.txt",
             "firma_umstellen.log",
+            OcrVocabulary.FileName,
         };
 
         public static bool ClearOnExit
@@ -41,6 +42,7 @@ namespace Dateiumbenenner.Engine
         /// <summary>Löscht die Daten und gibt die Anzahl nicht löschbarer Dateien zurück.</summary>
         public static int Clear()
         {
+            OcrVocabulary.Forget();
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             GC.Collect();
             GC.WaitForPendingFinalizers();
