@@ -33,6 +33,8 @@ namespace Dateiumbenenner.Engine
         public string Source { get; private set; } = "";
         /// <summary>Hinweis, wenn eine vorhandene Daten\DE.txt die Prüfung nicht bestanden hat und deshalb nicht verwendet wird.</summary>
         public string? Warning { get; private set; }
+        /// <summary>True, wenn die mitgelieferte Liste aktiv ist (keine gültige Daten\DE.txt).</summary>
+        public bool IsBundled { get; private set; }
 
         public PlzDirectory() => Reload();
 
@@ -46,6 +48,7 @@ namespace Dateiumbenenner.Engine
             var map = new Dictionary<string, List<string>>();
             string source = "keine PLZ-Liste";
             string? warning = null;
+            bool bundled = false;
             try
             {
                 if (File.Exists(GeoNamesPath))
@@ -55,7 +58,7 @@ namespace Dateiumbenenner.Engine
                     if (problem == null) { map = update; source = DescribeUpdate(); }
                     else warning = $"Daten\\DE.txt wird nicht verwendet: {problem}";
                 }
-                if (map.Count == 0) source = LoadBundled(map) ?? source;
+                if (map.Count == 0 && LoadBundled(map) is { } b) { source = b; bundled = true; }
                 if (File.Exists(FilePath))
                 {
                     Load(File.ReadLines(FilePath, Encoding.UTF8), map);
@@ -66,6 +69,7 @@ namespace Dateiumbenenner.Engine
             _map = map;
             Source = source;
             Warning = warning;
+            IsBundled = bundled;
             _placeWords = null;
             System.Threading.Interlocked.Increment(ref _version);
         }
@@ -125,7 +129,9 @@ namespace Dateiumbenenner.Engine
                         + $", SHA-256 {i.Sha256[..Math.Min(16, i.Sha256.Length)]}…";
             }
             catch { }
-            return "Daten\\DE.txt (Herkunft nicht vermerkt, Prüfung bestanden)";
+            string date = "";
+            try { date = $", Datei vom {File.GetLastWriteTime(GeoNamesPath):dd.MM.yyyy}"; } catch { }
+            return $"Daten\\DE.txt – früher heruntergeladen (Herkunft nicht vermerkt{date}), Prüfung bestanden";
         }
 
         /// <summary>Ergebnis eines Downloads – noch nicht aktiv, erst <see cref="Activate"/> übernimmt es.</summary>

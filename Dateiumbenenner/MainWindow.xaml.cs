@@ -2305,7 +2305,11 @@ namespace Dateiumbenenner
         {
             var plz = Dateiumbenenner.Engine.DocumentEngine.Plz;
             var before = plz.Count;
-            var info = $"Aktiv: {before:N0} PLZ – {plz.Source}" + (plz.Warning != null ? $"\n\nAchtung: {plz.Warning}" : "");
+            var bundledDate = Dateiumbenenner.Engine.PlzDirectory.BundledDate;
+            var info = $"Aktiv: {before:N0} PLZ – {plz.Source}" + (plz.Warning != null ? $"\n\nAchtung: {plz.Warning}" : "")
+                + (!plz.IsBundled && bundledDate is { } bd
+                    ? $"\n\nMitgeliefert ist außerdem die GeoNames-Liste (Stand {bd:dd.MM.yyyy}). Sie gilt, solange keine Daten\\DE.txt vorhanden ist – zurückstellen über „PLZ-Verzeichnis: mitgelieferte Liste verwenden…“."
+                    : "");
             if (MessageBoxWpf.Show($"{info}\n\nAktualisierung prüfen?\nQuelle (fest, nur HTTPS, keine Umleitung):\n{Dateiumbenenner.Engine.PlzDirectory.SourceUrl}\n\n"
                 + "Die Daten werden zuerst geprüft und mit der aktiven Liste verglichen. Übernommen wird erst nach deiner Bestätigung.",
                 "PLZ-Verzeichnis", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;

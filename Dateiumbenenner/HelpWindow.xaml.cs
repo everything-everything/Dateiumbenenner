@@ -462,6 +462,7 @@ Klicken Sie auf ein unterstrichenes Thema, um es anzuzeigen. Mit den Schaltfläc
 * [[zusammenfuehren|PDF-Dateien zusammenführen]]
 * [[kompression|Kompressionseinstellungen]]
 * [[ocr|OCR-Korrektur und Wörterbücher]]
+* [[plz|PLZ-Verzeichnis]]
 * [[nummernregeln|Nummernmuster und Belegarten]]
 * [[profile|Profile]]
 * [[listen|Listen: Kopieren, Markieren, Filtern]]
@@ -502,6 +503,7 @@ Siehe auch: [[system|Systemanforderungen]]"),
 # Optional
 * Ghostscript – nur für den Kompressionsmodus ""Ghostscript (extern)"", siehe [[kompression|Kompressionseinstellungen]]
 * Hunspell-Wörterbücher im Ordner ""Dictionaries"" – nur für die [[ocr|OCR-Korrektur]]
+* PLZ-Liste: mitgeliefert, kein Download nötig, siehe [[plz|PLZ-Verzeichnis]]
 
 # Hardware
 * ca. 200 MB freier Festplattenspeicher
@@ -575,10 +577,38 @@ Jede Seite wird mit dem in Windows eingebauten PDF-Renderer (Windows.Data.Pdf) a
             ("ocr", "OCR-Korrektur und Wörterbücher", @"Die OCR-Korrektur verbessert Texte, die durch Texterkennung (OCR) entstanden sind, z. B. verwechselte Zeichen wie 0/O oder 1/l. Sie arbeitet mit der Rechtschreibprüfung Hunspell.
 
 # Wörterbücher installieren
-Die Wörterbücher (de_DE, en_US) werden aus Lizenzgründen nicht mitgeliefert. Führen Sie Download-Dictionaries.ps1 oder Download-Dictionaries.bat aus; die Dateien werden im Ordner ""Dictionaries"" abgelegt.
+Die Hunspell-Wörterbücher (de_DE, en_US) stehen unter eigenen Lizenzen (GPL/LGPL/MPL) und sind deshalb nicht im Programmpaket enthalten. Führen Sie Download-Dictionaries.ps1 oder Download-Dictionaries.bat aus; die Dateien werden im Ordner ""Dictionaries"" abgelegt.
+
+Das gilt nur für die Wörterbücher. Die Postleitzahlen-Liste ist dagegen mitgeliefert, siehe [[plz|PLZ-Verzeichnis]].
 
 # Eigene Korrekturen
 Eigene Ersetzungsregeln können nach dem Muster der Datei OcrCorrections.example.txt angelegt werden.
+
+Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
+
+            ("plz", "PLZ-Verzeichnis", @"Das PLZ-Verzeichnis dient zur Prüfung von Postleitzahl und Ort in der Adresserkennung.
+
+# Mitgelieferte Liste
+Die Postleitzahlen für Deutschland von GeoNames (CC BY 4.0) sind unverändert in der signierten Programmdatei enthalten. Ein Download ist nicht nötig, und die Liste kann nicht unbemerkt ausgetauscht werden.
+
+# Welche Liste ist aktiv?
+Reihenfolge:
+* Daten\DE.txt – eine heruntergeladene Aktualisierung, sofern sie die Prüfung besteht. Sie ersetzt die mitgelieferte Liste.
+* sonst die mitgelieferte Liste.
+* Eigene Ergänzungen aus Daten\plz.csv (je Zeile ""PLZ;Ort"") kommen immer hinzu.
+
+Die aktive Quelle zeigen der Menüpunkt ""PLZ-Verzeichnis (DE) prüfen und aktualisieren..."" und die Diagnose. Eine DE.txt aus einer Version vor 5.1.2619 erscheint als ""früher heruntergeladen, Herkunft nicht vermerkt"".
+
+# Aktualisieren (optional)
+* Geladen wird nur von https://download.geonames.org/export/zip/DE.zip (nur HTTPS, keine Umleitung, Größenlimit).
+* Die Daten werden geprüft (Steuerzeichen, überlange Einträge, ungewöhnliche Ortsnamen, Anzahl der PLZ).
+* Eine Vorschau zeigt Quelle, Datum, Größe, SHA-256 sowie neue, entfallene und geänderte PLZ. Übernommen wird erst nach Bestätigung; bei auffällig vielen Änderungen erscheint eine Warnung.
+
+# Zurück zur mitgelieferten Liste
+Menüpunkt ""PLZ-Verzeichnis: mitgelieferte Liste verwenden..."" – entfernt Daten\DE.txt; plz.csv bleibt erhalten.
+
+# Hinweis
+In den GeoNames-Daten stehen bei Großkunden-PLZ teils Firmennamen statt Ortsnamen. Das ist im Original so und wird bei der Prüfung toleriert.
 
 Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
 
@@ -647,6 +677,11 @@ Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2026 
 > Microsoft.Extensions.DependencyInjection.Abstractions MIT (.NET Foundation)
 
 WeCantSpell.Hunspell wird unverändert als eigenständige DLL eingebunden (LGPL-konform).
+
+# Mitgelieferte Daten
+> GeoNames-Postleitzahlen DE   CC BY 4.0, unverändert eingebettet
+
+Postleitzahlen-Daten von GeoNames (www.geonames.org), lizenziert unter Creative Commons Attribution 4.0 (creativecommons.org/licenses/by/4.0). Siehe [[plz|PLZ-Verzeichnis]].
 
 # Microsoft.Web.WebView2 – Lizenztext
 Copyright (C) Microsoft Corporation. All rights reserved.
@@ -761,6 +796,7 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 * [[ocr|Dictionaries (Wörterbücher)]]
 * [[kompression|DPI]]
 > G
+* [[plz|GeoNames]]
 * [[kompression|Ghostscript]]
 * [[haftung|Gewährleistung]]
 > H
@@ -784,6 +820,8 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 * [[ocr|OCR-Korrektur]]
 * [[umbenennen|Ordner öffnen]]
 > P
+* [[plz|PLZ-Verzeichnis]]
+* [[plz|Postleitzahlen]]
 * [[praefix|Präfix]]
 * [[signatur|Prüfsummen]]
 > R
