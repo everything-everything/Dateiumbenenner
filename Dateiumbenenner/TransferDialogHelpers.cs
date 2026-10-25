@@ -217,6 +217,9 @@ namespace Dateiumbenenner
         private static readonly System.Windows.Media.Pen Border = Freeze(new System.Windows.Media.Pen(new SolidColorBrush(System.Windows.Media.Color.FromArgb(200, 230, 150, 0)), 1));
         private readonly WpfTextBox _box;
         private List<(int Start, int Length)> _ranges = new();
+        /// <summary>Text, zu dem die Fundstellen gehören – nach einem Belegwechsel passen sie nicht mehr.</summary>
+        private string _rangesText = "";
+        private bool _retry;
 
         public HighlightAdorner(WpfTextBox box) : base(box)
         {
@@ -224,6 +227,7 @@ namespace Dateiumbenenner
             IsHitTestVisible = false;
             box.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, _) => InvalidateVisual()));
             box.SizeChanged += (_, _) => InvalidateVisual();
+            box.TextChanged += (_, _) => InvalidateVisual();
         }
 
         private static T Freeze<T>(T f) where T : Freezable { f.Freeze(); return f; }
@@ -231,28 +235,51 @@ namespace Dateiumbenenner
         public void SetRanges(List<(int Start, int Length)> ranges)
         {
             _ranges = ranges;
+            _rangesText = _box.Text ?? "";
             InvalidateVisual();
         }
 
         protected override void OnRender(DrawingContext dc)
         {
-            if (_ranges.Count == 0 || _box.Text.Length == 0) return;
-            int first = _box.GetFirstVisibleLineIndex(), last = _box.GetLastVisibleLineIndex();
-            if (first < 0) return;
-            if (last < 0) last = _box.LineCount - 1;
-            int from = _box.GetCharacterIndexFromLineIndex(first);
-            int to = last >= 0 ? _box.GetCharacterIndexFromLineIndex(last) + _box.GetLineLength(last) : _box.Text.Length;
+            var text = _box.Text ?? "";
+            if (_ranges.Count == 0 || text.Length == 0 || !ReferenceEquals(text, _rangesText) && text != _rangesText) return;
             dc.PushClip(new RectangleGeometry(new Rect(_box.RenderSize)));
+            try
+            {
+                Draw(dc, text.Length);
+                _retry = false;
+            }
+            catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+            {
+                // Zeilenaufteilung der Anzeige noch nicht neu berechnet (Text gerade gewechselt) – nach dem Layout erneut zeichnen
+                if (!_retry)
+                {
+                    _retry = true;
+                    Dispatcher.BeginInvoke(InvalidateVisual, System.Windows.Threading.DispatcherPriority.Background);
+                }
+            }
+            finally { dc.Pop(); }
+        }
+
+        private void Draw(DrawingContext dc, int textLength)
+        {
+            int lines = _box.LineCount;
+            if (lines <= 0) return;
+            int first = _box.GetFirstVisibleLineIndex(), last = _box.GetLastVisibleLineIndex();
+            if (first < 0 || first >= lines) return;
+            if (last < 0 || last >= lines) last = lines - 1;
+            int from = _box.GetCharacterIndexFromLineIndex(first);
+            int to = Math.Min(textLength, _box.GetCharacterIndexFromLineIndex(last) + _box.GetLineLength(last));
             foreach (var (start, length) in _ranges)
             {
-                int end = Math.Min(start + length, _box.Text.Length);
+                int end = Math.Min(start + length, textLength);
                 if (end <= from || start >= to) continue;
                 // Treffer über einen Zeilenumbruch hinweg: je Zeile ein Rechteck
                 int pos = Math.Max(start, from);
                 while (pos < end)
                 {
                     int line = _box.GetLineIndexFromCharacterIndex(pos);
-                    if (line < 0) break;
+                    if (line < 0 || line >= lines) break;
                     int lineEnd = _box.GetCharacterIndexFromLineIndex(line) + _box.GetLineLength(line);
                     int segEnd = Math.Max(pos + 1, Math.Min(end, lineEnd));
                     var a = _box.GetRectFromCharacterIndex(pos);
@@ -262,7 +289,6 @@ namespace Dateiumbenenner
                     pos = segEnd;
                 }
             }
-            dc.Pop();
         }
     }
 
