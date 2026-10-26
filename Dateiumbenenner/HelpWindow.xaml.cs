@@ -758,6 +758,20 @@ In der Spalte ""Beispielnummer"" kann eine erkannte Nummer ausgewählt werden; d
 # Priorität
 Passende Masken werden zuerst im Text gesucht und vor der allgemeinen Nummernerkennung bevorzugt. Regeln für Firma und Belegart gehen allgemeinen Regeln vor.
 
+# Begriff vor/nach Nummer
+* Begriff (vor Nummer): Text direkt vor der Nummer (gleiche Zeile oder Zeile darüber), z. B. ""Rechnung Nr.""
+* Begriff (nach Nummer): Text direkt hinter der Nummer
+* beide eingetragen: die Nummer steht zwischen den Begriffen
+* Seite egal: ein einzelner Begriff darf vor oder hinter der Nummer stehen
+
+Nummern an dieser Stelle werden bevorzugt; gleich aufgebaute Nummern an anderer Stelle bleiben möglich.
+
+# Weitere Spalten
+* Art: ""Maske"" (genaues Muster, Normalfall) oder ""Merkmale"" (nur ungefähre Länge und erlaubte Zeichen)
+* Länge min/max, Ziffern, Buchstaben, Leerzeichen, Sonderzeichen: gelten nur für Art ""Merkmale"" – bei ""Maske"" legt die Maske das fest (Zellen ausgegraut). Die Spalten lassen sich unten ein- und ausblenden.
+* Beginnt mit (Präfix): Nummern, die nicht so anfangen, werden schwächer bewertet; bei einer Maske meist überflüssig
+* Gelernt: automatisch angelegt, als eine Nummer von Hand gewählt wurde (niedrige Priorität); ""Gelernte Regeln löschen"" entfernt sie
+
 # Datum
 Im Reiter ""Datum"" wird – im Stil der Nummernmuster – je Firma und Belegart festgelegt, welches Datum gilt:
 * Begriff: Bezeichnung beim Datum, z. B. Rechnungsdatum, Belegdatum, Lieferdatum

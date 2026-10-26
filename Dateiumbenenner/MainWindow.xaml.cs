@@ -38,6 +38,10 @@ namespace Dateiumbenenner
         public string? OriginalFullText { get; set; }
         private string? _companyName; public string? CompanyName { get => _companyName; set { if (_companyName != value) { _companyName = value; OnPropertyChanged(nameof(CompanyName)); } } }
         public ObservableCollection<string> CompanyCandidates { get; } = new();
+        /// <summary>Von der Firmenerkennung zuerst vorgeschlagener Name (ohne Zuweisungen von Hand).</summary>
+        public string? DetectedCompany { get; set; }
+        /// <summary>Früher zugewiesene Firmennamen (neueste zuerst), z. B. vor einer Korrektur oder Übertragung.</summary>
+        public List<string> PreviousCompanies { get; set; } = new();
         /// <summary>Absenderadresse (nur bei Bedarf berechnet).</summary>
         public string? Street { get; set; }
         public string? Zip { get; set; }
@@ -681,7 +685,7 @@ namespace Dateiumbenenner
             if(loadVersion!=_loadVersion) return;
             // UI-Thread: Nummern zuordnen und Liste in Originalreihenfolge in einem Durchgang füllen
             var boundSource=LvFiles.ItemsSource; LvFiles.ItemsSource=null;
-            for(int mi=0; mi<metas.Count; mi++){ var meta=metas[mi]; AutoAssignNumbers(meta); try{ meta.CompanyCandidates.Clear(); foreach(var c in companiesByMeta[mi] ?? new List<string>()) meta.CompanyCandidates.Add(c); if(!string.IsNullOrWhiteSpace(storedCompany[mi]) && !meta.CompanyCandidates.Contains(storedCompany[mi]!)) meta.CompanyCandidates.Insert(0, storedCompany[mi]!); meta.CompanyName=string.IsNullOrWhiteSpace(storedCompany[mi]) ? meta.CompanyCandidates.FirstOrDefault() : storedCompany[mi]; } catch{ } meta.PropertyChanged-=Meta_CompanyChanged; meta.PropertyChanged+=Meta_CompanyChanged; _lastCompany[meta]=meta.CompanyName; _items.Add(meta); }
+            for(int mi=0; mi<metas.Count; mi++){ var meta=metas[mi]; AutoAssignNumbers(meta); try{ meta.CompanyCandidates.Clear(); foreach(var c in companiesByMeta[mi] ?? new List<string>()) meta.CompanyCandidates.Add(c); meta.DetectedCompany=companiesByMeta[mi]?.FirstOrDefault(); if(!string.IsNullOrWhiteSpace(storedCompany[mi]) && !meta.CompanyCandidates.Contains(storedCompany[mi]!)) meta.CompanyCandidates.Insert(0, storedCompany[mi]!); meta.CompanyName=string.IsNullOrWhiteSpace(storedCompany[mi]) ? meta.CompanyCandidates.FirstOrDefault() : storedCompany[mi]; } catch{ } meta.PropertyChanged-=Meta_CompanyChanged; meta.PropertyChanged+=Meta_CompanyChanged; _lastCompany[meta]=meta.CompanyName; _items.Add(meta); }
             LvFiles.ItemsSource=boundSource??_items;
             var newMetas=metas.Select((m,i)=>(m,i)).Where(x=>toSave[x.i]).Select(x=>(x.m, key:StoreSettingsKey(x.m.FilePath), confirmed:confirmedArr[x.i])).ToList();
             foreach(var x in metas.Select((m,i)=>(m,i)).Where(x=>confirmedArr[x.i])) _confirmedCompany.Add(x.m);
@@ -703,6 +707,7 @@ namespace Dateiumbenenner
             if(r.NumberManuallySet){ m.SelectedNumber=r.SelectedNumber; m.NumberManuallySet=true; }
             if(r.DateManuallySet){ m.SelectedDate=r.SelectedDate; m.Date=r.Date; m.DateManuallySet=true; }
             if(r.DocTypeManuallySet){ m.DocumentType=r.DocumentType; m.DocTypeManuallySet=true; }
+            m.PreviousCompanies=r.PreviousCompanies.ToList();
             ApplyStoredLayout(m, r);
         }
 
@@ -780,6 +785,7 @@ namespace Dateiumbenenner
             m.NumberManuallySet=r.NumberManuallySet; m.DateManuallySet=r.DateManuallySet; m.DocTypeManuallySet=r.DocTypeManuallySet;
             if(!string.IsNullOrWhiteSpace(r.Street)||!string.IsNullOrWhiteSpace(r.City)||r.AddressManuallySet){ m.Street=r.Street; m.Zip=r.Zip; m.City=r.City; m.AddressLoaded=true; }
             m.AddressManuallySet=r.AddressManuallySet;
+            m.PreviousCompanies=r.PreviousCompanies.ToList();
             if(string.IsNullOrEmpty(m.SavedDelimiter)||m.DelimiterAutoDetected){ m.SavedDelimiter=DetectDelimiterFromFilename(m.FileName); m.DelimiterAutoDetected=true; }
             ApplyStoredLayout(m, r);
             m.Loaded=true;
@@ -802,7 +808,7 @@ namespace Dateiumbenenner
                 SelectedNumber=m.SelectedNumber, SelectedDate=m.SelectedDate, NumberCandidates=m.NumberCandidates.ToList(), DateCandidates=m.DateCandidates.ToList(),
                 Street=m.Street, Zip=m.Zip, City=m.City, AddressManuallySet=m.AddressManuallySet,
                 NumberManuallySet=m.NumberManuallySet, DateManuallySet=m.DateManuallySet, DocTypeManuallySet=m.DocTypeManuallySet,
-                CompanyConfirmed=confirmed,
+                CompanyConfirmed=confirmed, PreviousCompanies=m.PreviousCompanies.ToList(),
                 Layout=m.LayoutSet ? CaptureLayout(m) : null, TemplateDeclined=m.TemplateDeclined };
             DocumentStore.Save(m.FilePath, key, rec);
         }
@@ -916,6 +922,7 @@ namespace Dateiumbenenner
             {
                 ApplyStoreRecord(meta, rec);
                 foreach (var c in TextCandidates(rec.CompanyCandidates, rec.FullText)) meta.CompanyCandidates.Add(c);
+                meta.DetectedCompany = meta.CompanyCandidates.FirstOrDefault();
                 meta.CompanyName = rec.CompanyName;
                 AutoAssignNumbers(meta);
                 return meta;
@@ -1594,6 +1601,19 @@ namespace Dateiumbenenner
             if (!meta.NumberManuallySet && number.Value != null) { meta.InvoiceNumber = number.Value; meta.SelectedNumber = number.Value; }
         }
 
+        /// <summary>Datumsregeln (Begriff/Schreibweise) der aktuellen Firma + Belegart erneut anwenden, z. B. nach einer Belegart-Übertragung.
+        /// Ein von Hand gesetztes Datum bleibt unverändert.</summary>
+        private void ReapplyDateRules(DocumentMetadata meta)
+        {
+            if (meta.DateManuallySet || string.IsNullOrEmpty(meta.FullText)) return;
+            if (Dateiumbenenner.Engine.DateRuleStore.RulesFor(meta.CompanyName, meta.DocumentType).Count == 0) return;
+            var date = Engine.ExtractDate(meta.FullText, meta.FilePath);
+            Dateiumbenenner.Engine.DateRuleStore.Apply(date, meta.CompanyName, meta.DocumentType, meta.FullText);
+            for (int i = date.Values.Count - 1; i >= 0; i--)
+            { meta.DateCandidates.Remove(date.Values[i]); meta.DateCandidates.Insert(0, date.Values[i]); }
+            if (date.Value != null) { meta.Date = date.Value; meta.SelectedDate = date.Value; }
+        }
+
         private void ApplyEngineFields(DocumentMetadata meta)
         {
             var pdf = meta.FilePath;
@@ -1692,12 +1712,28 @@ namespace Dateiumbenenner
         }
 
         private readonly Dictionary<DocumentMetadata, string?> _lastCompany = new();
+        /// <summary>Gerade abgeschlossene Bearbeitung im Firmenfeld: Name beim Betreten (statt getippter Zwischenstände).</summary>
+        private (DocumentMetadata Meta, string? Original)? _finishedEdit;
+
+        /// <summary>Bisherigen Firmennamen in der Liste früherer Namen merken (neueste zuerst, höchstens 10).</summary>
+        private static void RememberPreviousCompany(DocumentMetadata m, string? oldName)
+        {
+            var old = oldName?.Trim();
+            if (string.IsNullOrWhiteSpace(old) || string.Equals(old, m.CompanyName?.Trim(), StringComparison.OrdinalIgnoreCase)) return;
+            // Neue Liste statt Änderung: Speichern im Hintergrund liest die bisherige gefahrlos weiter
+            m.PreviousCompanies = new[] { old }.Concat(m.PreviousCompanies.Where(p => !string.Equals(p, old, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(p, m.CompanyName?.Trim(), StringComparison.OrdinalIgnoreCase)))
+                .Take(10).ToList();
+        }
 
         private void Meta_CompanyChanged(object? sender, PropertyChangedEventArgs e)
         {
             if (e.PropertyName != nameof(DocumentMetadata.CompanyName) || sender is not DocumentMetadata src) return;
             _lastCompany.TryGetValue(src, out var oldName);
             _lastCompany[src] = src.CompanyName;
+            // Alten Namen merken – nicht während des Tippens (Zwischenstände); beim Abschluss zählt der Name vor der Bearbeitung
+            if (!_isBulkLoading && !ReferenceEquals(src, _companyEditMeta))
+                RememberPreviousCompany(src, _finishedEdit is { } fe && ReferenceEquals(fe.Meta, src) ? fe.Original : oldName);
             PrefixRenamerTab?.SetCompanyName(src.FilePath, src.CompanyName);
             if (!_isBulkLoading) ResetAddress(src);
             if (!_isBulkLoading && !string.IsNullOrWhiteSpace(src.CompanyName)) { _confirmedCompany.Add(src); ScheduleStoreSave(src); }
@@ -1846,8 +1882,9 @@ namespace Dateiumbenenner
             {
                 if (!meta.CompanyCandidates.Contains(text)) meta.CompanyCandidates.Add(text);
                 if (!ask) _propagatingCompany = true;
+                _finishedEdit = (meta, original);
                 try { meta.CompanyName = text; } // Sitzung ist beendet → Meta_CompanyChanged lernt und fragt jetzt regulär
-                finally { _propagatingCompany = false; }
+                finally { _propagatingCompany = false; _finishedEdit = null; }
                 if (!ask && meta == _currentMeta) LearnCompany(meta);
                 RefreshNewNamePreview(meta);
                 return;
@@ -1856,6 +1893,8 @@ namespace Dateiumbenenner
             if (pending is { } p && ReferenceEquals(p.Src, meta) && !string.IsNullOrWhiteSpace(meta.CompanyName)
                 && !string.Equals(meta.CompanyName?.Trim(), original?.Trim(), StringComparison.OrdinalIgnoreCase))
             {
+                RememberPreviousCompany(meta, original);
+                ScheduleStoreSave(meta);
                 if (meta == _currentMeta) LearnCompany(meta);
                 if (!ask) return;
                 var name = meta.CompanyName!;
@@ -1978,6 +2017,7 @@ namespace Dateiumbenenner
             {
                 m.DocumentType = t;
                 m.DocTypeManuallySet = true;
+                ReapplyDateRules(m);
                 AutoAssignNumbers(m);
                 RefreshNewNamePreview(m);
                 ScheduleStoreSave(m);
@@ -2115,6 +2155,7 @@ namespace Dateiumbenenner
                     var current = m.CompanyName;
                     m.CompanyCandidates.Clear();
                     foreach (var c in ExtractCompanyNames(m.FullText, m.FilePath)) m.CompanyCandidates.Add(c);
+                    m.DetectedCompany = m.CompanyCandidates.FirstOrDefault();
                     if (string.IsNullOrWhiteSpace(current) || Dateiumbenenner.Engine.CompanyExclusions.IsExcluded(current))
                         m.CompanyName = m.CompanyCandidates.FirstOrDefault();
                     else if (!m.CompanyCandidates.Contains(current)) m.CompanyCandidates.Insert(0, current);

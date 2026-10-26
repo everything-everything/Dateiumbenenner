@@ -34,6 +34,10 @@ namespace Dateiumbenenner
             public string? Current => Item.DocumentType;
             public string? Number => Item.SelectedNumber;
             public string Similarity { get; init; } = "";
+            internal double Sim { get; init; }
+            public string? Company => Item.CompanyName;
+            public string? Detected => Item.DetectedCompany ?? Item.CompanyCandidates.FirstOrDefault();
+            public string Previous => string.Join(" | ", Item.PreviousCompanies);
             internal Action? SelectionChanged;
             public event PropertyChangedEventHandler? PropertyChanged;
             private void Changed(string n) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
@@ -45,6 +49,8 @@ namespace Dateiumbenenner
             public string Current { get; init; } = "";
             public string Shape { get; init; } = "";
             public string Match { get; init; } = "";
+            /// <summary>Gleiche Firma und gleicher Aufbau/Inhalt (Vorauswahl).</summary>
+            internal bool Suggested { get; init; }
             public List<Row> Rows { get; } = new();
             public int Count => Rows.Count;
             public bool? Selected
@@ -53,6 +59,7 @@ namespace Dateiumbenenner
                 set { foreach (var r in Rows) r.Selected = value == true; }
             }
             public string Pending => string.Join(" | ", Rows.Select(r => r.Pending).Where(p => p.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase));
+            public string Previous => string.Join(" | ", Rows.SelectMany(r => r.Item.PreviousCompanies).Distinct(StringComparer.OrdinalIgnoreCase));
             public event PropertyChangedEventHandler? PropertyChanged;
             internal void Notify()
             {
@@ -69,6 +76,11 @@ namespace Dateiumbenenner
         private readonly TextBox _filter;
         private readonly TextBlock _info;
 
+        /// <summary>Gruppierung der oberen Liste (sitzungsweit gemerkt).</summary>
+        private static readonly string[] Modes = { "Firma + Nummernaufbau + Belegart", "Firma + Belegart", "Erkannter Firmenname + Belegart", "Früher erkannter Firmenname", "Keine Gruppen – alle Belege einzeln" };
+        private static readonly string[] ModeHeaders = { "Firma", "Firma", "Firma erkannt", "Früher erkannt", "Beleg" };
+        private static int _mode;
+
         /// <summary>Ergebnis: Beleg → neue Belegart (zugewiesene Gruppen plus beim Schließen markierte).</summary>
         public Dictionary<DocumentMetadata, string> Assignments { get; } = new();
 
@@ -83,45 +95,66 @@ namespace Dateiumbenenner
             var srcShape = Shape(source.SelectedNumber);
             var srcRange = Range(source.SelectedNumber);
 
-            _groups = new ObservableCollection<Group>(items
-                .GroupBy(i => (Company: i.CompanyName?.Trim() ?? "", Shape: Shape(i.SelectedNumber), Type: i.DocumentType?.Trim() ?? ""),
-                    new KeyComparer())
-                .Select(g =>
+            static string Disp(string? s) => string.IsNullOrWhiteSpace(s) ? "(leer)" : s.Trim();
+            static string Join(IEnumerable<string?> v, string empty)
+            {
+                var s = string.Join(" | ", v.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
+                return s.Length == 0 ? empty : s;
+            }
+            string KeyOf(Row r, int mode) => mode switch
+            {
+                1 => $"{Disp(r.Item.CompanyName)}\u0001{Disp(r.Item.DocumentType)}",
+                2 => $"{Disp(r.Detected)}\u0001{Disp(r.Item.DocumentType)}",
+                3 => r.Item.PreviousCompanies.FirstOrDefault() ?? $"(unverändert) {Disp(r.Item.CompanyName)}",
+                4 => r.Item.FilePath,
+                _ => $"{Disp(r.Item.CompanyName)}\u0001{Shape(r.Item.SelectedNumber)}\u0001{Disp(r.Item.DocumentType)}"
+            };
+            Group MakeGroup(List<Row> rows, int mode)
+            {
+                bool company = rows.Any(r => sameCompany(r.Item.CompanyName, source.CompanyName));
+                var shapes = rows.Select(r => Shape(r.Item.SelectedNumber)).Distinct().ToList();
+                var reasons = new List<string>();
+                if (company) reasons.Add("Firma");
+                if (srcShape.Length > 0 && shapes.Contains(srcShape)) reasons.Add("Nummernaufbau");
+                if (srcRange != null && rows.Any(r => Range(r.Item.SelectedNumber) == srcRange)) reasons.Add("Nummernkreis " + srcRange + "…");
+                double best = rows.Max(r => r.Sim);
+                if (best >= ContentThreshold) reasons.Add($"Inhalt {best:P0}");
+                bool structure = reasons.Any(r => r != "Firma");
+                if (company && structure && targetType.Length > 0 && rows.Any(r => string.Equals(r.Item.DocumentType?.Trim(), targetType, StringComparison.OrdinalIgnoreCase)))
+                    reasons.Add("bereits " + targetType);
+                var grp = new Group
                 {
-                    bool company = sameCompany(g.Key.Company, source.CompanyName);
-                    var rows = new List<Row>();
-                    double best = 0;
-                    foreach (var i in g)
+                    Company = mode switch
                     {
-                        var sim = Jaccard(srcWords, Words(i.FullText));
-                        best = Math.Max(best, sim);
-                        rows.Add(new Row { Item = i, Similarity = $"{sim:P0}" });
-                    }
-                    var reasons = new List<string>();
-                    if (company) reasons.Add("Firma");
-                    if (srcShape.Length > 0 && g.Key.Shape == srcShape) reasons.Add("Nummernaufbau");
-                    if (srcRange != null && g.Any(i => Range(i.SelectedNumber) == srcRange)) reasons.Add("Nummernkreis " + srcRange + "…");
-                    if (best >= ContentThreshold) reasons.Add($"Inhalt {best:P0}");
-                    bool structure = reasons.Any(r => r != "Firma");
-                    if (company && structure && targetType.Length > 0 && string.Equals(g.Key.Type, targetType, StringComparison.OrdinalIgnoreCase))
-                        reasons.Add("bereits " + targetType);
-                    var grp = new Group
-                    {
-                        Company = g.Key.Company.Length == 0 ? "(leer)" : g.Key.Company,
-                        Shape = g.Key.Shape.Length == 0 ? "(keine Nummer)" : g.Key.Shape,
-                        Current = g.Key.Type.Length == 0 ? "(leer)" : g.Key.Type,
-                        Match = string.Join(", ", reasons),
-                    };
-                    grp.Rows.AddRange(rows);
-                    // Firma muss passen, dazu gleicher Nummernaufbau/-kreis oder ähnlicher Inhalt – auch wenn die Gruppe
-                    // schon die Belegart der Quelle hat (z. B. für eine Gruppenzuweisung auf eine andere Belegart)
-                    if (company && structure) grp.Selected = true;
-                    foreach (var r in grp.Rows) { var gg = grp; r.SelectionChanged = () => { gg.Notify(); UpdateInfo(); }; }
-                    return grp;
-                })
+                        2 => Join(rows.Select(r => r.Detected), "(leer)"),
+                        3 => rows[0].Item.PreviousCompanies.FirstOrDefault() ?? $"(unverändert) {Disp(rows[0].Item.CompanyName)}",
+                        4 => $"{Disp(rows[0].Item.CompanyName)}  ({rows[0].FileName})",
+                        _ => Join(rows.Select(r => r.Item.CompanyName), "(leer)")
+                    },
+                    Shape = Join(shapes, "(keine Nummer)"),
+                    Current = Join(rows.Select(r => r.Item.DocumentType), "(leer)"),
+                    Match = string.Join(", ", reasons),
+                    Suggested = company && structure,
+                };
+                grp.Rows.AddRange(rows);
+                foreach (var r in grp.Rows) { var gg = grp; r.SelectionChanged = () => { gg.Notify(); UpdateInfo(); }; }
+                return grp;
+            }
+            List<Group> Build(IEnumerable<Row> rows, int mode) => rows
+                .GroupBy(r => KeyOf(r, mode), StringComparer.OrdinalIgnoreCase)
+                .Select(g => MakeGroup(g.ToList(), mode))
                 .OrderByDescending(g => g.Selected != false)
-                .ThenByDescending(g => sameCompany(g.Company, source.CompanyName))
-                .ThenByDescending(g => g.Count).ThenBy(g => g.Company));
+                .ThenByDescending(g => g.Rows.Any(r => sameCompany(r.Item.CompanyName, source.CompanyName)))
+                .ThenByDescending(g => g.Count).ThenBy(g => g.Company)
+                .ToList();
+
+            var allRows = items.Select(i => { var sim = Jaccard(srcWords, Words(i.FullText)); return new Row { Item = i, Sim = sim, Similarity = $"{sim:P0}" }; }).ToList();
+            // Vorauswahl immer nach Firma + Nummernaufbau + Belegart: Firma muss passen, dazu gleicher Nummernaufbau/-kreis oder ähnlicher Inhalt –
+            // auch wenn die Gruppe schon die Belegart der Quelle hat (z. B. für eine Gruppenzuweisung auf eine andere Belegart)
+            foreach (var g in Build(allRows, 0))
+                if (g.Suggested)
+                    foreach (var r in g.Rows) r.Selected = true;
+            _groups = new ObservableCollection<Group>(Build(allRows, _mode));
 
             var root = new DockPanel { Margin = new Thickness(8) };
 
@@ -131,7 +164,7 @@ namespace Dateiumbenenner
             {
                 Text = $"Quelle: {source.FileName} – {source.CompanyName} – {(string.IsNullOrWhiteSpace(source.DocumentType) ? "(leer)" : source.DocumentType)}"
                     + (srcShape.Length > 0 ? $"  (Nummer {source.SelectedNumber}, Aufbau {srcShape})" : "")
-                    + "\nGruppiert nach Firma, Nummernaufbau und bisheriger Belegart. Vorausgewählt: gleiche Firma und gleicher Nummernaufbau/-kreis oder ähnlicher Inhalt (auch Gruppen, die die Belegart schon haben – „bereits …“)."
+                    + "\nStandardmäßig gruppiert nach Firma, Nummernaufbau und bisheriger Belegart (umschaltbar unter „Gruppieren nach“). Vorausgewählt: gleiche Firma und gleicher Nummernaufbau/-kreis oder ähnlicher Inhalt (auch Gruppen, die die Belegart schon haben – „bereits …“)."
                     + "\nGruppenzuweisung: Belegart wählen, Gruppen/Belege markieren, „Markierten zuweisen“ – beliebig oft mit anderen Belegarten wiederholen.",
                 TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4)
             });
@@ -149,7 +182,14 @@ namespace Dateiumbenenner
             head.Children.Add(tp);
             var fp = new DockPanel();
             fp.Children.Add(new TextBlock { Text = "Filter: ", VerticalAlignment = VerticalAlignment.Center, Width = 60 });
-            _filter = new TextBox();
+            var opts = new StackPanel { Orientation = Orientation.Horizontal };
+            DockPanel.SetDock(opts, Dock.Right);
+            opts.Children.Add(TransferSearch.CreateTextOption(() => _view?.Refresh()));
+            opts.Children.Add(new TextBlock { Text = "Gruppieren nach: ", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0) });
+            var modeBox = new ComboBox { Width = 250, ItemsSource = Modes, SelectedIndex = _mode };
+            opts.Children.Add(modeBox);
+            fp.Children.Add(opts);
+            _filter = new TextBox { ToolTip = "Sucht in Firmenname (aktuell, erkannt, früher erkannt), Dateiname, Belegart, Nummer, Datum – und optional im Belegtext" };
             fp.Children.Add(_filter);
             head.Children.Add(fp);
             root.Children.Add(head);
@@ -180,11 +220,13 @@ namespace Dateiumbenenner
             var gv = new GridView();
             gv.Columns.Add(new GridViewColumn { Header = "", Width = 30, CellTemplate = CheckTemplate(nameof(Group.Selected)) });
             gv.Columns.Add(new GridViewColumn { Header = "Anzahl", Width = 55, DisplayMemberBinding = new Binding(nameof(Group.Count)) });
-            gv.Columns.Add(new GridViewColumn { Header = "Firma", Width = 280, DisplayMemberBinding = new Binding(nameof(Group.Company)) });
+            var companyCol = new GridViewColumn { Header = ModeHeaders[_mode], Width = 280, DisplayMemberBinding = new Binding(nameof(Group.Company)) };
+            gv.Columns.Add(companyCol);
             gv.Columns.Add(new GridViewColumn { Header = "Nummernaufbau", Width = 140, DisplayMemberBinding = new Binding(nameof(Group.Shape)) });
             gv.Columns.Add(new GridViewColumn { Header = "Bisherige Belegart", Width = 150, DisplayMemberBinding = new Binding(nameof(Group.Current)) });
             gv.Columns.Add(new GridViewColumn { Header = "Zugewiesen", Width = 150, DisplayMemberBinding = new Binding(nameof(Group.Pending)) });
-            gv.Columns.Add(new GridViewColumn { Header = "Übereinstimmung (Grund der Vorauswahl)", Width = 360, DisplayMemberBinding = new Binding(nameof(Group.Match)) });
+            gv.Columns.Add(new GridViewColumn { Header = "Übereinstimmung (Grund der Vorauswahl)", Width = 300, DisplayMemberBinding = new Binding(nameof(Group.Match)) });
+            gv.Columns.Add(new GridViewColumn { Header = "Früher erkannt", Width = 160, DisplayMemberBinding = new Binding(nameof(Group.Previous)) });
             lv.View = gv;
             lv.ItemsSource = _groups;
             Dateiumbenenner.ListViewCopyHelper.Attach(lv);
@@ -217,6 +259,10 @@ namespace Dateiumbenenner
             fgv.Columns.Add(new GridViewColumn { Header = "", Width = 30, CellTemplate = CheckTemplate(nameof(Row.Selected)) });
             fgv.Columns.Add(new GridViewColumn { Header = "Dateiname", Width = 240, DisplayMemberBinding = new Binding(nameof(Row.FileName)) });
             fgv.Columns.Add(new GridViewColumn { Header = "Nummer", Width = 110, DisplayMemberBinding = new Binding(nameof(Row.Number)) });
+            fgv.Columns.Add(new GridViewColumn { Header = "Belegart", Width = 100, DisplayMemberBinding = new Binding(nameof(Row.Current)) });
+            fgv.Columns.Add(new GridViewColumn { Header = "Firma", Width = 150, DisplayMemberBinding = new Binding(nameof(Row.Company)) });
+            fgv.Columns.Add(new GridViewColumn { Header = "Firma erkannt", Width = 150, DisplayMemberBinding = new Binding(nameof(Row.Detected)) });
+            fgv.Columns.Add(new GridViewColumn { Header = "Früher erkannt", Width = 140, DisplayMemberBinding = new Binding(nameof(Row.Previous)) });
             fgv.Columns.Add(new GridViewColumn { Header = "Inhalt ähnl.", Width = 70, DisplayMemberBinding = new Binding(nameof(Row.Similarity)) });
             fgv.Columns.Add(new GridViewColumn { Header = "Zugewiesen", Width = 110, DisplayMemberBinding = new Binding(nameof(Row.Pending)) });
             files.View = fgv;
@@ -298,14 +344,34 @@ namespace Dateiumbenenner
                 var words = _filter.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 if (words.Length == 0) return true;
                 if (o is not Group g) return false;
-                var key = string.Join("\u0001", new[] { g.Company, g.Current, g.Shape, g.Match, g.Pending }
-                    .Concat(g.Rows.SelectMany(r => new[] { r.Item.FileName, r.Item.SelectedNumber, r.Item.SelectedDate })));
+                var key = string.Join("\u0001", new[] { g.Company, g.Current, g.Shape, g.Match, g.Pending, g.Previous }
+                    .Concat(g.Rows.SelectMany(r => new[] { r.Item.FileName, r.Item.CompanyName, r.Detected, r.Item.SelectedNumber, r.Item.SelectedDate })));
                 return words.All(w => key.Contains(w, StringComparison.OrdinalIgnoreCase))
-                    || g.Rows.Any(r => words.All(w => (r.Item.FullText ?? "").Contains(w, StringComparison.OrdinalIgnoreCase)));
+                    || TransferSearch.InText && g.Rows.Any(r => words.All(w => (r.Item.FullText ?? "").Contains(w, StringComparison.OrdinalIgnoreCase)));
             };
             var filterTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
             filterTimer.Tick += (_, _) => { filterTimer.Stop(); _view.Refresh(); };
             _filter.TextChanged += (_, _) => { filterTimer.Stop(); filterTimer.Start(); };
+
+            modeBox.SelectionChanged += (_, _) =>
+            {
+                if (modeBox.SelectedIndex < 0 || modeBox.SelectedIndex == _mode) return;
+                _mode = modeBox.SelectedIndex;
+                var current = files.SelectedItem as Row ?? (lv.SelectedItem as Group)?.Rows.FirstOrDefault();
+                var rows = _groups.SelectMany(g => g.Rows).ToList();
+                lv.SelectedItem = null;
+                _groups.Clear();
+                foreach (var g in Build(rows, _mode)) _groups.Add(g);
+                companyCol.Header = ModeHeaders[_mode];
+                var sel = current == null ? null : _groups.FirstOrDefault(g => g.Rows.Contains(current));
+                if (sel != null && _view.Contains(sel))
+                {
+                    lv.SelectedItem = sel;
+                    lv.ScrollIntoView(sel);
+                    files.SelectedItem = current;
+                }
+                UpdateInfo();
+            };
             UpdateInfo();
         }
 
@@ -368,15 +434,6 @@ namespace Dateiumbenenner
             if (a.Count == 0 || b.Count == 0) return 0;
             int common = a.Count(b.Contains);
             return (double)common / (a.Count + b.Count - common);
-        }
-
-        private sealed class KeyComparer : IEqualityComparer<(string Company, string Shape, string Type)>
-        {
-            public bool Equals((string Company, string Shape, string Type) x, (string Company, string Shape, string Type) y)
-                => string.Equals(x.Company, y.Company, StringComparison.OrdinalIgnoreCase) && x.Shape == y.Shape
-                    && string.Equals(x.Type, y.Type, StringComparison.OrdinalIgnoreCase);
-            public int GetHashCode((string Company, string Shape, string Type) k)
-                => HashCode.Combine(k.Company.ToUpperInvariant(), k.Shape, k.Type.ToUpperInvariant());
         }
     }
 }

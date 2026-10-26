@@ -24,6 +24,11 @@ namespace Dateiumbenenner
                 set { foreach (var r in Rows) r.Selected = value == true; }
             }
             public string Match => string.Join(" | ", Rows.SelectMany(r => r.Match.Split(" | ", StringSplitOptions.RemoveEmptyEntries)).Distinct(StringComparer.OrdinalIgnoreCase));
+            public string Current => Distinct(Rows.Select(r => r.Item.CompanyName));
+            public string Detected => Distinct(Rows.Select(r => r.Detected));
+            public string Previous => Distinct(Rows.SelectMany(r => r.Item.PreviousCompanies));
+            public string DocTypes => Distinct(Rows.Select(r => r.Item.DocumentType));
+            private static string Distinct(IEnumerable<string?> v) => string.Join(" | ", v.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
             public string Candidates => string.Join(" | ", Rows.SelectMany(r => r.Item.CompanyCandidates)
                 .Where(k => !string.IsNullOrWhiteSpace(k)).Select(k => k.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
             public string Files => string.Join(" | ", Rows.Select(r => r.FileName));
@@ -31,7 +36,7 @@ namespace Dateiumbenenner
             public event PropertyChangedEventHandler? PropertyChanged;
             internal void Notify()
             {
-                foreach (var n in new[] { nameof(Selected), nameof(Count), nameof(Match), nameof(Candidates), nameof(Files) })
+                foreach (var n in new[] { nameof(Selected), nameof(Count), nameof(Match), nameof(Candidates), nameof(Files), nameof(Current), nameof(Detected), nameof(Previous), nameof(DocTypes) })
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
             }
         }
@@ -45,6 +50,10 @@ namespace Dateiumbenenner
             public string FileName => Item.FileName;
             public string? Number => Item.SelectedNumber;
             public string? DocumentType => Item.DocumentType;
+            /// <summary>Von der Erkennung vorgeschlagener Name.</summary>
+            public string? Detected => Item.DetectedCompany ?? Item.CompanyCandidates.FirstOrDefault();
+            /// <summary>Früher zugewiesene Namen (z. B. vor einer Korrektur).</summary>
+            public string Previous => string.Join(" | ", Item.PreviousCompanies);
             public string Company { get; set; } = "";
             /// <summary>Grund der Vorauswahl für diese Datei.</summary>
             public string Match { get; init; } = "";
@@ -57,6 +66,11 @@ namespace Dateiumbenenner
         private readonly ICollectionView _view;
         private readonly System.Windows.Controls.TextBox _filter;
         private readonly TextBlock _info = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+
+        /// <summary>Gruppierung der oberen Liste (sitzungsweit gemerkt).</summary>
+        private static readonly string[] Modes = { "Erkannter Name", "Aktueller (zugewiesener) Name", "Aktueller Name + Belegart", "Früher erkannter Name", "Keine Gruppen – alle Dateien einzeln" };
+        private static readonly string[] ModeHeaders = { "Erkannt", "Aktuell zugewiesen", "Aktuell zugewiesen – Belegart", "Früher erkannt", "Datei" };
+        private static int _mode = 1;
 
         public IEnumerable<DocumentMetadata> SelectedItems => _groups.SelectMany(g => g.Rows).Where(r => r.Selected).Select(r => r.Item);
         /// <summary>In der Dateiliste von Hand geänderte Firmennamen (nicht angehakter Dateien).</summary>
@@ -81,10 +95,22 @@ namespace Dateiumbenenner
                 return new Row { Item = i, Company = i.CompanyName ?? "", Match = string.Join(" | ", matches.Distinct(StringComparer.OrdinalIgnoreCase)), Selected = inText };
             }
 
-            _groups = new ObservableCollection<Group>(items
-                .GroupBy(i => (i.CompanyName ?? "").Trim(), StringComparer.OrdinalIgnoreCase)
-                .Select(g => NewGroup(g.Key.Length == 0 ? "(leer)" : g.Key, g.Select(MakeRow)))
-                .OrderByDescending(g => g.Selected == true).ThenByDescending(g => g.Selected == null).ThenByDescending(g => g.Count).ThenBy(g => g.Name));
+            _groups = new ObservableCollection<Group>(Build(items.Select(MakeRow)));
+
+            static string Disp(string? s) => string.IsNullOrWhiteSpace(s) ? "(leer)" : s.Trim();
+            string KeyOf(Row r) => _mode switch
+            {
+                0 => r.Detected?.Trim() ?? "",
+                2 => $"{Disp(r.Item.CompanyName)} – {Disp(r.Item.DocumentType)}",
+                3 => r.Item.PreviousCompanies.FirstOrDefault() ?? $"(unverändert) {Disp(r.Item.CompanyName)}",
+                4 => r.Item.FilePath,
+                _ => r.Item.CompanyName?.Trim() ?? ""
+            };
+            List<Group> Build(IEnumerable<Row> rows) => rows
+                .GroupBy(KeyOf, StringComparer.OrdinalIgnoreCase)
+                .Select(g => NewGroup(_mode == 4 ? $"{Disp(g.First().Item.CompanyName)}  ({g.First().FileName})" : g.Key.Length == 0 ? "(leer)" : g.Key, g))
+                .OrderByDescending(g => g.Selected == true).ThenByDescending(g => g.Selected == null).ThenByDescending(g => g.Count).ThenBy(g => g.Name)
+                .ToList();
 
             var root = new DockPanel { Margin = new Thickness(8) };
             var head = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
@@ -92,12 +118,20 @@ namespace Dateiumbenenner
             head.Children.Add(new TextBlock
             {
                 Text = $"Übertragen: '{target}'\nDateien, in deren Text die Firma steht, sind vorausgewählt. Der Firmenname wird auf die angehakten Dateien übernommen."
-                    + "\nEinzelne Dateien unten abhaken, mit „Aus Gruppe lösen“ herausziehen oder die Gruppe auflösen, wenn sie so nicht passt.",
+                    + "\nEinzelne Dateien unten abhaken, mit „Aus Gruppe lösen“ herausziehen oder die Gruppe auflösen, wenn sie so nicht passt."
+                    + "\n„Gruppieren nach“: „Erkannter Name“ zeigt, was die Erkennung vorschlägt, „Früher erkannter Name“ findet Dateien wieder, deren Name inzwischen korrigiert wurde.",
                 TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4)
             });
             var fp = new DockPanel();
             fp.Children.Add(new TextBlock { Text = "Filter: ", VerticalAlignment = VerticalAlignment.Center });
-            _filter = new System.Windows.Controls.TextBox();
+            var opts = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+            DockPanel.SetDock(opts, Dock.Right);
+            opts.Children.Add(TransferSearch.CreateTextOption(() => _view?.Refresh()));
+            opts.Children.Add(new TextBlock { Text = "Gruppieren nach: ", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0) });
+            var modeBox = new System.Windows.Controls.ComboBox { Width = 240, ItemsSource = Modes, SelectedIndex = _mode };
+            opts.Children.Add(modeBox);
+            fp.Children.Add(opts);
+            _filter = new System.Windows.Controls.TextBox { ToolTip = "Sucht in aktuellem, erkanntem und früher erkanntem Firmennamen, Dateiname, Belegart, Nummer, Datum – und optional im Belegtext" };
             fp.Children.Add(_filter);
             head.Children.Add(fp);
             root.Children.Add(head);
@@ -120,7 +154,14 @@ namespace Dateiumbenenner
             var gv = new GridView();
             gv.Columns.Add(new GridViewColumn { Header = "", Width = 30, CellTemplate = ListKeyboard.CheckTemplate(nameof(Group.Selected)) });
             gv.Columns.Add(new GridViewColumn { Header = "Anzahl", Width = 55, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.Count)) });
-            gv.Columns.Add(new GridViewColumn { Header = "Aktuell gewählt", Width = 220, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.Name)) });
+            var nameCol = new GridViewColumn { Header = ModeHeaders[_mode], Width = 260, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.Name)) };
+            gv.Columns.Add(nameCol);
+            var detectedCol = new GridViewColumn { Header = "Erkannt", Width = _mode == 0 ? 0 : 200, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.Detected)) };
+            gv.Columns.Add(detectedCol);
+            var currentCol = new GridViewColumn { Header = "Aktuell gewählt", Width = _mode == 1 ? 0 : 200, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.Current)) };
+            gv.Columns.Add(currentCol);
+            gv.Columns.Add(new GridViewColumn { Header = "Früher erkannt", Width = 160, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.Previous)) });
+            gv.Columns.Add(new GridViewColumn { Header = "Belegart", Width = 120, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.DocTypes)) });
             gv.Columns.Add(new GridViewColumn { Header = "Treffer (Grund der Vorauswahl)", Width = 240, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.Match)) });
             gv.Columns.Add(new GridViewColumn { Header = "Erkannte Firmennamen (Liste)", Width = 340, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.Candidates)) });
             gv.Columns.Add(new GridViewColumn { Header = "Dateien", Width = 260, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Group.Files)) });
@@ -155,6 +196,8 @@ namespace Dateiumbenenner
             edit.SetBinding(System.Windows.Controls.TextBox.TextProperty, new System.Windows.Data.Binding(nameof(Row.Company)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
             edit.SetValue(MinWidthProperty, 160.0);
             fgv.Columns.Add(new GridViewColumn { Header = "Aktuell (bearbeitbar)", Width = 200, CellTemplate = new DataTemplate { VisualTree = edit } });
+            fgv.Columns.Add(new GridViewColumn { Header = "Erkannt", Width = 160, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Row.Detected)) });
+            fgv.Columns.Add(new GridViewColumn { Header = "Früher erkannt", Width = 140, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Row.Previous)) });
             fgv.Columns.Add(new GridViewColumn { Header = "Belegart", Width = 110, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Row.DocumentType)) });
             fgv.Columns.Add(new GridViewColumn { Header = "Nummer", Width = 110, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Row.Number)) });
             fgv.Columns.Add(new GridViewColumn { Header = "Treffer", Width = 200, DisplayMemberBinding = new System.Windows.Data.Binding(nameof(Row.Match)) });
@@ -258,14 +301,36 @@ namespace Dateiumbenenner
                 var words = _filter.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 if (words.Length == 0) return true;
                 if (o is not Group g) return false;
-                var key = string.Join("\u0001", new[] { g.Name, g.Match, g.Candidates, g.Files }
+                var key = string.Join("\u0001", new[] { g.Name, g.Match, g.Candidates, g.Files, g.Detected, g.Previous }
                     .Concat(g.Items.SelectMany(i => new[] { i.CompanyName, i.DocumentType, i.SelectedNumber, i.SelectedDate })));
                 return words.All(w => key.Contains(w, StringComparison.OrdinalIgnoreCase))
-                    || g.Items.Any(i => i.FullText != null && words.All(w => i.FullText.Contains(w, StringComparison.OrdinalIgnoreCase)));
+                    || TransferSearch.InText && g.Items.Any(i => i.FullText != null && words.All(w => i.FullText.Contains(w, StringComparison.OrdinalIgnoreCase)));
             };
             var filterTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
             filterTimer.Tick += (_, _) => { filterTimer.Stop(); _view.Refresh(); };
             _filter.TextChanged += (_, _) => { filterTimer.Stop(); filterTimer.Start(); };
+
+            modeBox.SelectionChanged += (_, _) =>
+            {
+                if (modeBox.SelectedIndex < 0 || modeBox.SelectedIndex == _mode) return;
+                _mode = modeBox.SelectedIndex;
+                var current = files.SelectedItem as Row ?? (lv.SelectedItem as Group)?.Rows.FirstOrDefault();
+                var rows = _groups.SelectMany(g => g.Rows).ToList();
+                lv.SelectedItem = null;
+                _groups.Clear();
+                foreach (var g in Build(rows)) _groups.Add(g);
+                nameCol.Header = ModeHeaders[_mode];
+                detectedCol.Width = _mode == 0 ? 0 : 200;
+                currentCol.Width = _mode == 1 ? 0 : 200;
+                var sel = current == null ? null : _groups.FirstOrDefault(g => g.Rows.Contains(current));
+                if (sel != null && _view.Contains(sel))
+                {
+                    lv.SelectedItem = sel;
+                    lv.ScrollIntoView(sel);
+                    files.SelectedItem = current;
+                }
+                UpdateInfo();
+            };
             UpdateInfo();
         }
 

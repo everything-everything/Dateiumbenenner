@@ -134,7 +134,6 @@ namespace Dateiumbenenner
         {
             InitializeComponent();
             ColKind.ItemsSource = Enum.GetValues(typeof(NumberRuleKind));
-            ColKeywordPos.ItemsSource = Enum.GetValues(typeof(KeywordPosition));
             _rules = new ObservableCollection<NumberRule>(NumberRuleStore.Rules
                 .Select(Clone)
                 .OrderBy(r => r.Learned).ThenBy(r => r.Company).ThenBy(r => r.DocType).ThenByDescending(r => r.Priority));
@@ -145,6 +144,8 @@ namespace Dateiumbenenner
                 Keywords = string.Join("; ", d.NumberKeywords)
             }));
             GridRules.ItemsSource = _rules;
+            ChkFeatureColumns.IsChecked = _rules.Any(r => r.Kind == NumberRuleKind.Merkmale);
+            ChkFeatureColumns_Changed(ChkFeatureColumns, new RoutedEventArgs());
             GridDocTypes.ItemsSource = _docTypes;
             ColAmountPos.ItemsSource = Enum.GetValues(typeof(AmountPosition));
             ColAmountPage.ItemsSource = Enum.GetValues(typeof(AmountPage));
@@ -168,8 +169,10 @@ namespace Dateiumbenenner
         {
             Company = r.Company, DocType = r.DocType, Priority = r.Priority, Kind = r.Kind, Mask = r.Mask,
             MinLength = r.MinLength, MaxLength = r.MaxLength, AllowDigits = r.AllowDigits, AllowLetters = r.AllowLetters,
+            AllowSpace = r.AllowSpace, AllowSymbols = r.AllowSymbols,
             Prefix = r.Prefix, Learned = r.Learned, Example = r.Example,
-                        Examples = string.IsNullOrEmpty(r.Example) ? new() : new() { r.Example }
+            Keyword = r.Keyword, KeywordPosition = r.KeywordPosition, KeywordEnd = r.KeywordEnd,
+            Examples = string.IsNullOrEmpty(r.Example) ? new() : new() { r.Example }
         };
 
         private static System.Collections.Generic.List<string> Split(string? s) =>
@@ -313,8 +316,19 @@ namespace Dateiumbenenner
             foreach (var r in GridDocTypes.SelectedItems.OfType<DocTypeRow>().ToList()) _docTypes.Remove(r);
         }
 
-        private void GridRules_CellEditEnding(object? sender, DataGridCellEditEndingEventArgs e) =>
+        private void GridRules_CellEditEnding(object? sender, DataGridCellEditEndingEventArgs e)
+        {
+            // Art auf „Merkmale“ gestellt: die nur dafür geltenden Spalten einblenden
+            if (e.Column == ColKind && e.EditingElement is System.Windows.Controls.ComboBox { SelectedItem: NumberRuleKind.Merkmale })
+                ChkFeatureColumns.IsChecked = true;
             Dispatcher.BeginInvoke(new Action(() => { UpdateTest(); UpdateDateTest(); }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        private void ChkFeatureColumns_Changed(object sender, RoutedEventArgs e)
+        {
+            var v = ChkFeatureColumns.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var c in new DataGridColumn[] { ColMinLen, ColMaxLen, ColDigits, ColLetters, ColSpace, ColSymbols }) c.Visibility = v;
+        }
 
         private void Test_Changed(object sender, TextChangedEventArgs e) { UpdateTest(); UpdateDateTest(); }
 
@@ -494,6 +508,9 @@ namespace Dateiumbenenner
             {
                 r.Company = string.IsNullOrWhiteSpace(r.Company) ? "*" : r.Company.Trim();
                 r.DocType = string.IsNullOrWhiteSpace(r.DocType) ? "*" : r.DocType.Trim();
+                r.Keyword = string.IsNullOrWhiteSpace(r.Keyword) ? null : r.Keyword.Trim();
+                r.KeywordEnd = string.IsNullOrWhiteSpace(r.KeywordEnd) ? null : r.KeywordEnd.Trim();
+                r.Prefix = string.IsNullOrWhiteSpace(r.Prefix) ? null : r.Prefix.Trim();
                 return r;
             }));
             AmountRuleStore.Save(_amountRules.Select(r =>

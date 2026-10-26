@@ -26,6 +26,30 @@ using WpfTextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 // Gemeinsame Hilfen der „Übertragen“-Dialoge (Hauptprogramm und INI-Generator binden diese Datei jeweils selbst ein).
 namespace Dateiumbenenner
 {
+    /// <summary>Gemeinsame Filter-Einstellung der Übertragen-Dialoge (sitzungsweit gemerkt).</summary>
+    internal static class TransferSearch
+    {
+        /// <summary>Filter durchsucht zusätzlich den Belegtext.</summary>
+        public static bool InText { get; set; } = true;
+
+        public static WpfCheckBox CreateTextOption(Action changed)
+        {
+            var c = new WpfCheckBox
+            {
+                Content = "auch im Belegtext suchen", IsChecked = InText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
+                ToolTip = "Aus: nur Firmennamen (aktuell, erkannt und früher erkannt), Dateiname, Belegart, Nummer usw. durchsuchen –\n"
+                    + "z. B. findet „0,78 KG“ dann nur Belege, die einmal so benannt waren, statt aller Belege mit einem Gewicht im Text."
+            };
+            c.Click += (_, _) => { InText = c.IsChecked == true; changed(); };
+            return c;
+        }
+
+        /// <summary>Alle Suchwörter im Schlüssel bzw. – wenn eingeschaltet – im Belegtext.</summary>
+        public static bool Matches(string[] words, string key, string? fullText)
+            => words.All(w => key.Contains(w, StringComparison.OrdinalIgnoreCase))
+                || InText && fullText != null && words.All(w => fullText.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>Hilfen für die Übertragen-Dialoge: Ankreuzen per Pfeiltasten + Leertaste.</summary>
     internal static class ListKeyboard
     {

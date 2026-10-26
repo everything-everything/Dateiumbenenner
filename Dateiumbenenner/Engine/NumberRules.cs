@@ -44,6 +44,50 @@ namespace Dateiumbenenner.Engine
         public string? KeywordEnd { get; set; }
         /// <summary>Bisher erkannte Nummern zur Auswahl (nur Dialog).</summary>
         [JsonIgnore] public List<string> Examples { get; set; } = new();
+
+        // Dialog-Sicht auf Keyword/KeywordEnd/KeywordPosition: Begriff vor bzw. nach der Nummer
+        private bool _eitherShownAfter;
+        private bool _eitherPending;
+
+        /// <summary>Begriff, der vor der Nummer steht (Dialog).</summary>
+        [JsonIgnore]
+        public string? KeywordBefore
+        {
+            get => KeywordPosition == KeywordPosition.HinterNummer || (KeywordPosition == KeywordPosition.Beliebig && _eitherShownAfter) ? null : Keyword;
+            set => SetKeywords(value, KeywordAfter, KeywordEitherSide);
+        }
+
+        /// <summary>Begriff, der hinter der Nummer steht (Dialog).</summary>
+        [JsonIgnore]
+        public string? KeywordAfter
+        {
+            get => KeywordPosition switch
+            {
+                KeywordPosition.HinterNummer => Keyword,
+                KeywordPosition.Umschlossen => KeywordEnd,
+                KeywordPosition.Beliebig when _eitherShownAfter => Keyword,
+                _ => null
+            };
+            set => SetKeywords(KeywordBefore, value, KeywordEitherSide);
+        }
+
+        /// <summary>Ein einzelner Begriff darf vor oder hinter der Nummer stehen (Dialog).</summary>
+        [JsonIgnore]
+        public bool KeywordEitherSide
+        {
+            get => string.IsNullOrWhiteSpace(Keyword) ? _eitherPending : KeywordPosition == KeywordPosition.Beliebig;
+            set { _eitherPending = value; SetKeywords(KeywordBefore, KeywordAfter, value); }
+        }
+
+        private void SetKeywords(string? before, string? after, bool eitherSide)
+        {
+            bool b = !string.IsNullOrWhiteSpace(before), a = !string.IsNullOrWhiteSpace(after);
+            _eitherShownAfter = false;
+            if (b && a) { Keyword = before; KeywordEnd = after; KeywordPosition = KeywordPosition.Umschlossen; }
+            else if (b) { Keyword = before; KeywordEnd = null; KeywordPosition = eitherSide ? KeywordPosition.Beliebig : KeywordPosition.VorNummer; }
+            else if (a) { Keyword = after; KeywordEnd = null; KeywordPosition = eitherSide ? KeywordPosition.Beliebig : KeywordPosition.HinterNummer; _eitherShownAfter = eitherSide; }
+            else { Keyword = null; KeywordEnd = null; KeywordPosition = KeywordPosition.Beliebig; }
+        }
     }
 
     public static class NumberRuleStore

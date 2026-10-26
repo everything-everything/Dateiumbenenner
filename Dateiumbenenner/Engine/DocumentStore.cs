@@ -119,6 +119,8 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
             public bool DateManuallySet { get; set; }
             public bool DocTypeManuallySet { get; set; }
             public bool CompanyConfirmed { get; set; }
+            /// <summary>Früher zugewiesene Firmennamen (neueste zuerst).</summary>
+            public List<string> PreviousCompanies { get; set; } = new();
             /// <summary>Dateinamen-Aufbau der Datei (Trennzeichen, Segment, Einfügepositionen), z. B. aus einer übernommenen Vorlage.</summary>
             public Dateiumbenenner.Engine.DocTemplate? Layout { get; set; }
             /// <summary>Vorlage, deren Übernahme für diese Datei abgelehnt wurde (nicht erneut fragen).</summary>

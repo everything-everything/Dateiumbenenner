@@ -27,6 +27,16 @@
             <Setter Property="Margin" Value="0,6,0,0"/>
             <Setter Property="DockPanel.Dock" Value="Bottom"/>
         </Style>
+        <!-- Spalten nur für Art „Merkmale“: bei „Maske“ ausgegraut und gesperrt (die Maske legt das bereits fest) -->
+        <Style x:Key="FeatureCell" TargetType="DataGridCell">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="Maske">
+                    <Setter Property="IsEnabled" Value="False"/>
+                    <Setter Property="Background" Value="#FFF0F0F0"/>
+                    <Setter Property="ToolTip" Value="Gilt nur f&#252;r Art &#8222;Merkmale&#8220; &#8211; bei &#8222;Maske&#8220; legt die Maske das fest."/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
     <DockPanel Margin="10">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
@@ -64,7 +74,7 @@
                 <DockPanel Margin="5">
                     <Border Style="{StaticResource HintBox}">
                         <TextBlock Style="{StaticResource HintText}"
-                               Text="Maske: $ = Ziffer, ? = Buchstabe, # = Ziffer oder Buchstabe, * = beliebiges Zeichen, Leerzeichen = Leerzeichen, sonst w&#246;rtlich (z. B. RE-$$$$$$ oder ???$$$$ $$$?). Merkmale: ungef&#228;hre L&#228;nge und erlaubte Zeichen. Firma/Belegart * = alle. H&#246;here Priorit&#228;t gewinnt; Abweichungen (l&#228;nger/k&#252;rzer) werden schw&#228;cher bewertet."/>
+                               Text="Maske: $ = Ziffer, ? = Buchstabe, # = Ziffer oder Buchstabe, * = beliebiges Zeichen, Leerzeichen = Leerzeichen, sonst w&#246;rtlich (z. B. RE-$$$$$$ oder ???$$$$ $$$?). Begriff vor/nach Nummer: Text, der direkt vor bzw. hinter der Nummer steht &#8211; Nummern an dieser Stelle werden bevorzugt (beide eingetragen = Nummer steht dazwischen). Art &#8222;Merkmale&#8220; statt Maske: nur ungef&#228;hre L&#228;nge und erlaubte Zeichen (Spalten unten einblendbar). Firma/Belegart * = alle. H&#246;here Priorit&#228;t gewinnt; Abweichungen (l&#228;nger/k&#252;rzer) werden schw&#228;cher bewertet. Spalten-&#220;berschriften zeigen beim Darauf-Zeigen eine Erkl&#228;rung."/>
                     </Border>
                     <Border Style="{StaticResource TestBox}">
                         <StackPanel Orientation="Horizontal">
@@ -78,6 +88,9 @@
                         <Button Content="Vorschl&#228;ge f&#252;r Firma" Style="{StaticResource BarButton}" Click="BtnSuggest_Click" ToolTip="Je Belegart eine Regel f&#252;r die oben eingetragene Firma anlegen (Maske aus bisher erkannten Nummern)"/>
                         <Button Content="Markierte l&#246;schen" Style="{StaticResource BarButton}" Click="BtnDeleteRule_Click"/>
                         <Button Content="Gelernte Regeln l&#246;schen" Style="{StaticResource BarButton}" Click="BtnDeleteLearned_Click"/>
+                        <CheckBox x:Name="ChkFeatureColumns" Content="Spalten f&#252;r Art &#8222;Merkmale&#8220; anzeigen" VerticalAlignment="Center" Margin="8,0,0,0"
+                                  Checked="ChkFeatureColumns_Changed" Unchecked="ChkFeatureColumns_Changed"
+                                  ToolTip="L&#228;nge, Ziffern, Buchstaben, Leerzeichen, Sonderzeichen &#8211; nur n&#246;tig, wenn eine Regel statt einer Maske ungef&#228;hre Merkmale verwendet"/>
                     </StackPanel>
                     <DataGrid x:Name="GridRules" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column" CellEditEnding="GridRules_CellEditEnding">
                         <DataGrid.Columns>
@@ -94,17 +107,61 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Maske" Binding="{Binding Mask, UpdateSourceTrigger=PropertyChanged}" Width="120" FontFamily="Consolas"/>
-                            <DataGridTextColumn Header="Begriff (bevorzugt)" Binding="{Binding Keyword, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
-                            <DataGridComboBoxColumn x:Name="ColKeywordPos" Header="Lage Begriff" SelectedItemBinding="{Binding KeywordPosition}" Width="100"/>
-                            <DataGridTextColumn Header="Begriff Ende" Binding="{Binding KeywordEnd, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
-                            <DataGridTextColumn Header="L&#228;nge min" Binding="{Binding MinLength, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="65"/>
-                            <DataGridTextColumn Header="L&#228;nge max" Binding="{Binding MaxLength, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="65"/>
-                            <DataGridCheckBoxColumn Header="Ziffern" Binding="{Binding AllowDigits, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
-                            <DataGridCheckBoxColumn Header="Buchst." Binding="{Binding AllowLetters, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
-                            <DataGridCheckBoxColumn Header="Leerz." Binding="{Binding AllowSpace, UpdateSourceTrigger=PropertyChanged}" Width="50"/>
-                            <DataGridCheckBoxColumn Header="Zeichen" Binding="{Binding AllowSymbols, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
-                            <DataGridTextColumn Header="Pr&#228;fix" Binding="{Binding Prefix, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
-                            <DataGridCheckBoxColumn Header="Gelernt" Binding="{Binding Learned}" Width="55"/>
+                            <DataGridTextColumn Binding="{Binding KeywordBefore}" Width="120">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="Begriff (vor Nummer)" ToolTip="Begriff, der direkt vor der Nummer steht (gleiche Zeile oder Zeile dar&#252;ber), z. B. &#8222;Rechnung Nr.&#8220;. Nummern an dieser Stelle werden bevorzugt."/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Binding="{Binding KeywordAfter}" Width="120">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="Begriff (nach Nummer)" ToolTip="Begriff, der direkt hinter der Nummer steht. Sind beide Begriffe eingetragen, muss die Nummer zwischen ihnen stehen."/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                            <DataGridCheckBoxColumn Binding="{Binding KeywordEitherSide, UpdateSourceTrigger=PropertyChanged}" Width="70">
+                                <DataGridCheckBoxColumn.Header>
+                                    <TextBlock Text="Seite egal" ToolTip="Nur ein Begriff eingetragen: er darf vor ODER hinter der Nummer stehen."/>
+                                </DataGridCheckBoxColumn.Header>
+                            </DataGridCheckBoxColumn>
+                            <DataGridTextColumn x:Name="ColMinLen" Binding="{Binding MinLength, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="65" CellStyle="{StaticResource FeatureCell}">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="L&#228;nge min" ToolTip="Nur Art &#8222;Merkmale&#8220;: Mindestl&#228;nge der Nummer (k&#252;rzere werden schw&#228;cher bewertet). Bei &#8222;Maske&#8220; ergibt sich die L&#228;nge aus der Maske."/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn x:Name="ColMaxLen" Binding="{Binding MaxLength, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Width="65" CellStyle="{StaticResource FeatureCell}">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="L&#228;nge max" ToolTip="Nur Art &#8222;Merkmale&#8220;: H&#246;chstl&#228;nge der Nummer (l&#228;ngere werden schw&#228;cher bewertet)."/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                            <DataGridCheckBoxColumn x:Name="ColDigits" Binding="{Binding AllowDigits, UpdateSourceTrigger=PropertyChanged}" Width="55" CellStyle="{StaticResource FeatureCell}">
+                                <DataGridCheckBoxColumn.Header>
+                                    <TextBlock Text="Ziffern" ToolTip="Nur Art &#8222;Merkmale&#8220;: Nummer darf Ziffern 0&#8211;9 enthalten (bei &#8222;Maske&#8220; steht daf&#252;r $)."/>
+                                </DataGridCheckBoxColumn.Header>
+                            </DataGridCheckBoxColumn>
+                            <DataGridCheckBoxColumn x:Name="ColLetters" Binding="{Binding AllowLetters, UpdateSourceTrigger=PropertyChanged}" Width="75" CellStyle="{StaticResource FeatureCell}">
+                                <DataGridCheckBoxColumn.Header>
+                                    <TextBlock Text="Buchstaben" ToolTip="Nur Art &#8222;Merkmale&#8220;: Nummer darf Buchstaben enthalten (bei &#8222;Maske&#8220; steht daf&#252;r ?)."/>
+                                </DataGridCheckBoxColumn.Header>
+                            </DataGridCheckBoxColumn>
+                            <DataGridCheckBoxColumn x:Name="ColSpace" Binding="{Binding AllowSpace, UpdateSourceTrigger=PropertyChanged}" Width="80" CellStyle="{StaticResource FeatureCell}">
+                                <DataGridCheckBoxColumn.Header>
+                                    <TextBlock Text="Leerzeichen" ToolTip="Nur Art &#8222;Merkmale&#8220;: Nummer darf Leerzeichen enthalten (z. B. &#8222;123 456&#8220;)."/>
+                                </DataGridCheckBoxColumn.Header>
+                            </DataGridCheckBoxColumn>
+                            <DataGridCheckBoxColumn x:Name="ColSymbols" Binding="{Binding AllowSymbols, UpdateSourceTrigger=PropertyChanged}" Width="90" CellStyle="{StaticResource FeatureCell}">
+                                <DataGridCheckBoxColumn.Header>
+                                    <TextBlock Text="Sonderzeichen" ToolTip="Nur Art &#8222;Merkmale&#8220;: Nummer darf Zeichen wie - / . enthalten (z. B. &#8222;RE-2024/17&#8220;)."/>
+                                </DataGridCheckBoxColumn.Header>
+                            </DataGridCheckBoxColumn>
+                            <DataGridTextColumn Binding="{Binding Prefix, UpdateSourceTrigger=PropertyChanged}" Width="80">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="Beginnt mit" ToolTip="Pr&#228;fix (optional): Nummern, die nicht so anfangen, werden schw&#228;cher bewertet (z. B. &#8222;RE&#8220; f&#252;r RE-12345). Bei einer Maske meist &#252;berfl&#252;ssig, weil feste Zeichen schon in der Maske stehen."/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                            <DataGridCheckBoxColumn Binding="{Binding Learned}" Width="60" IsReadOnly="True">
+                                <DataGridCheckBoxColumn.Header>
+                                    <TextBlock Text="Gelernt" ToolTip="Automatisch angelegt, als eine Nummer von Hand ausgew&#228;hlt wurde (niedrige Priorit&#228;t). Mit &#8222;Gelernte Regeln l&#246;schen&#8220; entfernbar; eigene Regeln haben Vorrang."/>
+                                </DataGridCheckBoxColumn.Header>
+                            </DataGridCheckBoxColumn>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
