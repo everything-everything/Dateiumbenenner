@@ -146,22 +146,29 @@ namespace Dateiumbenenner.Engine
             var field = new Field();
             if (string.IsNullOrEmpty(text)) return field;
             var lines = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
-            var hit = new LineBlock(lines).Mark(DateRegex);
+            var block = new LineBlock(lines);
+            var hit = block.Mark(DateRegex);
+            foreach (var rx in DateRuleStore.MonthNameRegexes) block.Mark(rx, hit);
 
             for (int i = 0; i < lines.Length; i++)
             {
                 if (!hit[i]) continue;
-                foreach (Match m in DateRegex.Matches(lines[i]))
+                void Add(int index, string date, bool alt = false)
                 {
-                    if (!TryNormalize(m, out var date)) continue;
                     // Nächstgelegene Bezeichnung links vom Datum (höchstens 40 Zeichen Abstand)
-                    var left = lines[i].Substring(0, m.Index);
+                    var left = lines[i].Substring(0, index);
                     var labels = DateLabel.Matches(left).Cast<Match>().ToList();
-                    var label = labels.LastOrDefault(l => m.Index - (l.Index + l.Length) <= 40);
+                    var label = labels.LastOrDefault(l => index - (l.Index + l.Length) <= 40);
                     double score = label != null ? DateLabelWeight(label.Groups["label"].Value) : 0.8;
                     if (i < 30) score += 0.3;
+                    // Zweite Lesart einer mehrdeutigen Kurzform (25Oct23): nur als weiterer Vorschlag
+                    if (alt) { score = Math.Max(0, score - 0.6); field.Add(date, score, (label?.Value ?? "Datumsmuster") + " (andere Lesart)"); return; }
                     field.Add(date, score, label?.Value ?? "Datumsmuster");
                 }
+                foreach (Match m in DateRegex.Matches(lines[i]))
+                    if (TryNormalize(m, out var date)) Add(m.Index, date);
+                // Monatsnamen: 23. Okt. 2025, 23Okt25, 25-Dez-23, 2025-MAY-10
+                foreach (var h in DateRuleStore.FindDates(lines[i], DateFormatKind.Monatsname)) Add(h.Index, h.Date, h.Alt);
             }
             return field;
         }

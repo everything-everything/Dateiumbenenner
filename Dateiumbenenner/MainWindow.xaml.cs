@@ -254,6 +254,8 @@ namespace Dateiumbenenner
             ListViewSearch.Register();
             InitializeComponent();
             Title += $" – Profil: {ProfileManager.ActiveProfile}";
+            Dateiumbenenner.Engine.NumberFixStore.TextFilesChanged += OnTextFilesChanged;
+            Closed += (_, _) => Dateiumbenenner.Engine.NumberFixStore.TextFilesChanged -= OnTextFilesChanged;
             if (LvFiles != null)
             {
                 LvFiles.ItemsSource = _items;
@@ -584,6 +586,8 @@ namespace Dateiumbenenner
         }
 
         private FileSystemWatcher? _watcher; private System.Windows.Threading.DispatcherTimer? _watchTimer;
+        /// <summary>Vom Watcher gemeldete neu geschriebene Dateien (z. B. ersetzte PDF/TXT mit besserer OCR).</summary>
+        private readonly HashSet<string> _changedFiles=new(StringComparer.OrdinalIgnoreCase);
         private void ChkWatchFolder_Changed(object sender,RoutedEventArgs e)=>SetupWatcher();
         private void SetupWatcher(){
             _watcher?.Dispose(); _watcher=null;
@@ -591,7 +595,7 @@ namespace Dateiumbenenner
             if(ChkWatchFolder?.IsChecked!=true || string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return;
             try{
                 _watcher=new FileSystemWatcher(folder){ IncludeSubdirectories=false, InternalBufferSize=64*1024, NotifyFilter=NotifyFilters.FileName|NotifyFilters.LastWrite|NotifyFilters.Size };
-                FileSystemEventHandler h=(s,ev)=>OnFolderChanged(); _watcher.Created+=h; _watcher.Deleted+=h; _watcher.Changed+=h; _watcher.Renamed+=(s,ev)=>OnFolderChanged(); _watcher.Error+=(s,ev)=>OnFolderChanged();
+                FileSystemEventHandler h=(s,ev)=>OnFolderChanged(); FileSystemEventHandler w=(s,ev)=>{ lock(_changedFiles) _changedFiles.Add(ev.FullPath); OnFolderChanged(); }; _watcher.Created+=w; _watcher.Deleted+=h; _watcher.Changed+=w; _watcher.Renamed+=(s,ev)=>OnFolderChanged(); _watcher.Error+=(s,ev)=>OnFolderChanged();
                 _watcher.EnableRaisingEvents=true;
             }catch(Exception ex){ TxtStatus.Text="Ordnerüberwachung nicht möglich: "+ex.Message; }
         }
@@ -604,8 +608,13 @@ namespace Dateiumbenenner
             var folder=TxtFolder.Text; if(string.IsNullOrEmpty(folder)||!Directory.Exists(folder)) return;
             var exts=AMode? new[]{".pdf"} : new[]{".pdf",".txt",".csv"};
             var known=_items.Select(i=>i.FilePath).ToList();
+            string[] changed; lock(_changedFiles){ changed=_changedFiles.ToArray(); _changedFiles.Clear(); }
             var (gone,added)=await Task.Run(()=>{ var now=new HashSet<string>(Directory.EnumerateFiles(folder).Where(f=>exts.Contains(Path.GetExtension(f).ToLowerInvariant())),StringComparer.OrdinalIgnoreCase); var k=new HashSet<string>(known,StringComparer.OrdinalIgnoreCase); return (known.Where(p=>!now.Contains(p)).ToHashSet(StringComparer.OrdinalIgnoreCase), now.Count(p=>!k.Contains(p))); });
             if(added>0){ TxtStatus.Text=$"{added:N0} neue Datei(en) erkannt – Liste wird aktualisiert..."; await RefreshFolderAsync(); return; }
+            // Ersetzte Belege bzw. (A-Modus) ersetzte TXT: neu laden, unveränderte Belege kommen direkt aus der Datenbank
+            var knownSet=new HashSet<string>(known,StringComparer.OrdinalIgnoreCase);
+            int modified=changed.Count(p=>File.Exists(p) && (knownSet.Contains(p) || AMode && Path.GetExtension(p).Equals(".txt",StringComparison.OrdinalIgnoreCase) && knownSet.Contains(Path.ChangeExtension(p,".pdf"))));
+            if(modified>0){ TxtStatus.Text=$"{modified:N0} geänderte Datei(en) erkannt – Liste wird aktualisiert..."; await RefreshFolderAsync(); return; }
             if(gone.Count==0) return;
             RemoveItems(gone);
             TxtStatus.Text=$"{gone.Count:N0} Datei(en) aus dem Ordner entfernt/verschoben – Liste angepasst ({_items.Count:N0} Dateien).";
@@ -700,7 +709,15 @@ namespace Dateiumbenenner
         }
 
         private string StoreSettingsKey(string path) =>
-            $"{AMode}|{(_enableOcrCorrection ? "True|" + OcrTextCorrector.AlgorithmTag : "False")}|{Dateiumbenenner.Engine.TextReflow.Width}|{Dateiumbenenner.Engine.TextReflow.GetFileWidth(path)}";
+            $"{AMode}|{(_enableOcrCorrection ? "True|" + OcrTextCorrector.AlgorithmTag : "False")}|{Dateiumbenenner.Engine.TextReflow.Width}|{Dateiumbenenner.Engine.TextReflow.GetFileWidth(path)}{TextSourceKey(path)}";
+
+        /// <summary>A-Modus: Der Text stammt aus der gleichnamigen TXT – deren Inhalt gehört zum Schlüssel, damit eine ersetzte TXT neu ausgewertet wird.</summary>
+        private string TextSourceKey(string path)
+        {
+            if(!AMode) return "";
+            try{ var txt=Path.ChangeExtension(path,".txt"); return File.Exists(txt) ? "|txt:"+DocumentStore.Stamp(txt, out _, out _) : ""; }
+            catch{ return ""; }
+        }
 
         private void ApplyManualValues(DocumentMetadata m, DocumentStore.Record r)
         {
@@ -723,6 +740,8 @@ namespace Dateiumbenenner
             if (m.NumberManuallySet && !FitsContent(m.SelectedNumber, m.NumberCandidates, text)) { m.NumberManuallySet = false; m.SelectedNumber = null; reextract = true; }
             if (m.DateManuallySet && !FitsContent(m.SelectedDate, m.DateCandidates, text)) { m.DateManuallySet = false; m.SelectedDate = null; m.Date = null; reextract = true; }
             if (m.DocTypeManuallySet && !sameDoc) { m.DocTypeManuallySet = false; m.DocumentType = null; reextract = true; }
+            // Frühere Firmennamen gehören zum ersetzten Inhalt
+            if (!sameDoc) m.PreviousCompanies.Clear();
             if (reextract && !string.IsNullOrEmpty(m.FullText)) { m.NumberCandidates.Clear(); m.DateCandidates.Clear(); ExtractCandidates(m); }
             return r.CompanyConfirmed && !string.IsNullOrWhiteSpace(r.CompanyName) && (sameDoc || CompanyMatcher.AppearsInText(r.CompanyName!, text));
         }
@@ -1492,6 +1511,7 @@ namespace Dateiumbenenner
             var docNumHit=block.Mark(KeyDocNum);
             var dateHit=new bool[lines.Length];
             foreach(var rx in new[]{_dateNumeric1,_dateNumeric2,_dateSpelledDayMonthYear,_dateSpelledMonthYear}) block.Mark(rx,dateHit);
+            foreach(var rx in Dateiumbenenner.Engine.DateRuleStore.MonthNameRegexes) block.Mark(rx,dateHit);
             for(int i=0;i<lines.Length;i++)
             { 
                 if(invoiceHit[i]) ScanForValuesWithPosition(lines,i,KeyInvoice,invoiceNumbers); 
@@ -1688,6 +1708,9 @@ namespace Dateiumbenenner
             {
                 if(dateHit!=null && !dateHit[line]) return;
                 var text=lines[line]; int start=offsets[line];
+                // Monatsnamen auch kompakt/OCR-tolerant (23Okt25, 25-Dez-23, 2025-MAY-10, 0kt)
+                foreach(var h in Dateiumbenenner.Engine.DateRuleStore.FindDates(text,Dateiumbenenner.Engine.DateFormatKind.Monatsname))
+                    if(!results.Any(x=>x.Item1==h.Date)) results.Add((h.Date,start+h.Index));
                 foreach(var rx in dateRegexes)
                     foreach(Match m in rx.Matches(text))
                     {
@@ -2124,6 +2147,63 @@ namespace Dateiumbenenner
 
         private void MenuRecalcNumbers_Click(object sender, RoutedEventArgs e) => RecalculateNumbers();
 
+        /// <summary>TXT-Datei eines Belegs: A-Modus-Quelle, die Datei selbst oder eine gleichnamige .txt.</summary>
+        private static string? TxtOf(DocumentMetadata m)
+        {
+            if (!string.IsNullOrEmpty(m.TextSourcePath)) return m.TextSourcePath;
+            if (string.IsNullOrEmpty(m.FilePath)) return null;
+            if (Path.GetExtension(m.FilePath).Equals(".txt", StringComparison.OrdinalIgnoreCase)) return m.FilePath;
+            var txt = Path.ChangeExtension(m.FilePath, ".txt");
+            return File.Exists(txt) ? txt : null;
+        }
+
+        private void MenuNumberFix_Click(object sender, RoutedEventArgs e)
+        {
+            static NumberFixDoc? Doc(DocumentMetadata m) => TxtOf(m) is { } t ? new NumberFixDoc(m.FileName, t) : null;
+            var all = _items.Select(Doc).OfType<NumberFixDoc>().ToList();
+            if (all.Count == 0)
+            {
+                MessageBoxWpf.Show(this, "In der Liste gibt es keine Belege mit TXT-Datei.\n\nDie Korrektur ändert die Textdateien (z. B. im A-Modus die gleichnamige .txt). Text, der direkt aus einer PDF gelesen wird, kann so nicht korrigiert werden.", "TXT-Nummernkorrektur");
+                return;
+            }
+            var selected = LvFiles.SelectedItems.OfType<DocumentMetadata>().Select(Doc).OfType<NumberFixDoc>().ToList();
+            string? example = null;
+            try { example = TxtPreviewRich?.Selection?.Text?.Trim(); } catch { }
+            if (string.IsNullOrEmpty(example) || example.Length > 40 || example.Contains('\n')) example = _currentMeta?.SelectedNumber;
+            new NumberFixWindow(all, selected, example) { Owner = this }.ShowDialog();
+        }
+
+        private int _txtReloadRun;
+        /// <summary>Nach einer TXT-Korrektur die betroffenen Belege neu einlesen und auswerten.</summary>
+        private async void OnTextFilesChanged(IReadOnlyCollection<string> files)
+        {
+            if (!Dispatcher.CheckAccess()) { _ = Dispatcher.InvokeAsync(() => OnTextFilesChanged(files)); return; }
+            int run = ++_txtReloadRun;
+            var set = new HashSet<string>(files, StringComparer.OrdinalIgnoreCase);
+            var affected = _items.Where(m => m.Loaded && TxtOf(m) is { } t && set.Contains(t)
+                && (!string.IsNullOrEmpty(m.TextSourcePath) || Path.GetExtension(m.FilePath).Equals(".txt", StringComparison.OrdinalIgnoreCase))).ToList();
+            if (affected.Count == 0) return;
+            for (int i = 0; i < affected.Count; i++)
+            {
+                if (run != _txtReloadRun) return;
+                var m = affected[i];
+                m.OriginalFullText = null;
+                await LoadMetadataAsync(m);
+                AutoAssignNumbers(m);
+                ScheduleStoreSave(m);
+                TxtStatus.Text = $"Korrigierte TXT-Dateien werden neu ausgewertet: {i + 1:N0} / {affected.Count:N0}";
+            }
+            LvFiles.Items.Refresh();
+            if (_currentMeta != null && affected.Contains(_currentMeta))
+            {
+                _isPopulatingSelectors = true;
+                try { PopulateSelectors(_currentMeta); ShowDetails(_currentMeta); RefreshNewNamePreview(_currentMeta); }
+                finally { _isPopulatingSelectors = false; }
+                _ = UpdatePdfPreviewAsync(_currentMeta);
+            }
+            UpdateStandardStatus();
+        }
+
         /// <summary>Belegart und Belegnummer aller geladenen Dateien neu ermitteln (manuell gesetzte Werte bleiben).</summary>
         private void RecalculateNumbers()
         {
@@ -2303,23 +2383,98 @@ namespace Dateiumbenenner
             return boxes.Where(b => b.box.IsChecked == true).Select(b => b.group).ToList();
         }
 
-        private void BtnApplyTemplate_Click(object sender, RoutedEventArgs e)
+        private static Dateiumbenenner.TransferDoc TransferDocOf(DocumentMetadata m, Func<DocumentMetadata, string> layout) => new()
+        {
+            Item = m, FilePath = m.FilePath, Company = m.CompanyName, Detected = m.DetectedCompany ?? m.CompanyCandidates.FirstOrDefault(),
+            DocType = m.DocumentType, Number = m.SelectedNumber, Date = m.SelectedDate, FullText = m.FullText, Previous = m.PreviousCompanies,
+            Values = new()
+            {
+                ["Layout"] = layout(m), ["Company"] = m.CompanyName, ["Address"] = FormatAddress(m), ["DocType"] = m.DocumentType
+            }
+        };
+
+        /// <summary>„Eigenschaften übertragen“: Dateinamen-Aufbau (Vorlage für Firma + Dokumenttyp), Firma, Adresse und Belegart des aktuellen
+        /// Dokuments – auch nachträglich – auf gleichartige Dokumente übertragen. Ziele werden im Dialog gruppiert gewählt (markierte sind angehakt).</summary>
+        private async void BtnApplyTemplate_Click(object sender, RoutedEventArgs e)
         {
             if (_currentMeta is not { Loaded: true } src) { MessageBoxWpf.Show("Bitte zuerst ein Dokument auswählen.", "Eigenschaften übertragen"); return; }
             SaveCurrentSettings(src);
-            if (string.IsNullOrWhiteSpace(src.CompanyName) || string.IsNullOrWhiteSpace(src.DocumentType))
-            { MessageBoxWpf.Show("Firma und Dokumenttyp müssen gesetzt sein.", "Eigenschaften übertragen"); return; }
+            var others = _items.Where(m => m != src).ToList();
+            if (others.Count == 0) { TxtStatus.Text = "Keine weiteren Dokumente zum Übertragen."; return; }
             var t = CaptureTemplate(src);
-            Dateiumbenenner.Engine.DocTemplateStore.Set(src.CompanyName!, src.DocumentType!, t);
-            var targets = LvFiles.SelectedItems.OfType<DocumentMetadata>().Where(m => m != src).ToList();
-            var same = _items.Where(m => m != src && !targets.Contains(m)
-                && string.Equals(m.CompanyName, src.CompanyName, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(m.DocumentType, src.DocumentType, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (same.Count > 0 && MessageBoxWpf.Show($"Vorlage für „{src.CompanyName} – {src.DocumentType}“ gespeichert.\n\nAuf {same.Count} weitere Dokument(e) mit gleicher Firma und gleichem Dokumenttyp übertragen?",
-                    "Eigenschaften übertragen", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-                targets.AddRange(same);
-            foreach (var m in targets) ApplyTemplate(m, t);
-            TxtStatus.Text = $"Vorlage „{src.CompanyName} – {src.DocumentType}“ gespeichert, auf {targets.Count} weitere Dokument(e) übertragen.";
+            var stored = Dateiumbenenner.Engine.DocTemplateStore.Get(src.CompanyName, src.DocumentType);
+            var layoutText = DescribeTemplate(t);
+            string LayoutOf(DocumentMetadata m) => m == src || TemplateMatches(m, t) ? layoutText : "abweichend";
+            bool companyChanged = !string.IsNullOrWhiteSpace(src.CompanyName) && !string.IsNullOrWhiteSpace(src.DetectedCompany)
+                && !string.Equals(src.CompanyName.Trim(), src.DetectedCompany.Trim(), StringComparison.OrdinalIgnoreCase);
+            var props = new List<Dateiumbenenner.TransferProperty>
+            {
+                new() { Key = "Layout", Label = "Dateinamen-Aufbau", Value = layoutText, Changed = stored == null || !TemplateMatches(src, stored), Selected = true,
+                        ToolTip = "Trennzeichen, Segment und Einfügepositionen. Wird außerdem als Vorlage für Firma + Dokumenttyp gespeichert\n(neue Dokumente dieser Art erhalten sie automatisch bzw. nach Rückfrage)." },
+                new() { Key = "Company", Label = "Firma", Value = src.CompanyName, Changed = companyChanged, Selected = companyChanged },
+                new() { Key = "Address", Label = "Adresse", Value = FormatAddress(src), Changed = src.AddressManuallySet, Selected = src.AddressManuallySet || companyChanged,
+                        ToolTip = "Straße, PLZ und Ort der Quelle – auch leer. Ohne Haken wird die Adresse bei geänderter Firma neu ermittelt." },
+                new() { Key = "DocType", Label = "Belegart", Value = src.DocumentType, Changed = src.DocTypeManuallySet, Selected = src.DocTypeManuallySet },
+                new() { Key = "Rules", Label = "Danach Nummern- und Datumsregeln neu anwenden", IsOption = true, Selected = true,
+                        ToolTip = "Gelerntes Nummernformat, Nummern- und Datumsregeln nach Firma + Belegart des Ziels. Von Hand gesetzte Nummern und Daten bleiben." },
+                new() { Key = "Learn", Label = "Firma lernen", IsOption = true, Selected = true,
+                        ToolTip = "Nur Dokumente, in deren Text die Firma steht: Merkmale wie IBAN oder USt-ID werden der Firma zugeordnet." },
+            };
+            var sourceCompanies = new[] { src.CompanyName, src.DetectedCompany, src.CompanyCandidates.FirstOrDefault() }.Concat(src.PreviousCompanies);
+            var marked = LvFiles.SelectedItems.OfType<DocumentMetadata>().Where(m => m != src).Cast<object>().ToList();
+            var dlg = new Dateiumbenenner.PropertyTransferDialog(TransferDocOf(src, LayoutOf), sourceCompanies, others.Select(m => TransferDocOf(m, LayoutOf)), props,
+                (a, b) => !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) && SameCompany(a, b), marked) { Owner = this };
+            if (dlg.ShowDialog() != true) return;
+            var targets = dlg.SelectedItems.OfType<DocumentMetadata>().ToList();
+            if (targets.Count == 0) return;
+
+            bool layout = dlg.Has("Layout"), doCompany = dlg.Has("Company") && !string.IsNullOrWhiteSpace(src.CompanyName), doAddress = dlg.Has("Address"),
+                 doType = dlg.Has("DocType"), rules = dlg.Has("Rules"), learn = dlg.Has("Learn");
+            var name = src.CompanyName?.Trim();
+            bool saved = layout && !string.IsNullOrWhiteSpace(src.CompanyName) && !string.IsNullOrWhiteSpace(src.DocumentType);
+            if (saved) Dateiumbenenner.Engine.DocTemplateStore.Set(src.CompanyName!, src.DocumentType!, t);
+            if (doAddress) await EnsureAddressAsync(src);
+            int learned = 0;
+            _propagatingCompany = true;
+            try
+            {
+                foreach (var m in targets)
+                {
+                    if (doCompany && !string.Equals(m.CompanyName?.Trim(), name, StringComparison.Ordinal))
+                    {
+                        if (!m.CompanyCandidates.Contains(name!)) m.CompanyCandidates.Add(name!);
+                        m.CompanyName = name;
+                        _confirmedCompany.Add(m);
+                    }
+                    if (doAddress) TransferAddress(src, m);
+                    if (doType && !string.IsNullOrWhiteSpace(src.DocumentType)) { m.DocumentType = src.DocumentType; m.DocTypeManuallySet = true; }
+                    if (rules && m.Loaded && !string.IsNullOrEmpty(m.FullText))
+                    {
+                        ApplyNumberField(m, Engine.ExtractNumber(m.FullText, m.FilePath), m.DocumentType);
+                        ReapplyDateRules(m);
+                        AutoAssignNumbers(m);
+                    }
+                    if (layout) ApplyTemplate(m, t);
+                    if (doCompany && learn && m.FullText?.Contains(name!, StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        Engine.ConfirmSender(m.FullText, name!);
+                        learned++;
+                    }
+                    RefreshNewNamePreview(m);
+                    ScheduleStoreSave(m);
+                }
+            }
+            finally { _propagatingCompany = false; }
+            LvFiles.Items.Refresh();
+            ShowDetails(src);
+            var what = new List<string>();
+            if (layout) what.Add("Dateinamen-Aufbau");
+            if (doCompany) what.Add("Firma");
+            if (doAddress) what.Add("Adresse");
+            if (doType) what.Add("Belegart");
+            TxtStatus.Text = (what.Count > 0 ? string.Join(", ", what) : "Regeln") + $" auf {targets.Count} Dokument(e) übertragen"
+                + (rules ? ", Regeln neu angewendet" : "") + (learned > 0 ? $", Firma aus {learned} Dokument(en) gelernt" : "")
+                + (saved ? $". Vorlage „{src.CompanyName} – {src.DocumentType}“ gespeichert." : ".");
         }
 
         private void BtnPrefixAction_Click(object sender, RoutedEventArgs e)

@@ -129,6 +129,9 @@ namespace Dateiumbenenner.Engine
                     foreach (var rx in new[] { DateRx, IsoDateRx, LongDateRx })
                         foreach (Match m in rx.Matches(text))
                             if (TryDate(m, out var d) && d == target) result.Add((m.Index, m.Length));
+                    var wanted = target.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+                    foreach (var h in DateRuleStore.FindDates(text, DateFormatKind.Monatsname))
+                        if (h.Date == wanted && !result.Any(r => r.Item1 < h.Index + h.Length && h.Index < r.Item1 + r.Item2)) result.Add((h.Index, h.Length));
                     result.Sort((a, b) => a.Item1.CompareTo(b.Item1));
                     break;
                 }

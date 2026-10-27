@@ -35,9 +35,17 @@ namespace Dateiumbenenner.Engine
         private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
 
         private static readonly Regex NumericRx = new(@"(?<!\d)(?<d>[0-3]?\d)\s?[./-]\s?(?<m>[01]?\d)\s?[./-]\s?(?<y>(?:19|20)?\d{2})(?!\d)", RegexOptions.Compiled);
-        private static readonly Regex MonthRx = new(@"(?<!\d)(?<d>[0-3]?\d)\.?\s*(?<mn>Jan(?:uar)?|January|Feb(?:ruar)?|February|M(?:ä|ae)rz|Mär|Mrz|March|Mar|Apr(?:il)?|Mai|May|Jun(?:i|e)?|Jul(?:i|y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Okt(?:ober)?|Oct(?:ober)?|Nov(?:ember)?|Dez(?:ember)?|Dec(?:ember)?)\.?\s*(?<y>(?:19|20)?\d{2})(?!\d)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        // Monatsnamen auch OCR-tolerant (0 statt O: 0kt, 0ct, N0v); Trennzeichen optional (23Okt25, 25-Dez-23, 23. Okt. 2025)
+        private const string MonthAlt = @"Jan(?:uar)?|January|Feb(?:ruar)?|February|M(?:ä|ae)rz|Mär|Mrz|March|Mar|Apr(?:il)?|Mai|May|Jun(?:i|e)?|Jul(?:i|y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|[O0]kt(?:[o0]ber)?|[O0]ct(?:[o0]ber)?|N[o0]v(?:ember)?|Dez(?:ember)?|Dec(?:ember)?";
+        private const string MonthSep = @"[ \t\u00A0]*[./-]?[ \t\u00A0]*";
+        private static readonly Regex MonthRx = new(@"(?<!\d)(?<d>[0-3]?\d)" + MonthSep + "(?<mn>" + MonthAlt + @")(?!\p{L})" + MonthSep + @"(?<y>(?:19|20)?\d{2})(?!\d)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        /// <summary>Jahr zuerst mit Monatsname, z. B. 2025-MAY-10.</summary>
+        private static readonly Regex YearMonthRx = new(@"(?<!\d)(?<y>(?:19|20)\d{2})" + MonthSep + "(?<mn>" + MonthAlt + @")(?!\p{L})" + MonthSep + @"(?<d>[0-3]?\d)(?!\d)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex YmdRx = new(@"(?<!\d)(?<y>(?:19|20)\d{2})[./-](?<m>[01]?\d)[./-](?<d>[0-3]?\d)(?!\d)", RegexOptions.Compiled);
         private static readonly Regex UsRx = new(@"(?<!\d)(?<m>0?[1-9]|1[0-2])/(?<d>0?[1-9]|[12]\d|3[01])/(?<y>(?:19|20)?\d{2})(?!\d)", RegexOptions.Compiled);
+
+        /// <summary>Muster für Daten mit Monatsnamen (zur Vorauswahl von Zeilen).</summary>
+        internal static readonly Regex[] MonthNameRegexes = { MonthRx, YearMonthRx };
 
         public static string FilePath => Path.Combine(Plugins.PluginManager.BaseDirectory, "date_rules.json");
 
@@ -110,34 +118,47 @@ namespace Dateiumbenenner.Engine
         public static DateFormatKind DetectFormat(string? raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return DateFormatKind.Beliebig;
-            if (MonthRx.IsMatch(raw)) return DateFormatKind.Monatsname;
+            if (MonthRx.IsMatch(raw) || YearMonthRx.IsMatch(raw)) return DateFormatKind.Monatsname;
             if (YmdRx.IsMatch(raw)) return DateFormatKind.JahrMonatTag;
             if (NumericRx.IsMatch(raw)) return DateFormatKind.Numerisch;
             if (UsRx.IsMatch(raw)) return DateFormatKind.US;
             return DateFormatKind.Beliebig;
         }
 
-        /// <summary>Alle Daten einer Zeile in der Schreibweise (Beliebig = alle bekannten), normalisiert auf TT.MM.JJJJ.</summary>
-        public static List<(int Index, int Length, string Raw, string Date)> FindDates(string line, DateFormatKind format = DateFormatKind.Beliebig, string? mask = null)
+        /// <summary>
+        /// Alle Daten einer Zeile in der Schreibweise (Beliebig = alle bekannten), normalisiert auf TT.MM.JJJJ.
+        /// Mehrdeutige Kurzformen (25Oct23 = 25.10.2023 oder 23.10.2025) liefern beide Lesarten an gleicher Position;
+        /// die zweite hat Alt = true (weiterer Vorschlag).
+        /// </summary>
+        public static List<(int Index, int Length, string Raw, string Date, bool Alt)> FindDates(string line, DateFormatKind format = DateFormatKind.Beliebig, string? mask = null)
         {
-            var list = new List<(int, int, string, string)>();
+            var list = new List<(int, int, string, string, bool)>();
             if (string.IsNullOrEmpty(line)) return list;
             void AddAll(Regex rx)
             {
                 foreach (Match m in rx.Matches(line))
-                    if (Normalize(m) is { } d && !list.Any(x => x.Item1 == m.Index)) list.Add((m.Index, m.Length, m.Value, d));
+                {
+                    if (Normalize(m) is not { } d || list.Any(x => x.Item1 == m.Index)) continue;
+                    var alt = YearFirstReading(m, d);
+                    // Englische Monatsnamen: Jahr zuerst (25Oct23 = 23.10.2025), die europäische Lesart als weiterer Vorschlag
+                    if (alt != null && IsEnglishMonth(m.Groups["mn"].Value)) (d, alt) = (alt, d);
+                    // Eine Lesart weit in der Zukunft (31Dec05 ≠ 05.12.2031) ist unwahrscheinlich
+                    if (alt != null && IsFarFuture(d) && !IsFarFuture(alt)) (d, alt) = (alt, d);
+                    list.Add((m.Index, m.Length, m.Value, d, false));
+                    if (alt != null) list.Add((m.Index, m.Length, m.Value, alt, true));
+                }
             }
             switch (format)
             {
                 case DateFormatKind.Numerisch: AddAll(NumericRx); break;
-                case DateFormatKind.Monatsname: AddAll(MonthRx); break;
+                case DateFormatKind.Monatsname: AddAll(MonthRx); AddAll(YearMonthRx); break;
                 case DateFormatKind.JahrMonatTag: AddAll(YmdRx); break;
                 case DateFormatKind.US: AddAll(UsRx); break;
                 case DateFormatKind.Frei:
                     foreach (var alt in (mask ?? "").Split('/').Where(a => a.Trim().Length > 0)) AddAll(MaskRegex(alt.Trim()));
                     break;
                 default:
-                    AddAll(MonthRx); AddAll(YmdRx); AddAll(NumericRx);
+                    AddAll(MonthRx); AddAll(YearMonthRx); AddAll(YmdRx); AddAll(NumericRx);
                     break;
             }
             return list.OrderBy(x => x.Item1).ToList();
@@ -171,19 +192,51 @@ namespace Dateiumbenenner.Engine
             new[] { "jul" }, new[] { "aug" }, new[] { "sep" }, new[] { "okt", "oct" }, new[] { "nov" }, new[] { "dez", "dec" }
         };
 
+        private static int MonthOf(string name)
+        {
+            var n = name.ToLowerInvariant().Replace('0', 'o');
+            return Array.FindIndex(MonthNames, a => a.Any(p => n.StartsWith(p, StringComparison.Ordinal))) + 1;
+        }
+
+        private static readonly HashSet<string> EnglishOnlyMonths = new(StringComparer.Ordinal) { "january", "february", "march", "mar", "may", "june", "july" };
+
+        private static bool IsEnglishMonth(string name)
+        {
+            var n = name.ToLowerInvariant().Replace('0', 'o');
+            return n.StartsWith("oct", StringComparison.Ordinal) || n.StartsWith("dec", StringComparison.Ordinal) || EnglishOnlyMonths.Contains(n);
+        }
+
+        private static bool IsFarFuture(string date) =>
+            DateTime.TryParseExact(date, "dd.MM.yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt) && dt > DateTime.Today.AddYears(1);
+
+        private static string? Format(int y, int mo, int d)
+        {
+            if (y < 100) y += 2000;
+            if (y < 1900 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > DateTime.DaysInMonth(y, mo)) return null;
+            return new DateTime(y, mo, d).ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+        }
+
         private static string? Normalize(Match m)
         {
             if (!int.TryParse(m.Groups["d"].Value, out var d) || !int.TryParse(m.Groups["y"].Value, out var y)) return null;
             int mo;
-            if (m.Groups["mn"].Success)
-            {
-                var n = m.Groups["mn"].Value.ToLowerInvariant();
-                mo = Array.FindIndex(MonthNames, a => a.Any(p => n.StartsWith(p, StringComparison.Ordinal))) + 1;
-            }
+            if (m.Groups["mn"].Success) mo = MonthOf(m.Groups["mn"].Value);
             else if (!int.TryParse(m.Groups["m"].Value, out mo)) return null;
-            if (y < 100) y += 2000;
-            if (y < 1900 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > DateTime.DaysInMonth(y, mo)) return null;
-            return new DateTime(y, mo, d).ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+            return Format(y, mo, d);
+        }
+
+        /// <summary>
+        /// Zweite Lesart einer Kurzform mit Monatsname und je zwei Ziffern (JJ-Mon-TT statt TT-Mon-JJ), z. B. 25Oct23 = 23.10.2025.
+        /// Nicht bei „23. Okt 25“ (Punkt = Tag) oder vierstelligem Jahr; null, wenn ungültig oder gleich.
+        /// </summary>
+        private static string? YearFirstReading(Match m, string primary)
+        {
+            var dg = m.Groups["d"]; var yg = m.Groups["y"]; var mn = m.Groups["mn"];
+            if (!mn.Success || dg.Length != 2 || yg.Length != 2 || dg.Index > mn.Index) return null;
+            var between = m.Value.Substring(dg.Index + dg.Length - m.Index, mn.Index - dg.Index - dg.Length);
+            if (between.Contains('.')) return null;
+            var alt = Format(int.Parse(dg.Value), MonthOf(mn.Value), int.Parse(yg.Value));
+            return alt == primary ? null : alt;
         }
 
         /// <summary>
@@ -199,7 +252,7 @@ namespace Dateiumbenenner.Engine
             foreach (var (r, spec) in RulesFor(company, docType, rules))
             {
                 var found = string.IsNullOrWhiteSpace(r.Keyword)
-                    ? lines.SelectMany(l => FindDates(l, r.Format, r.Mask)).Select(x => x.Date).Distinct().ToList()
+                    ? lines.SelectMany(l => FindDates(l, r.Format, r.Mask)).Where(x => !x.Alt).Select(x => x.Date).Distinct().ToList()
                     : NearKeyword(lines, r).Distinct().ToList();
                 double baseScore = string.IsNullOrWhiteSpace(r.Keyword) ? 20 : 50;
                 for (int i = 0; i < found.Count; i++)
@@ -223,7 +276,7 @@ namespace Dateiumbenenner.Engine
                     if (r.Position is DatePosition.Beliebig or DatePosition.Rechts)
                     {
                         var rest = lines[i].Substring(k.Index + k.Length);
-                        var hit = FindDates(rest, r.Format, r.Mask).FirstOrDefault();
+                        var hit = FindDates(rest, r.Format, r.Mask).FirstOrDefault(x => !x.Alt);
                         if (hit.Raw != null && hit.Index <= 40 && !Regex.IsMatch(rest.Substring(0, hit.Index), @"\p{L}{3,}"))
                         {
                             yield return hit.Date;
@@ -233,7 +286,7 @@ namespace Dateiumbenenner.Engine
                     if (r.Position is DatePosition.Beliebig or DatePosition.Links)
                     {
                         var head = lines[i].Substring(0, k.Index);
-                        var hit = FindDates(head, r.Format, r.Mask).LastOrDefault();
+                        var hit = FindDates(head, r.Format, r.Mask).LastOrDefault(x => !x.Alt);
                         if (hit.Raw != null && !Regex.IsMatch(head.Substring(hit.Index + hit.Length), @"\p{L}{3,}"))
                         {
                             yield return hit.Date;
@@ -246,7 +299,7 @@ namespace Dateiumbenenner.Engine
                         for (int j = i + 1; j < Math.Min(lines.Length, i + 4); j++)
                         {
                             var hit = FindDates(lines[j], r.Format, r.Mask)
-                                .Where(x => x.Index <= right + 6 && x.Index + x.Length >= left - 6)
+                                .Where(x => !x.Alt && x.Index <= right + 6 && x.Index + x.Length >= left - 6)
                                 .OrderBy(x => Math.Abs(x.Index + x.Length / 2.0 - (left + right) / 2.0)).FirstOrDefault();
                             if (hit.Raw != null) { yield return hit.Date; break; }
                         }

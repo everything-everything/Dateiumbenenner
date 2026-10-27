@@ -34,6 +34,7 @@
             <MenuItem Header="_Einstellungen..." Click="MenuSettings_Click"/>
             <MenuItem Header="Belegarten &amp; _Nummernmuster..." Click="MenuNumberRules_Click"/>
             <MenuItem Header="Belegnummern neu _ermitteln" Click="MenuRecalcNumbers_Click"/>
+            <MenuItem Header="_TXT-Nummern korrigieren..." Click="MenuNumberFix_Click" ToolTip="Wiederkehrende OCR-Fehler in Nummern (z. B. 4700012345F831 statt 4700D12345F831) per Regel in allen TXT-Dateien der Liste korrigieren."/>
         </MenuItem>
         <MenuItem x:Name="MenuProfiles" Header="P_rofil" SubmenuOpened="MenuProfiles_Opened">
             <MenuItem Header="Profil _w&#228;hlen"/>
@@ -96,7 +97,8 @@
                         <Button Content="MB/KB umschalten" Width="130" Margin="10,0,0,0" Click="ToggleSizeUnit_Click"/>
                         <Button x:Name="BtnAddToMerge" Content="Zur Liste Zusammenfügen hinzufügen" Width="220" Margin="10,0,0,0" Click="BtnAddToMerge_Click"/>
                         <Button x:Name="BtnCompanyPrefix" Content="Firma als Präfix (Auswahl)" Width="170" Margin="10,0,0,0" Click="BtnCompanyPrefix_Click" ToolTip="Setzt für die in der Liste markierten Dateien den erkannten Firmennamen als neuen Präfix und öffnet den Präfix-Bereich."/>
-                        <Button x:Name="BtnApplyTemplate" Content="Eigenschaften übertragen" Width="160" Margin="10,0,0,0" Click="BtnApplyTemplate_Click" ToolTip="Speichert die Eigenschaften des aktuellen Dokuments als Vorlage für Firma + Dokumenttyp und überträgt sie auf markierte bzw. gleichartige Dokumente."/>
+                        <Button x:Name="BtnApplyTemplate" Content="Eigenschaften übertragen" Width="160" Margin="10,0,0,0" Click="BtnApplyTemplate_Click"
+                                ToolTip="Dateinamen-Aufbau, Firma, Adresse und Belegart des aktuellen Dokuments (auch nachträglich) auf gleichartige Dokumente übertragen – Ziele gruppiert wählbar, markierte sind angehakt. Der Aufbau wird als Vorlage für Firma + Dokumenttyp gespeichert."/>
                         <!-- Neue Option für natürliche Sortierung -->
                         <CheckBox x:Name="ChkNaturalSort" Content="Natürliche Dateinamensortierung (_ = -)" Margin="20,0,0,0" VerticalAlignment="Center" Checked="ChkNaturalSort_Changed" Unchecked="ChkNaturalSort_Changed"/>
                         <!-- NEU: OCR Korrektur Umschalter -->
@@ -542,6 +544,7 @@
                             <Button x:Name="BtnHighlightNumber" Content="🔍 Nummer markieren" Width="140" Margin="0,0,5,0" Click="BtnHighlightNumber_Click"/>
                             <Button x:Name="BtnHighlightDate" Content="🔍 Datum markieren" Width="130" Margin="0,0,5,0" Click="BtnHighlightDate_Click"/>
                             <Button x:Name="BtnClearHighlight" Content="✖ Zurücksetzen" Width="110" Margin="0,0,0,0" Click="BtnClearHighlight_Click"/>
+                            <Button x:Name="BtnNumberFix" Content="🛠 TXT-Nummern korrigieren" Margin="5,0,0,0" Padding="6,0,6,0" Click="MenuNumberFix_Click" ToolTip="Wiederkehrende OCR-Fehler in Nummern in den TXT-Dateien korrigieren. Markierter Text bzw. die Belegnummer wird als Beispiel übernommen."/>
                         </StackPanel>
                         
                         <!-- Text mit RichTextBox für Highlighting -->

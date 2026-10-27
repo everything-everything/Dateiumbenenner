@@ -462,6 +462,7 @@ Klicken Sie auf ein unterstrichenes Thema, um es anzuzeigen. Mit den Schaltfläc
 * [[zusammenfuehren|PDF-Dateien zusammenführen]]
 * [[kompression|Kompressionseinstellungen]]
 * [[ocr|OCR-Korrektur und Wörterbücher]]
+* [[txtnummern|TXT-Nummern korrigieren]]
 * [[plz|PLZ-Verzeichnis]]
 * [[nummernregeln|Nummernmuster und Belegarten]]
 * [[profile|Profile]]
@@ -597,6 +598,31 @@ Eigene Ersetzungsregeln und Wörter können nach dem Muster der Datei OcrCorrect
 Die Postleitzahlen-Liste ist ebenfalls mitgeliefert, siehe [[plz|PLZ-Verzeichnis]].
 
 Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
+
+            ("txtnummern", "TXT-Nummern korrigieren", @"Korrigiert wiederkehrende OCR-Fehler in Nummern direkt in den TXT-Dateien – z. B. wenn die Texterkennung in 14-stelligen Belegnummern immer an der gleichen Stelle D als 0 liest (4700012345F831 statt 4700D12345F831).
+
+# Aufruf
+* Menü Extras → ""TXT-Nummern korrigieren..."" oder Schaltfläche ""TXT-Nummern korrigieren"" über der Textvorschau.
+* Im Plugin ""INI Erzeugen"": Schaltfläche ""TXT-Nummern korrigieren…"" in der Werkzeugleiste.
+* In der Textvorschau markierter Text bzw. die Belegnummer wird als Beispiel übernommen.
+
+# Regeln
+* Am einfachsten: Falsch erkannte und richtige Nummer eingeben und ""Regel ableiten"" – aus 4700012345F831 → 4700D12345F831 wird Länge 14, Muster ""47000"" am Anfang → ""4700D"".
+* Länge: Anzahl Zeichen der ganzen Nummer (Buchstaben und Ziffern ohne Trennzeichen); leer = beliebig. Nummern anderer Länge bleiben unberührt.
+* Position: Anfang, Ende oder Beliebig (jede Stelle in der Nummer).
+* Platzhalter im falschen Muster: $ = Ziffer, ? = Buchstabe, * = beliebiges Zeichen. In der Ersetzung behält $, ? bzw. * das vorhandene Zeichen – z. B. ""$$$$0"" → ""$$$$D"" korrigiert jede 14-stellige Nummer mit 0 an fünfter Stelle.
+* Groß-/Kleinschreibung spielt beim Vergleich keine Rolle. Die Regeln werden im Profil gespeichert (txt_number_fixes.json).
+
+# Prüfen und schreiben
+* Bereich: alle Belege der Liste mit TXT-Datei oder nur die markierten.
+* Die Trefferliste zeigt Beleg, Zeile, gefundene und neue Nummer, Regel und Textzeile. Häkchen bzw. Leertaste schließt einzelne Treffer aus.
+* ""In TXT-Dateien schreiben"" ändert die Dateien (Zeichenkodierung bleibt erhalten). Die Originale werden vorher im Profilordner unter TxtBackup gesichert; ""Rückgängig"" stellt die zuletzt geänderten Dateien wieder her.
+* Die betroffenen Belege werden danach automatisch neu eingelesen und ausgewertet – im Hauptfenster und im Plugin. Von Hand gesetzte Werte bleiben erhalten.
+
+# Hinweis
+Korrigiert werden nur Textdateien: im A-Modus die gleichnamige .txt bzw. .txt-Dateien in der Liste. Text, der direkt aus einer PDF gelesen wird, kann so nicht geändert werden.
+
+Siehe auch: [[ocr|OCR-Korrektur]]"),
 
             ("plz", "PLZ-Verzeichnis", @"Das PLZ-Verzeichnis dient zur Prüfung von Postleitzahl und Ort in der Adresserkennung.
 
@@ -863,6 +889,9 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 > S
 * [[signatur|Signatur]]
 * [[system|Systemanforderungen]]
+> T
+* [[txtnummern|TXT-Nummern korrigieren]]
+* [[txtnummern|Texterkennungsfehler in Nummern]]
 > U
 * [[umbenennen|Umbenennen]]
 > V
