@@ -47,6 +47,33 @@ namespace Dateiumbenenner.Engine
         /// <summary>Muster für Daten mit Monatsnamen (zur Vorauswahl von Zeilen).</summary>
         internal static readonly Regex[] MonthNameRegexes = { MonthRx, YearMonthRx };
 
+        /// <summary>OCR-Lesefehler in Zahlendaten: Komma statt Punkt (25.05,25), Leerzeichen zwischen Ziffern (2 5 . 0 1 . 023),
+        /// dreistelliges Jahr mit führender 0 (023 = 2023).</summary>
+        internal static readonly Regex OcrNumericRx = new(
+            @"(?<![\d.,])(?<d>[0-3] ?\d|\d)[ \t]?(?<s1>[.,])[ \t]?(?<m>[01] ?\d|\d)[ \t]?(?<s2>[.,])[ \t]?(?<y>(?:19|20)\d{2}|0\d{2}|\d{2}|\d(?: ?\d){1,3})(?!\d)(?![.,]\d)",
+            RegexOptions.Compiled);
+
+        /// <summary>Zahlendaten mit typischen OCR-Fehlern einer Zeile (nur die fehlerhaften – korrekte findet die normale Suche), normalisiert auf TT.MM.JJJJ.</summary>
+        public static List<(int Index, int Length, string Raw, string Date)> FindOcrDates(string? line)
+        {
+            var list = new List<(int, int, string, string)>();
+            if (string.IsNullOrEmpty(line) || line.IndexOfAny(new[] { '.', ',' }) < 0) return list;
+            foreach (Match m in OcrNumericRx.Matches(line))
+            {
+                string d = m.Groups["d"].Value.Replace(" ", ""), mo = m.Groups["m"].Value.Replace(" ", ""), y = m.Groups["y"].Value.Replace(" ", "");
+                string s1 = m.Groups["s1"].Value, s2 = m.Groups["s2"].Value;
+                if (s1 == "," && s2 == ",") continue; // zwei Kommas: eher Aufzählung/Betrag als Datum
+                bool comma = s1 != s2;
+                bool spaced = m.Groups["d"].Value.Contains(' ') || m.Groups["m"].Value.Contains(' ') || m.Groups["y"].Value.Contains(' ');
+                if (!comma && !spaced && y.Length != 3) continue;
+                int year;
+                if (y.Length == 3) { if (y[0] != '0') continue; year = 2000 + int.Parse(y[1..]); }
+                else year = int.Parse(y);
+                if (Format(year, int.Parse(mo), int.Parse(d)) is { } date) list.Add((m.Index, m.Length, m.Value, date));
+            }
+            return list;
+        }
+
         public static string FilePath => Path.Combine(Plugins.PluginManager.BaseDirectory, "date_rules.json");
 
         public static List<DateRule> Rules
@@ -148,9 +175,14 @@ namespace Dateiumbenenner.Engine
                     if (alt != null) list.Add((m.Index, m.Length, m.Value, alt, true));
                 }
             }
+            void AddOcr()
+            {
+                foreach (var o in FindOcrDates(line))
+                    if (!list.Any(x => x.Item1 == o.Index)) list.Add((o.Index, o.Length, o.Raw, o.Date, false));
+            }
             switch (format)
             {
-                case DateFormatKind.Numerisch: AddAll(NumericRx); break;
+                case DateFormatKind.Numerisch: AddAll(NumericRx); AddOcr(); break;
                 case DateFormatKind.Monatsname: AddAll(MonthRx); AddAll(YearMonthRx); break;
                 case DateFormatKind.JahrMonatTag: AddAll(YmdRx); break;
                 case DateFormatKind.US: AddAll(UsRx); break;
@@ -158,7 +190,7 @@ namespace Dateiumbenenner.Engine
                     foreach (var alt in (mask ?? "").Split('/').Where(a => a.Trim().Length > 0)) AddAll(MaskRegex(alt.Trim()));
                     break;
                 default:
-                    AddAll(MonthRx); AddAll(YearMonthRx); AddAll(YmdRx); AddAll(NumericRx);
+                    AddAll(MonthRx); AddAll(YearMonthRx); AddAll(YmdRx); AddAll(NumericRx); AddOcr();
                     break;
             }
             return list.OrderBy(x => x.Item1).ToList();

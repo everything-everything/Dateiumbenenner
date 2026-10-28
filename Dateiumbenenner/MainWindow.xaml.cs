@@ -1635,13 +1635,73 @@ namespace Dateiumbenenner
             if (!meta.NumberManuallySet && number.Value != null) { meta.InvoiceNumber = number.Value; meta.SelectedNumber = number.Value; }
         }
 
-        /// <summary>Datumsregeln (Begriff/Schreibweise) der aktuellen Firma + Belegart erneut anwenden, z. B. nach einer Belegart-Übertragung.
-        /// Ein von Hand gesetztes Datum bleibt unverändert.</summary>
-        private void ReapplyDateRules(DocumentMetadata meta)
+        private bool NeedsNumberRules(DocumentMetadata m) => !m.NumberManuallySet
+            && (Dateiumbenenner.Engine.NumberPatternStore.Get(m.CompanyName, m.DocumentType) != null
+                || Dateiumbenenner.Engine.NumberRuleStore.RulesFor(m.CompanyName, m.DocumentType).Count > 0
+                || Dateiumbenenner.Engine.ValueLocationStore.Has(Dateiumbenenner.Engine.ValueKind.Nummer, m.CompanyName, m.DocumentType));
+
+        private static bool NeedsDateRules(DocumentMetadata m) => !m.DateManuallySet
+            && Dateiumbenenner.Engine.DateRuleStore.RulesFor(m.CompanyName, m.DocumentType).Count > 0;
+
+        /// <summary>Gelernte Eigenschaften (Nummernmuster/-regeln/-fundstelle, Datumsregeln) der Kombination Firma + Belegart
+        /// anwenden, z. B. nachdem Firma oder Belegart zugewiesen wurde. Von Hand gesetzte Werte bleiben unver?ndert.
+        /// Optional bereits im Hintergrund ermittelte Felder verwenden. R?ckgabe: Nummer oder Datum hat sich ge?ndert.</summary>
+        private bool ApplyLearnedRules(DocumentMetadata m, Dateiumbenenner.Engine.Field? number = null, Dateiumbenenner.Engine.Field? date = null)
         {
-            if (meta.DateManuallySet || string.IsNullOrEmpty(meta.FullText)) return;
-            if (Dateiumbenenner.Engine.DateRuleStore.RulesFor(meta.CompanyName, meta.DocumentType).Count == 0) return;
-            var date = Engine.ExtractDate(meta.FullText, meta.FilePath);
+            if (!m.Loaded || string.IsNullOrEmpty(m.FullText)) return false;
+            var oldNumber = m.SelectedNumber; var oldDate = m.SelectedDate;
+            if (NeedsNumberRules(m))
+                ApplyNumberField(m, number ?? Engine.ExtractNumber(m.FullText, m.FilePath), m.DocumentType);
+            ReapplyDateRules(m, date);
+            AutoAssignNumbers(m);
+            return !string.Equals(oldNumber, m.SelectedNumber, StringComparison.Ordinal) || !string.Equals(oldDate, m.SelectedDate, StringComparison.Ordinal);
+        }
+
+        /// <summary>Gelernte Regeln auf viele Belege anwenden, ohne die Oberfl?che zu blockieren (Textdateien werden im Hintergrund gelesen).</summary>
+        private async Task<int> ApplyLearnedRulesAsync(IReadOnlyList<DocumentMetadata> list)
+        {
+            var loaded = new HashSet<DocumentMetadata>(_items);
+            var tick = System.Diagnostics.Stopwatch.StartNew();
+            int changed = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var m = list[i];
+                if (!loaded.Contains(m) || !m.Loaded || string.IsNullOrEmpty(m.FullText)) continue;
+                bool needN = NeedsNumberRules(m), needD = NeedsDateRules(m);
+                Dateiumbenenner.Engine.Field? number = null, date = null;
+                if (needN || needD)
+                {
+                    var text = m.FullText; var path = m.FilePath;
+                    (number, date) = await Task.Run(() => (needN ? Engine.ExtractNumber(text, path) : null, needD ? Engine.ExtractDate(text, path) : null));
+                }
+                if (ApplyLearnedRules(m, number, date)) { changed++; ScheduleStoreSave(m); }
+                if (tick.ElapsedMilliseconds >= 40)
+                {
+                    tick.Restart();
+                    TxtStatus.Text = $"Gelernte Eigenschaften werden ?bernommen: {i + 1:N0} / {list.Count:N0}...";
+                    await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                }
+            }
+            if (_currentMeta is { } cur && list.Contains(cur)) RefreshAfterRules(cur);
+            return changed;
+        }
+
+        /// <summary>Aktuellen Beleg nach Regel?bernahme neu anzeigen (Nummer/Datum-Auswahl), sobald die laufende Eingabe abgeschlossen ist.</summary>
+        private void RefreshAfterRules(DocumentMetadata meta) =>
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_currentMeta != meta) return;
+                PopulateSelectors(meta);
+                ShowDetails(meta);
+                RefreshNewNamePreview(meta);
+            }), System.Windows.Threading.DispatcherPriority.Background);
+
+        /// <summary>Datumsregeln (Begriff/Schreibweise) der aktuellen Firma + Belegart erneut anwenden, z. B. nach einer Belegart-?bertragung.
+        /// Ein von Hand gesetztes Datum bleibt unver?ndert.</summary>
+        private void ReapplyDateRules(DocumentMetadata meta, Dateiumbenenner.Engine.Field? date = null)
+        {
+            if (string.IsNullOrEmpty(meta.FullText) || !NeedsDateRules(meta)) return;
+            date ??= Engine.ExtractDate(meta.FullText, meta.FilePath);
             Dateiumbenenner.Engine.DateRuleStore.Apply(date, meta.CompanyName, meta.DocumentType, meta.FullText);
             for (int i = date.Values.Count - 1; i >= 0; i--)
             { meta.DateCandidates.Remove(date.Values[i]); meta.DateCandidates.Insert(0, date.Values[i]); }
@@ -1799,6 +1859,8 @@ namespace Dateiumbenenner
                     Dateiumbenenner.Engine.CompanyDirectory.Learn(src.CompanyName, src.Zip, src.City);
             }
             catch { }
+            // Gelernte Nummer/Datum der Kombination Firma + Belegart ?bernehmen (von Hand gesetzte Werte bleiben)
+            if (ApplyLearnedRules(src)) { ScheduleStoreSave(src); RefreshAfterRules(src); }
             Dispatcher.BeginInvoke(new Action(() => OfferTemplates(new[] { src })), System.Windows.Threading.DispatcherPriority.Background);
         }
 
@@ -1984,7 +2046,9 @@ namespace Dateiumbenenner
                 }
             }
             finally { _propagatingCompany = false; }
-            TxtStatus.Text = $"Firmenname „{name}“ auf {targets.Count + 1} Einträge übernommen.";
+            var learned = await ApplyLearnedRulesAsync(targets.Prepend(src).ToList());
+            TxtStatus.Text = $"Firmenname „{name}“ auf {targets.Count + 1} Einträge übernommen."
+                + (learned > 0 ? $" Gelernte Nummer/Datum bei {learned} Beleg(en) übernommen." : "");
         }
 
         /// <summary>„Namen übertragen“: Übersicht aller Dateien, markierte erhalten den Firmennamen der aktuellen Datei.</summary>
@@ -2021,7 +2085,11 @@ namespace Dateiumbenenner
             }
             if (targets.Count == 0)
             {
-                if (edited.Count > 0) TxtStatus.Text = $"Firmenname bei {edited.Count} Datei(en) geändert.";
+                if (edited.Count > 0)
+                {
+                    var n = await ApplyLearnedRulesAsync(edited.Select(x => x.Item1).Prepend(src).ToList());
+                    TxtStatus.Text = $"Firmenname bei {edited.Count} Datei(en) geändert." + (n > 0 ? $" Gelernte Nummer/Datum bei {n} Beleg(en) übernommen." : "");
+                }
                 return;
             }
             await EnsureAddressAsync(src);
@@ -2037,15 +2105,17 @@ namespace Dateiumbenenner
                 }
             }
             finally { _propagatingCompany = false; }
+            var learnedCount = await ApplyLearnedRulesAsync(targets.Concat(edited.Select(x => x.Item1)).Prepend(src).Distinct().ToList());
             var adr = FormatAddress(src);
             TxtStatus.Text = $"Firmenname „{name}“" + (adr.Length > 0 ? $" mit Adresse ({adr})" : " mit leerer Adresse") + $" auf {targets.Count + 1} Datei(en) übertragen."
-                + (edited.Count > 0 ? $" {edited.Count} weitere von Hand geändert." : "");
+                + (edited.Count > 0 ? $" {edited.Count} weitere von Hand geändert." : "")
+                + (learnedCount > 0 ? $" Gelernte Nummer/Datum bei {learnedCount} Beleg(en) übernommen." : "");
         }
 
         /// <summary>„Belegart übertragen“: Belege gruppiert nach Firma/Nummernaufbau/Belegart, markierte bzw. zugewiesene erhalten die Belegart.</summary>
-        private void BtnMainTransferDocType_Click(object sender, RoutedEventArgs e)
+        private async void BtnMainTransferDocType_Click(object sender, RoutedEventArgs e)
         {
-            if (_currentMeta is not { Loaded: true } src) return;
+            if (_currentMeta is not { Loaded: true } src || _docTypeApplying) return;
             var type = (string.IsNullOrWhiteSpace(CmbDocType.Text) ? src.DocumentType : CmbDocType.Text)?.Trim();
             if (!string.IsNullOrWhiteSpace(type) && !string.Equals(src.DocumentType, type, StringComparison.Ordinal))
             {
@@ -2057,19 +2127,35 @@ namespace Dateiumbenenner
             var dlg = new DocTypeTransferDialog(src, others, Dateiumbenenner.Engine.DocTypeStore.Names,
                 (a, b) => !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) && SameCompany(a, b)) { Owner = this };
             if (dlg.ShowDialog() != true || dlg.Assignments.Count == 0) return;
-            foreach (var (m, t) in dlg.Assignments)
+            _docTypeApplying = true;
+            int learned;
+            try
             {
-                m.DocumentType = t;
-                m.DocTypeManuallySet = true;
-                ReapplyDateRules(m);
-                AutoAssignNumbers(m);
-                RefreshNewNamePreview(m);
-                ScheduleStoreSave(m);
+                var tick = System.Diagnostics.Stopwatch.StartNew();
+                int i = 0;
+                foreach (var (m, t) in dlg.Assignments)
+                {
+                    m.DocumentType = t;
+                    m.DocTypeManuallySet = true;
+                    AutoAssignNumbers(m);
+                    ScheduleStoreSave(m);
+                    i++;
+                    if (tick.ElapsedMilliseconds >= 40)
+                    {
+                        tick.Restart();
+                        TxtStatus.Text = $"Belegart wird übertragen: {i:N0} / {dlg.Assignments.Count:N0}...";
+                        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                    }
+                }
+                // Gelernte Nummer/Datum der neuen Kombination Firma + Belegart übernehmen
+                learned = await ApplyLearnedRulesAsync(dlg.Assignments.Keys.Prepend(src).ToList());
             }
+            finally { _docTypeApplying = false; }
             LvFiles.Items.Refresh();
-            ShowDetails(src);
+            RefreshAfterRules(src);
             TxtStatus.Text = $"Belegart auf {dlg.Assignments.Count} Datei(en) übertragen: "
-                + string.Join(", ", dlg.Assignments.GroupBy(a => a.Value, StringComparer.OrdinalIgnoreCase).Select(g => $"{g.Key} ({g.Count()})"));
+                + string.Join(", ", dlg.Assignments.GroupBy(a => a.Value, StringComparer.OrdinalIgnoreCase).Select(g => $"{g.Key} ({g.Count()})"))
+                + (learned > 0 ? $". Gelernte Nummer/Datum bei {learned} Beleg(en) übernommen." : "");
         }
 
         private async void BtnMainFromIni_Click(object sender, RoutedEventArgs e)
@@ -2682,14 +2768,17 @@ namespace Dateiumbenenner
             catch { return ""; }
         }
 
-        private void PopulateSelectors(DocumentMetadata meta){ _isPopulatingSelectors=true; try{ if(meta.DocTypeManuallySet && !string.IsNullOrEmpty(meta.DocumentType)) CmbDocType.Text=meta.DocumentType; else if(!string.IsNullOrEmpty(meta.DocumentType)){ var match=(CmbDocType.ItemsSource as List<string>)?.FirstOrDefault(i=>i.Equals(meta.DocumentType,StringComparison.OrdinalIgnoreCase)); if(match!=null) CmbDocType.SelectedItem=match; else CmbDocType.Text=meta.DocumentType; } else { CmbDocType.SelectedIndex=-1; CmbDocType.Text=string.Empty; }
+        private void PopulateSelectors(DocumentMetadata meta){ _isPopulatingSelectors=true; try{ if(!string.IsNullOrEmpty(meta.DocumentType)){ var match=(CmbDocType.ItemsSource as List<string>)?.FirstOrDefault(i=>i.Equals(meta.DocumentType.Trim(),StringComparison.OrdinalIgnoreCase)); if(match!=null) CmbDocType.SelectedItem=match; else CmbDocType.SelectedIndex=-1; if(match==null || meta.DocTypeManuallySet) CmbDocType.Text=meta.DocumentType; } else { CmbDocType.SelectedIndex=-1; CmbDocType.Text=string.Empty; } } finally { _isPopulatingSelectors=false; } PopulateNumberDate(meta); }
+
+        /// <summary>Nummern- und Datumsauswahl des Belegs anzeigen (auch einzeln, z. B. nach ?bernahme gelernter Regeln).</summary>
+        private void PopulateNumberDate(DocumentMetadata meta){ var was=_isPopulatingSelectors; _isPopulatingSelectors=true; try{
             CmbNumberCandidates.ItemsSource=null; CmbNumberCandidates.Text=""; CmbNumberCandidates.SelectedIndex=-1; var validNumbers=meta.NumberCandidates.Where(n=>IsValidNumber(n)).ToList(); if(_globalMinDigits>0){ var enough=validNumbers.Where(n=>CountDigits(n)>=_globalMinDigits).OrderBy(n=>CountDigits(n)).ToList(); var few=validNumbers.Where(n=>CountDigits(n)<_globalMinDigits).OrderBy(n=>CountDigits(n)).ToList(); validNumbers=enough.Concat(few).ToList(); } else validNumbers=validNumbers.OrderBy(n=>CountDigits(n)).ToList(); if(meta.NumberManuallySet && !string.IsNullOrEmpty(meta.SelectedNumber) && !validNumbers.Contains(meta.SelectedNumber)) validNumbers.Insert(0,meta.SelectedNumber); else if(!meta.NumberManuallySet && !string.IsNullOrEmpty(meta.SelectedNumber) && IsValidNumber(meta.SelectedNumber) && !validNumbers.Contains(meta.SelectedNumber)) validNumbers.Insert(0,meta.SelectedNumber); CmbNumberCandidates.ItemsSource=validNumbers; if(meta.NumberManuallySet && !string.IsNullOrEmpty(meta.SelectedNumber)){ CmbNumberCandidates.Text=meta.SelectedNumber; CmbNumberCandidates.SelectedItem=meta.SelectedNumber; } else if(!string.IsNullOrEmpty(meta.SelectedNumber) && validNumbers.Contains(meta.SelectedNumber) && IsValidNumber(meta.SelectedNumber)){ CmbNumberCandidates.SelectedItem=meta.SelectedNumber; CmbNumberCandidates.Text=meta.SelectedNumber; } else { var appropriate=GetAppropriateNumber(meta,meta.DocumentType); if(!string.IsNullOrEmpty(appropriate) && !validNumbers.Contains(appropriate)){ validNumbers.Insert(0,appropriate); CmbNumberCandidates.ItemsSource=null; CmbNumberCandidates.ItemsSource=validNumbers; } if(!string.IsNullOrEmpty(appropriate)){ CmbNumberCandidates.SelectedItem=appropriate; CmbNumberCandidates.Text=appropriate; if(!meta.NumberManuallySet) meta.SelectedNumber=appropriate; } else if(validNumbers.Any()){ var first=validNumbers.First(); CmbNumberCandidates.SelectedItem=first; CmbNumberCandidates.Text=first; if(!meta.NumberManuallySet) meta.SelectedNumber=first; } else { if(!meta.NumberManuallySet) meta.SelectedNumber=null; } }
             if(!meta.NumberManuallySet) UpdateMetadataFromSelections(meta);
-            CmbDateCandidates.ItemsSource=null; CmbDateCandidates.Text=""; CmbDateCandidates.SelectedIndex=-1; CmbDateCandidates.ItemsSource=meta.DateCandidates; if(meta.DateManuallySet && !string.IsNullOrEmpty(meta.SelectedDate) && meta.DateCandidates.Contains(meta.SelectedDate)){ CmbDateCandidates.SelectedItem=meta.SelectedDate; CmbDateCandidates.Text=meta.SelectedDate; } else if(!string.IsNullOrEmpty(meta.SelectedDate) && meta.DateCandidates.Contains(meta.SelectedDate)){ CmbDateCandidates.SelectedItem=meta.SelectedDate; CmbDateCandidates.Text=meta.SelectedDate; } else if(meta.DateCandidates.Any()){ CmbDateCandidates.SelectedIndex=0; if(!meta.DateManuallySet) meta.SelectedDate=meta.DateCandidates.First(); } else { if(!meta.DateManuallySet) meta.SelectedDate=null; } } finally { _isPopulatingSelectors=false; } }
+            CmbDateCandidates.ItemsSource=null; CmbDateCandidates.Text=""; CmbDateCandidates.SelectedIndex=-1; CmbDateCandidates.ItemsSource=meta.DateCandidates; if(meta.DateManuallySet && !string.IsNullOrEmpty(meta.SelectedDate) && meta.DateCandidates.Contains(meta.SelectedDate)){ CmbDateCandidates.SelectedItem=meta.SelectedDate; CmbDateCandidates.Text=meta.SelectedDate; } else if(!string.IsNullOrEmpty(meta.SelectedDate) && meta.DateCandidates.Contains(meta.SelectedDate)){ CmbDateCandidates.SelectedItem=meta.SelectedDate; CmbDateCandidates.Text=meta.SelectedDate; } else if(meta.DateCandidates.Any()){ CmbDateCandidates.SelectedIndex=0; if(!meta.DateManuallySet) meta.SelectedDate=meta.DateCandidates.First(); } else { if(!meta.DateManuallySet) meta.SelectedDate=null; } } finally { _isPopulatingSelectors=was; } }
 
         private void UpdateMetadataFromSelections(DocumentMetadata meta){ if(meta==null||_isPopulatingSelectors) return; if(CmbDocType!=null && !string.IsNullOrWhiteSpace(CmbDocType.Text)) meta.DocumentType=CmbDocType.Text.Trim(); if(CmbNumberCandidates!=null && !string.IsNullOrWhiteSpace(CmbNumberCandidates.Text)) meta.SelectedNumber=CmbNumberCandidates.Text.Trim(); if(CmbDateCandidates!=null && !string.IsNullOrWhiteSpace(CmbDateCandidates.Text)){ var dt=CmbDateCandidates.Text.Trim(); meta.SelectedDate=dt; meta.Date=dt; } }
 
-        private void SaveCurrentSettings(DocumentMetadata meta){ if(meta==null||!meta.Loaded) return; if(_currentMeta!=meta || _isPopulatingSelectors) return; var docType=CmbDocType.Text; if(!string.IsNullOrEmpty(docType)){ meta.DocumentType=docType; meta.DocTypeManuallySet=true; } var number=CmbNumberCandidates.Text; if(!string.IsNullOrWhiteSpace(number)){ meta.SelectedNumber=number; meta.NumberManuallySet=true; } var date=CmbDateCandidates.Text; if(!string.IsNullOrWhiteSpace(date)){ meta.SelectedDate=date; meta.Date=date; meta.DateManuallySet=true; } meta.SavedDelimiter=TxtDelimiter.Text; meta.RemoveDuplicates=ChkRemoveDuplicates.IsChecked==true; meta.ReplaceSegments=ChkReplaceSegments.IsChecked==true; meta.RemoveAttachment=ChkRemoveAttachment.IsChecked==true; if(int.TryParse(TxtSegmentIndex.Text,out int segIdx)) meta.SavedSegmentIndex=segIdx; meta.UseDelimiterPosition=ChkUseDelimiterPosition.IsChecked==true; meta.InsertPositions.Clear(); if(CmbNumberPosition!=null && CmbNumberPosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbNumberPosition.SelectedIndex+1,ValueType="Nummer (Auswahl)",Enabled=true}); if(CmbDatePosition!=null && CmbDatePosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbDatePosition.SelectedIndex+1,ValueType="Datum",Enabled=true}); if(CmbDocTypePosition!=null && CmbDocTypePosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbDocTypePosition.SelectedIndex+1,ValueType="Dokumenttyp",Enabled=true}); if(CmbAddressPosition!=null && CmbAddressPosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbAddressPosition.SelectedIndex+1,ValueType=AddressTypePrefix+SelectedAddressPart,Enabled=true}); if(TxtEditableNewName!=null && TxtEditableNewName.IsFocused) meta.ManualFileName=TxtEditableNewName.Text.Trim(); meta.LayoutSet=true; RefreshNewNamePreview(meta); ScheduleStoreSave(meta); }
+        private void SaveCurrentSettings(DocumentMetadata meta){ if(meta==null||!meta.Loaded) return; if(_currentMeta!=meta || _isPopulatingSelectors) return; var docType=CmbDocType.Text; if(!string.IsNullOrEmpty(docType)){ meta.DocumentType=docType; meta.DocTypeManuallySet=true; } var number=CmbNumberCandidates.Text; if(!string.IsNullOrWhiteSpace(number) && !string.Equals(number.Trim(), meta.SelectedNumber?.Trim(), StringComparison.Ordinal)){ meta.SelectedNumber=number; meta.NumberManuallySet=true; } var date=CmbDateCandidates.Text; if(!string.IsNullOrWhiteSpace(date) && !string.Equals(date.Trim(), meta.SelectedDate?.Trim(), StringComparison.Ordinal)){ meta.SelectedDate=date; meta.Date=date; meta.DateManuallySet=true; } meta.SavedDelimiter=TxtDelimiter.Text; meta.RemoveDuplicates=ChkRemoveDuplicates.IsChecked==true; meta.ReplaceSegments=ChkReplaceSegments.IsChecked==true; meta.RemoveAttachment=ChkRemoveAttachment.IsChecked==true; if(int.TryParse(TxtSegmentIndex.Text,out int segIdx)) meta.SavedSegmentIndex=segIdx; meta.UseDelimiterPosition=ChkUseDelimiterPosition.IsChecked==true; meta.InsertPositions.Clear(); if(CmbNumberPosition!=null && CmbNumberPosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbNumberPosition.SelectedIndex+1,ValueType="Nummer (Auswahl)",Enabled=true}); if(CmbDatePosition!=null && CmbDatePosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbDatePosition.SelectedIndex+1,ValueType="Datum",Enabled=true}); if(CmbDocTypePosition!=null && CmbDocTypePosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbDocTypePosition.SelectedIndex+1,ValueType="Dokumenttyp",Enabled=true}); if(CmbAddressPosition!=null && CmbAddressPosition.SelectedIndex<3) meta.InsertPositions.Add(new InsertPosition{Position=CmbAddressPosition.SelectedIndex+1,ValueType=AddressTypePrefix+SelectedAddressPart,Enabled=true}); if(TxtEditableNewName!=null && TxtEditableNewName.IsFocused) meta.ManualFileName=TxtEditableNewName.Text.Trim(); meta.LayoutSet=true; RefreshNewNamePreview(meta); ScheduleStoreSave(meta); }
 
         private void RefreshNewNamePreview(DocumentMetadata meta){ if(meta==null) return; ChainedUpdates(()=>{ var raw=GenerateNewFileName(meta); var unique=EnsureUniquePreviewName(meta,raw); meta.ProposedNewName=unique; if(TxtEditableNewName!=null){ _isSettingPreviewName=true; try{ var sel=TxtEditableNewName.SelectionStart; TxtEditableNewName.Text=unique; TxtEditableNewName.SelectionStart=Math.Min(sel,unique.Length); } finally { _isSettingPreviewName=false; } } }); }
         private void ChainedUpdates(Action act){ _updateTimer?.Stop(); _updateTimer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(100)}; _updateTimer.Tick += (s,e)=>{ _updateTimer.Stop(); act(); }; _updateTimer.Start(); }
@@ -2869,7 +2958,7 @@ namespace Dateiumbenenner
         private string? ExtractDateFromFileName(string fileName){ var match=Regex.Match(fileName,@"(\d{1,4})[-_.](\d{1,2})[-_.](\d{1,4})"); if(match.Success){ var year=match.Groups[1].Value; var month=match.Groups[2].Value; var day=match.Groups[3].Value; year=year.Length==2?"20"+year:year; month=month.PadLeft(2,'0'); day=day.PadLeft(2,'0'); return $"{day}.{month}.{year}"; } return null; }
         private string NormalizeDate(string dateStr){ if(string.IsNullOrWhiteSpace(dateStr)) return dateStr; dateStr=Regex.Replace(dateStr.Trim(),@"\s+"," "); if(DateTime.TryParseExact(dateStr,DateFormats,DeCulture,DateTimeStyles.AllowWhiteSpaces,out var dt)) return dt.ToString("dd.MM.yyyy",DeCulture); if(DateTime.TryParse(dateStr,DeCulture,DateTimeStyles.AllowWhiteSpaces,out dt)) return dt.ToString("dd.MM.yyyy",DeCulture); return dateStr; }
         private void ReapplyOcrAndReextract(DocumentMetadata meta) => ReapplyOcrAndReextract(meta, null, true);
-        private void ReapplyOcrAndReextract(DocumentMetadata meta, string? prepared, bool refreshUi){ if(meta==null||!meta.Loaded) return; meta.OriginalFullText??=meta.FullText; var source=meta.OriginalFullText??meta.FullText; if(string.IsNullOrEmpty(source)) return; meta.FullText=prepared ?? (_enableOcrCorrection? ApplyOcrHeuristics(source): source); meta.NumberCandidates.Clear(); meta.DateCandidates.Clear(); if(!meta.NumberManuallySet){ meta.SelectedNumber=null; meta.InvoiceNumber=null; meta.DocumentNumber=null; } if(!meta.DateManuallySet){ meta.SelectedDate=null; meta.Date=null; } meta.DocumentType=null; var flag=meta.DocTypeManuallySet; meta.DocTypeManuallySet=false; if(!string.IsNullOrEmpty(meta.FullText)) ExtractCandidates(meta); meta.DocTypeManuallySet=flag; AutoAssignNumbers(meta); if(!refreshUi) return; PopulateSelectors(meta); ShowDetails(meta); RefreshNewNamePreview(meta); LvFiles.Items.Refresh(); }
+        private void ReapplyOcrAndReextract(DocumentMetadata meta, string? prepared, bool refreshUi){ if(meta==null||!meta.Loaded) return; meta.OriginalFullText??=meta.FullText; var source=meta.OriginalFullText??meta.FullText; if(string.IsNullOrEmpty(source)) return; meta.FullText=prepared ?? (_enableOcrCorrection? ApplyOcrHeuristics(source): source); meta.NumberCandidates.Clear(); meta.DateCandidates.Clear(); if(!meta.NumberManuallySet){ meta.SelectedNumber=null; meta.InvoiceNumber=null; meta.DocumentNumber=null; } if(!meta.DateManuallySet){ meta.SelectedDate=null; meta.Date=null; } var manualType=meta.DocTypeManuallySet ? meta.DocumentType : null; meta.DocumentType=null; var flag=meta.DocTypeManuallySet; meta.DocTypeManuallySet=false; if(!string.IsNullOrEmpty(meta.FullText)) ExtractCandidates(meta); meta.DocTypeManuallySet=flag; if(flag && !string.IsNullOrWhiteSpace(manualType)) meta.DocumentType=manualType; AutoAssignNumbers(meta); if(!refreshUi) return; PopulateSelectors(meta); ShowDetails(meta); RefreshNewNamePreview(meta); LvFiles.Items.Refresh(); }
         private string? FindNumberNearDocType(string fullText,string docType,int minDigits){ if(!_docTypeNumberKeywords.TryGetValue(docType,out var keywords)||keywords.Length==0) return null; var pattern="\\b("+string.Join("|",keywords.Select(Regex.Escape))+")\\b"; var keyMatches=Regex.Matches(fullText,pattern,RegexOptions.IgnoreCase); if(keyMatches.Count==0) return null; foreach(Match km in keyMatches){ if(_docTypeNumberSearchForward){ int startIndex=km.Index+km.Length; if(startIndex>=fullText.Length) continue; var sliceLen=Math.Min(1000,fullText.Length-startIndex); var slice=fullText.Substring(startIndex,sliceLen); var tokenMatches=Regex.Matches(slice,@"\S+"); for(int t=0;t<Math.Min(_docTypeNumberSteps,tokenMatches.Count);t++){ var tok=tokenMatches[t].Value.Trim(); if(IsPotentialEnvironmentNumber(tok,minDigits)) return tok; var tmIndex=tokenMatches[t].Index; var m=_environmentNumberRegex.Match(slice,tmIndex); if(m.Success && IsPotentialEnvironmentNumber(m.Groups[1].Value,minDigits)) return m.Groups[1].Value; } var mAll=_environmentNumberRegex.Match(slice); if(mAll.Success && IsPotentialEnvironmentNumber(mAll.Groups[1].Value,minDigits)) return mAll.Groups[1].Value; } else { int endIndex=km.Index; if(endIndex<=0) continue; var sliceStart=Math.Max(0,endIndex-1000); var slice=fullText.Substring(sliceStart,endIndex-sliceStart); var tokenMatches=Regex.Matches(slice,@"\S+"); for(int t=1;t<=Math.Min(_docTypeNumberSteps,tokenMatches.Count);t++){ var idx=tokenMatches.Count-t; var tok=tokenMatches[idx].Value.Trim(); if(IsPotentialEnvironmentNumber(tok,minDigits)) return tok; var tmIndex=tokenMatches[idx].Index; var m=_environmentNumberRegex.Match(slice,tmIndex); if(m.Success && IsPotentialEnvironmentNumber(m.Groups[1].Value,minDigits)) return m.Groups[1].Value; } var all=_environmentNumberRegex.Matches(slice); if(all.Count>0){ var last=all.Cast<Match>().Last(); if(IsPotentialEnvironmentNumber(last.Groups[1].Value,minDigits)) return last.Groups[1].Value; } } } return null; }
         private void ReevaluateNumbersAfterDocTypeEnvChange(){ foreach(var item in _items.Where(m=>m.Loaded)){ if(!item.NumberManuallySet){ var appropriate=GetAppropriateNumber(item,item.DocumentType); if(!string.IsNullOrEmpty(appropriate)){ item.SelectedNumber=appropriate; AutoAssignNumbers(item); } } } if(_currentMeta is {Loaded:true} cur){ PopulateSelectors(cur); AutoAssignNumbers(cur); ShowDetails(cur); RefreshNewNamePreview(cur); } LvFiles.Items.Refresh(); UpdateStandardStatus(); }
         private bool IsPotentialEnvironmentNumber(string text,int minDigits){ if(string.IsNullOrWhiteSpace(text)) return false; if(!_environmentNumberRegex.IsMatch(text)) return false; var digits=new string(text.Where(char.IsDigit).ToArray()); if(digits.Length<minDigits) return false; return IsValidNumber(text); }
@@ -3061,27 +3150,77 @@ namespace Dateiumbenenner
             IdxIcon.Text=ok?"\U0001F4D7":"\U0001F4D5";
             IdxText.Text=ok?"Index bereit":"Suchindex: wird bei der ersten Suche (ab 3 Zeichen) erstellt";
         }
-        private void CmbDocType_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DocTypeManuallySet=true; UpdateMetadataFromSelections(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); ApplyDocTypeToSelection(meta, (e.AddedItems.Count>0 ? e.AddedItems[0] as string : null) ?? meta.DocumentType); } }
+        private void CmbDocType_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DocTypeManuallySet=true; UpdateMetadataFromSelections(meta); var picked=e.AddedItems.Count>0 ? e.AddedItems[0] as string : null; if(!string.IsNullOrWhiteSpace(picked)) meta.DocumentType=picked.Trim(); if(ApplyLearnedRules(meta)){ PopulateNumberDate(meta); ScheduleStoreSave(meta); } AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); QueueDocTypeAsk(meta, picked ?? meta.DocumentType); } }
 
-        /// <summary>Gew&#228;hlte Belegart auf weitere markierte Belege &#252;bernehmen (nach R&#252;ckfrage).</summary>
-        private void ApplyDocTypeToSelection(DocumentMetadata current, string? docType)
+        // Rückfrage für die markierten Belege erst nach abgeschlossener Auswahl (Liste zu, Enter, Feld verlassen) – nicht mitten im
+        // Tippen: Passt der Text genau zu einer Belegart, wechselt die Auswahl sofort, und Enter/Leertaste hätten sonst unbemerkt „Ja“ ausgelöst.
+        private (DocumentMetadata Meta, string DocType, List<DocumentMetadata> Marked)? _pendingDocTypeAsk;
+        private bool _docTypeApplying;
+
+        private void QueueDocTypeAsk(DocumentMetadata meta, string? docType)
         {
             if (string.IsNullOrWhiteSpace(docType)) return;
-            var others = LvFiles.SelectedItems.OfType<DocumentMetadata>().Where(m => m != current && m.Loaded
-                && !string.Equals(m.DocumentType, docType, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (others.Count == 0) return;
-            var question = $"Belegart \u201E{docType}\u201C auch f\u00FCr die {others.Count} weiteren markierten Belege \u00FCbernehmen?";
-            if (System.Windows.MessageBox.Show(this, question, "Belegart \u00FCbernehmen", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-            foreach (var m in others)
-            {
-                m.DocumentType = docType.Trim();
-                m.DocTypeManuallySet = true;
-                AutoAssignNumbers(m);
-                RefreshNewNamePreview(m);
-            }
+            var marked = LvFiles.SelectedItems.OfType<DocumentMetadata>().ToList();
+            if (marked.Count < 2 || !marked.Contains(meta)) { _pendingDocTypeAsk = null; return; }
+            _pendingDocTypeAsk = (meta, docType.Trim(), marked);
+            if (!CmbDocType.IsDropDownOpen && !CmbDocType.IsKeyboardFocusWithin) ScheduleDocTypeAsk(false);
         }
-        private void EditableCombo_DropDownClosed(object sender,EventArgs e){ if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } }
-        private void EditableCombo_KeyDown(object sender,System.Windows.Input.KeyEventArgs e){ if(e.Key==System.Windows.Input.Key.Enter){ if(sender is SWC.ComboBox combo){ combo.IsDropDownOpen=false; if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } } } }
+
+        private void ScheduleDocTypeAsk(bool committed)
+        {
+            if (_pendingDocTypeAsk == null) return;
+            Dispatcher.BeginInvoke(new Action(async () => await AskPendingDocTypeAsync(committed)), System.Windows.Threading.DispatcherPriority.Input);
+        }
+
+        private void CmbDocType_DropDownClosed(object sender, EventArgs e) => ScheduleDocTypeAsk(true);
+
+        private async Task AskPendingDocTypeAsync(bool committed)
+        {
+            if (_pendingDocTypeAsk is not { } p || _docTypeApplying) return;
+            if (!committed && (CmbDocType.IsDropDownOpen || CmbDocType.IsKeyboardFocusWithin)) return;
+            _pendingDocTypeAsk = null;
+            await ApplyDocTypeToSelectionAsync(p.Meta, (string.IsNullOrWhiteSpace(p.Meta.DocumentType) ? p.DocType : p.Meta.DocumentType).Trim(), p.Marked);
+        }
+
+        /// <summary>Gew&#228;hlte Belegart auf weitere markierte Belege &#252;bernehmen (nach R&#252;ckfrage).</summary>
+        private async Task ApplyDocTypeToSelectionAsync(DocumentMetadata current, string docType, List<DocumentMetadata> marked)
+        {
+            if (string.IsNullOrWhiteSpace(docType)) return;
+            var loaded = new HashSet<DocumentMetadata>(_items);
+            var others = marked.Where(m => m != current && m.Loaded && loaded.Contains(m)
+                && !string.Equals(m.DocumentType?.Trim(), docType, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (others.Count == 0) return;
+            var question = $"Belegart \u201E{docType}\u201C auch f\u00FCr {(others.Count == 1 ? "den weiteren markierten Beleg" : $"die {others.Count:N0} weiteren markierten Belege")} \u00FCbernehmen?";
+            // Standard „Nein“: eine Massenänderung soll nie durch einen versehentlichen Tastendruck bestätigt werden
+            if (System.Windows.MessageBox.Show(this, question, "Belegart \u00FCbernehmen", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            _docTypeApplying = true;
+            int learned;
+            try
+            {
+                var tick = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < others.Count; i++)
+                {
+                    var m = others[i];
+                    m.DocumentType = docType;
+                    m.DocTypeManuallySet = true;
+                    AutoAssignNumbers(m);
+                    ScheduleStoreSave(m);
+                    if (tick.ElapsedMilliseconds >= 40)
+                    {
+                        tick.Restart();
+                        TxtStatus.Text = $"Belegart \u201E{docType}\u201C wird \u00FCbernommen: {i + 1:N0} / {others.Count:N0}...";
+                        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                    }
+                }
+                learned = await ApplyLearnedRulesAsync(others);
+            }
+            finally { _docTypeApplying = false; }
+            if (_currentMeta != null) RefreshNewNamePreview(_currentMeta);
+            TxtStatus.Text = $"Belegart \u201E{docType}\u201C f\u00FCr {others.Count + 1:N0} Belege \u00FCbernommen."
+                + (learned > 0 ? $" Gelernte Nummer/Datum bei {learned:N0} Beleg(en) übernommen." : "");
+        }
+        private void EditableCombo_DropDownClosed(object sender,EventArgs e){ if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } if(sender==CmbDocType) ScheduleDocTypeAsk(false); }
+        private void EditableCombo_KeyDown(object sender,System.Windows.Input.KeyEventArgs e){ if(e.Key==System.Windows.Input.Key.Enter){ if(sender is SWC.ComboBox combo){ combo.IsDropDownOpen=false; if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } if(combo==CmbDocType) ScheduleDocTypeAsk(true); } } }
         private void InsertPosition_Changed(object sender,RoutedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ SaveCurrentSettings(meta); UpdateMetadataFromSelections(meta); RefreshNewNamePreview(meta); } }
         private void CmbNumberCandidates_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.NumberManuallySet=true; UpdateMetadataFromSelections(meta); if(e!=null) LearnNumberPattern(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); LvFiles.Items.Refresh(); } }
         private void CmbNumberCandidates_LostFocus(object s,RoutedEventArgs e)=>CmbNumberCandidates_SelectionChanged(s,null!);

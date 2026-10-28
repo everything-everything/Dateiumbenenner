@@ -312,7 +312,7 @@
 
                             <TextBlock Text="Dokumenttyp (Auswahl):" Grid.Row="5" Grid.Column="0" Margin="0,4,5,5"/>
                             <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
-                                <ComboBox x:Name="CmbDocType" IsEditable="True" IsTextSearchEnabled="False" SelectionChanged="CmbDocType_SelectionChanged" 
+                                <ComboBox x:Name="CmbDocType" IsEditable="True" IsTextSearchEnabled="False" SelectionChanged="CmbDocType_SelectionChanged" DropDownClosed="CmbDocType_DropDownClosed"
                                           LostFocus="EditableCombo_DropDownClosed" MaxDropDownHeight="180" KeyDown="EditableCombo_KeyDown" 
                                           Width="170" Margin="0,0,4,0"/>
                                 <Button Content="&#220;bertragen&#8230;" Padding="6,0" Margin="0,0,10,0" Click="BtnMainTransferDocType_Click" ToolTip="Belegart auf weitere Belege &#252;bertragen: gleiche Firma und gleicher Nummernaufbau/-kreis oder &#228;hnlicher Inhalt; Gruppenzuweisung m&#246;glich"/>

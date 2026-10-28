@@ -44,6 +44,7 @@ namespace Dateiumbenenner.Engine
         /// <summary>Löscht die Daten und gibt die Anzahl nicht löschbarer Dateien zurück.</summary>
         public static int Clear()
         {
+            SenderProfileStore.DiscardPendingWrites();
             OcrVocabulary.Forget();
             CrossCheck.Forget();
             CompanyDirectory.ResetLocal();

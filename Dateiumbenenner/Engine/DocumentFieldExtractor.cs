@@ -171,11 +171,12 @@ namespace Dateiumbenenner.Engine
             var block = new LineBlock(lines);
             var hit = block.Mark(DateRegex);
             foreach (var rx in DateRuleStore.MonthNameRegexes) block.Mark(rx, hit);
+            block.Mark(DateRuleStore.OcrNumericRx, hit);
 
             for (int i = 0; i < lines.Length; i++)
             {
                 if (!hit[i]) continue;
-                void Add(int index, string date, bool alt = false)
+                void Add(int index, string date, bool alt = false, bool ocr = false)
                 {
                     // Nächstgelegene Bezeichnung links vom Datum (höchstens 40 Zeichen Abstand)
                     var left = lines[i].Substring(0, index);
@@ -185,12 +186,15 @@ namespace Dateiumbenenner.Engine
                     if (i < 30) score += 0.3;
                     // Zweite Lesart einer mehrdeutigen Kurzform (25Oct23): nur als weiterer Vorschlag
                     if (alt) { score = Math.Max(0, score - 0.6); field.Add(date, score, (label?.Value ?? "Datumsmuster") + " (andere Lesart)"); return; }
+                    // OCR-Lesefehler (25.05,25 / 2 5 . 0 1 . 023): etwas hinter sauber gelesenen Daten
+                    if (ocr) { score = Math.Max(0, score - 0.3); field.Add(date, score, (label?.Value ?? "Datumsmuster") + " (OCR korrigiert)"); return; }
                     field.Add(date, score, label?.Value ?? "Datumsmuster");
                 }
                 foreach (Match m in DateRegex.Matches(lines[i]))
                     if (TryNormalize(m, out var date)) Add(m.Index, date);
                 // Monatsnamen: 23. Okt. 2025, 23Okt25, 25-Dez-23, 2025-MAY-10
                 foreach (var h in DateRuleStore.FindDates(lines[i], DateFormatKind.Monatsname)) Add(h.Index, h.Date, h.Alt);
+                foreach (var o in DateRuleStore.FindOcrDates(lines[i])) Add(o.Index, o.Date, ocr: true);
             }
             return field;
         }

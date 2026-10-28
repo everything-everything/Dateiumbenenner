@@ -134,18 +134,66 @@ namespace Dateiumbenenner.Engine
 
         private void SaveAmbiguous()
         {
-            try { Dateiumbenenner.Engine.SecureStorage.WriteAllText(_ambiguousFile, JsonSerializer.Serialize(_ambiguous.OrderBy(s => s).ToList(), new JsonSerializerOptions { WriteIndented = true })); }
-            catch { }
+            _ambiguousDirty = true;
+            ScheduleFlush();
         }
 
         private void Save()
         {
-            try
+            _dirty = true;
+            ScheduleFlush();
+        }
+
+        private bool _dirty, _ambiguousDirty;
+        private static volatile bool _discarded;
+
+        /// <summary>Gelernte Daten werden gelöscht (Zurücksetzen beim Beenden): ausstehende Schreibvorgänge verwerfen,
+        /// sonst entstünde die gelöschte Datei gleich wieder.</summary>
+        public static void DiscardPendingWrites() => _discarded = true;
+        private System.Threading.Timer? _saveTimer;
+        private readonly object _writeLock = new();
+
+        /// <summary>Viele Bestätigungen kurz hintereinander (z. B. Firma auf Tausende Belege übertragen) werden gebündelt
+        /// einmal geschrieben statt je Beleg die komplette Datei. Aufruf innerhalb von _lock.</summary>
+        private void ScheduleFlush()
+        {
+            if (_saveTimer == null)
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(_file)!);
-                Dateiumbenenner.Engine.SecureStorage.WriteAllText(_file, JsonSerializer.Serialize(_profiles, new JsonSerializerOptions { WriteIndented = true }));
+                _saveTimer = new System.Threading.Timer(_ => Flush());
+                AppDomain.CurrentDomain.ProcessExit += (_, _) => Flush();
             }
-            catch { }
+            _saveTimer.Change(1000, System.Threading.Timeout.Infinite);
+        }
+
+        /// <summary>Noch nicht geschriebene Änderungen sofort speichern.</summary>
+        public void Flush()
+        {
+            lock (_writeLock)
+            {
+                if (_discarded) return;
+                string? profiles = null, ambiguous = null;
+                lock (_lock)
+                {
+                    var options = new JsonSerializerOptions { WriteIndented = true };
+                    if (_dirty) profiles = JsonSerializer.Serialize(_profiles, options);
+                    if (_ambiguousDirty) ambiguous = JsonSerializer.Serialize(_ambiguous.OrderBy(s => s).ToList(), options);
+                    _dirty = _ambiguousDirty = false;
+                }
+                if (profiles != null)
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(_file)!);
+                        Dateiumbenenner.Engine.SecureStorage.WriteAllText(_file, profiles);
+                    }
+                    catch { }
+                }
+                if (ambiguous != null)
+                {
+                    try { Dateiumbenenner.Engine.SecureStorage.WriteAllText(_ambiguousFile, ambiguous); }
+                    catch { }
+                }
+            }
         }
     }
 }
