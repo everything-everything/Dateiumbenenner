@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <Version>5.1.2625</Version>
+    <Version>5.1.2626</Version>
     <Authors>everything-everything</Authors>
     <Product>Dateiumbenenner</Product>
     <Copyright>Copyright (c) 2026 everything-everything</Copyright>
@@ -25,6 +25,8 @@
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
     <PackageReference Include="SymSpell" Version="6.7.3" ExcludeAssets="contentFiles" />
+    <PackageReference Include="Microsoft.Recognizers.Text.DateTime" Version="1.8.13" />
+    <PackageReference Include="Microsoft.Recognizers.Text.NumberWithUnit" Version="1.8.13" />
   </ItemGroup>
 
   <ItemGroup>

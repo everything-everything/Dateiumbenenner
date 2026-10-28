@@ -112,10 +112,12 @@ namespace Dateiumbenenner.Engine
             var section = SectionFor(text, company);
             if (section.Length != text.Length)
             {
-                // Betr\u00E4ge au\u00DFerhalb des Belegs der gew\u00E4hlten Firma abwerten
+                // Betr\u00E4ge au\u00DFerhalb des Belegs der gew\u00E4hlten Firma abwerten (direkt ersetzen: Field.Add \u00FCbernimmt nur h\u00F6here Bewertungen)
                 var inside = new HashSet<string>(AmountRx.Matches(section).Select(m => m.Groups[1].Value));
-                foreach (var c in amount.Candidates.ToList())
-                    if (!inside.Contains(c.Value)) amount.Add(c.Value, c.Score - 1.5, c.Source);
+                for (int i = 0; i < amount.Candidates.Count; i++)
+                    if (amount.Candidates[i] is { Score: >= 0 } c && !inside.Contains(c.Value)
+                        && !(c.Value.Contains('.') && section.Contains(c.Value.Replace('.', ' '))))
+                        amount.Candidates[i] = c with { Score = Math.Max(0, c.Score - 2.0) };
                 foreach (var v in inside.OrderByDescending(Parse).Select((v, i) => (v, i)))
                     amount.Add(v.v, 1.5 - v.i * 0.01, "Beleg der Firma");
             }

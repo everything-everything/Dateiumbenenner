@@ -25,6 +25,19 @@ namespace Dateiumbenenner.Engine
 
         private static readonly Regex TokenAtStart = new(@"^\s*(?<value>[A-Z0-9OIl][A-Z0-9OIl\-/]{2,})", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // Fahrgestellnummer (FIN/VIN): 17 Zeichen, Buchstaben und Ziffern ohne I, O, Q
+        private static readonly Regex VinRegex = new(@"(?<![A-Za-z0-9])(?<value>[A-HJ-NPR-Z0-9]{17})(?![A-Za-z0-9])", RegexOptions.Compiled);
+        private static readonly Regex VinLabel = new(@"Fahrgestell|Fahrzeug\s*-?\s*Ident|Fzg\.?\s*-?\s*Ident|Ident\s*-?\s*Nr|\bFIN\b|\bVIN\b|Chassis", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>Wert hat die Form einer Fahrgestellnummer (17 Zeichen, Buchstaben und Ziffern gemischt, ohne I/O/Q).</summary>
+        private static bool IsVin(string? value)
+        {
+            value = value?.Trim();
+            if (value is not { Length: 17 }) return false;
+            var m = VinRegex.Match(value);
+            return m.Success && m.Length == 17 && value.Count(char.IsDigit) >= 3 && value.Count(char.IsLetter) >= 2;
+        }
+
         private static double LabelWeight(string label)
         {
             label = label.ToLowerInvariant();
@@ -78,7 +91,7 @@ namespace Dateiumbenenner.Engine
             if (string.IsNullOrEmpty(text)) return field;
             var lines = text.Replace("\t", "    ").Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
             var block = new LineBlock(lines);
-            var hit = block.Mark(PlainNumber, block.Mark(NumberLabel));
+            var hit = block.Mark(VinRegex, block.Mark(PlainNumber, block.Mark(NumberLabel)));
 
             for (int i = 0; i < lines.Length; i++)
             {
@@ -116,6 +129,15 @@ namespace Dateiumbenenner.Engine
                     if (Regex.IsMatch(before, @"[A-Za-zäöü]-?$")) continue;
                     var pv = ReadValue(lines[i], m.Groups["value"].Index) ?? m.Groups["value"].Value;
                     field.Add(FixDigits(pv.Trim('-', '/', '|', ':', '.')), 1.0, "Nr.");
+                }
+
+                // Fahrgestellnummer: als Vorschlag anbieten, aber hinter Rechnungs-/Belegnummern (außer Regeln bevorzugen sie)
+                foreach (Match m in VinRegex.Matches(lines[i]))
+                {
+                    var vin = m.Groups["value"].Value;
+                    if (!IsVin(vin)) continue;
+                    bool labeled = VinLabel.IsMatch(lines[i]) || (i > 0 && VinLabel.IsMatch(lines[i - 1]));
+                    field.Add(vin, labeled ? 0.9 : 0.5, labeled ? "Fahrgestell-Nr." : "FIN-Muster");
                 }
             }
             return field;
@@ -193,8 +215,6 @@ namespace Dateiumbenenner.Engine
             ("Angebot",              new Regex(@"\bAngebot\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
             ("Lieferschein",         new Regex(@"\bLieferschein\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
             ("Rechnung",             new Regex(@"\bRechnung\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 4),
-            // "Rechnungsnummer" ist eindeutig, aber nur ein schwacher Hinweis
-            ("Rechnung",             new Regex(@"\bRechnungs?\s*-?\s*(Nr|nummer)", RegexOptions.IgnoreCase | RegexOptions.Compiled), 1),
             ("Rechnungskorrektur",   new Regex(@"\b(Rechnungs\s*-?\s*korrektur|Korrektur\s*-?\s*rechnung)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 6),
             ("Korrektur",            new Regex(@"\bKorrektur\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 3),
             ("Sammelrechnung",       new Regex(@"\bSammel\s*-?\s*rechnung\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 6),
@@ -212,6 +232,20 @@ namespace Dateiumbenenner.Engine
             ("Schreiben",            new Regex(@"\bSchreiben\s+vom\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), 3),
         };
 
+        // Nummernbezeichnung der Belegart ("Rechnungsnummer", "Rechnungs-Nr.", "Lieferscheinnummer", "Lieferschein Nummer"):
+        // eigener Hinweis; zusammen mit dem Titel ("Lieferschein" + "Lieferschein-Nr.") ein starker Hinweis.
+        // "Belegnummer" ist neutral (kommt bei jeder Belegart vor).
+        private static readonly (string Type, Regex Rx, double Weight)[] NumberLabelRules =
+        {
+            ("Rechnung",     NumberLabelRx("Rechnungs?"), 2),
+            ("Gutschrift",   NumberLabelRx("Gutschrifts?"), 2),
+            ("Lieferschein", NumberLabelRx("Lieferscheins?"), 1.5),
+            ("Angebot",      NumberLabelRx("Angebots?"), 1.5),
+        };
+
+        private static Regex NumberLabelRx(string word) =>
+            new(@"\b" + word + @"\s*-?\s*(?:Nr|Nummer|No)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         private static readonly HashSet<string> BuiltInTypes = new(TypeRules.Select(r => r.Type), StringComparer.OrdinalIgnoreCase);
 
         public static Field ExtractDocumentType(string? text)
@@ -220,10 +254,15 @@ namespace Dateiumbenenner.Engine
             if (string.IsNullOrEmpty(text)) return field;
             var lines = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
             var scores = new Dictionary<string, double>();
+            var title = new Dictionary<string, double>();     // stärkster Titel-Treffer je Belegart
+            var labeled = new HashSet<string>();              // Belegarten mit eigener Nummernbezeichnung
             var block = new LineBlock(lines);
             int n = TypeRules.Length;
             var hit = new bool[lines.Length * n];
             for (int r = 0; r < n; r++) block.Mark(TypeRules[r].Rx, hit, n, r);
+            int nl = NumberLabelRules.Length;
+            var labelHit = new bool[lines.Length * nl];
+            for (int r = 0; r < nl; r++) block.Mark(NumberLabelRules[r].Rx, labelHit, nl, r);
 
             for (int i = 0; i < lines.Length; i++)
             {
@@ -233,9 +272,28 @@ namespace Dateiumbenenner.Engine
                     if (!hit[i * n + r]) continue;
                     var (type, rx, weight) = TypeRules[r];
                     foreach (Match m in rx.Matches(lines[i]))
-                        scores[type] = scores.GetValueOrDefault(type) + weight * pos * MatchFactor(lines[i], m);
+                    {
+                        double f = MatchFactor(lines[i], m);
+                        scores[type] = scores.GetValueOrDefault(type) + weight * pos * f;
+                        if (f >= 0.5) title[type] = Math.Max(title.GetValueOrDefault(type), weight * pos * f);
+                    }
+                }
+                for (int r = 0; r < nl; r++)
+                {
+                    if (!labelHit[i * nl + r]) continue;
+                    var (type, rx, weight) = NumberLabelRules[r];
+                    foreach (Match m in rx.Matches(lines[i]))
+                    {
+                        // "zu Lieferschein-Nr. 4711", "Ihre Rechnungsnummer": Bezug auf einen anderen Beleg
+                        bool reference = IsReference(lines[i], m);
+                        scores[type] = scores.GetValueOrDefault(type) + weight * pos * (reference ? 0.02 : 1.0);
+                        if (!reference) labeled.Add(type);
+                    }
                 }
             }
+            // Titel und passende Nummernbezeichnung zusammen ("Lieferschein" + "Lieferscheinnummer")
+            foreach (var type in labeled)
+                if (title.TryGetValue(type, out var t)) scores[type] += 0.5 * t;
             DocTypeStore.AddScores(block, scores, BuiltInTypes);
             foreach (var kv in scores) field.Add(DocTypeStore.Canonical(kv.Key), kv.Value, "Schl\u00FCsselwort");
             return field;
@@ -243,9 +301,13 @@ namespace Dateiumbenenner.Engine
 
         private static readonly Regex ColumnGap = new(@"\s{3,}|\t", RegexOptions.Compiled);
         private static readonly Regex LabelSuffix = new(@"^(s?\s*-?\s*(Nr|Nummer|No)\b|s?nummer|s?nr\b|-?datum)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Bezug auf einen anderen Beleg: "Ihr Angebot vom", "Lieferschein zu Auftrag", "gemäß unserem Angebot", "Bezug: Angebot"
+        private static readonly Regex ReferencePrefix = new(
+            @"(?:\b(?:Ihr(?:e[mnrs]?)?|unser(?:e[mnrs]?)?|gem(?:äß|aess|\.)|laut|lt\.|zu[mr]?|aus|auf|bzgl\.?|bez(?:ü|ue)glich|Bezug\s*:?|betr(?:\.|effend|\s*:)|siehe|vgl\.)\s*(?:(?:dem|der|den|das|die|Ihr(?:e[mnrs]?)?|unser(?:e[mnrs]?)?)\s+)?)$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>Gewichtung eines Belegart-Treffers: eigener Spaltenabschnitt, alleinstehender Titel z\u00E4hlt mehr, Feldbezeichnungen (z. B. "Beleg-Nr") weniger.</summary>
-        public static double MatchFactor(string line, Match m)
+        private static (int Start, int End) Segment(string line, Match m)
         {
             int start = 0, end = line.Length;
             foreach (Match g in ColumnGap.Matches(line))
@@ -253,12 +315,26 @@ namespace Dateiumbenenner.Engine
                 if (g.Index + g.Length <= m.Index) start = g.Index + g.Length;
                 else if (g.Index >= m.Index + m.Length) { end = g.Index; break; }
             }
+            return (start, end);
+        }
+
+        private static bool IsReference(string line, Match m)
+        {
+            int start = Segment(line, m).Start;
+            return ReferencePrefix.IsMatch(line.Substring(start, m.Index - start));
+        }
+
+        public static double MatchFactor(string line, Match m)
+        {
+            var (start, end) = Segment(line, m);
             var segment = line.Substring(start, end - start).Trim();
             double f = segment.Length < 40 ? 1.0 : 0.5;
             // Belegart steht meist als alleinstehender Begriff (Titel)
             if (segment.Equals(m.Value.Trim(), StringComparison.OrdinalIgnoreCase)) f *= 2.0;
-            // "Beleg-Nr", "Lieferschein-Datum": Feldbezeichnung, kein Hinweis auf die Belegart
+            // "Lieferschein-Nr", "Lieferschein-Datum": Feldbezeichnung, kein Titel (Nummernbezeichnungen werten NumberLabelRules)
             if (LabelSuffix.IsMatch(line.Substring(m.Index + m.Length))) return 0;
+            // Bezug auf einen anderen Beleg (z. B. "Ihr Angebot vom ..." auf einem Lieferschein): praktisch kein Hinweis
+            if (ReferencePrefix.IsMatch(line.Substring(start, m.Index - start))) return f * 0.02;
             return f;
         }
     }

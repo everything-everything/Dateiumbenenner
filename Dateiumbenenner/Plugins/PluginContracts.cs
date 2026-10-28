@@ -52,6 +52,15 @@ namespace Dateiumbenenner.Plugins
 
     public record AddressInfo(string? Street, string? Zip, string? City);
 
+    /// <summary>Firma mit Sitz-PLZ für das Firmenverzeichnis (Pluspunkte bei der Firmenerkennung).</summary>
+    public record CompanyRecord(string Name, string? Zip, string? City);
+
+    /// <summary>Optional für Adress-Provider: liefert alle bekannten Firmen (z. B. Adresstabelle der Datenbank).</summary>
+    public interface ICompanyDirectorySource
+    {
+        Task<IReadOnlyList<CompanyRecord>> LoadCompaniesAsync();
+    }
+
     /// <summary>Schnittstelle, die jede Plugin-DLL implementieren muss.</summary>
     public interface IPlugin
     {

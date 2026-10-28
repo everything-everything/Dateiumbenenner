@@ -13,6 +13,8 @@ Dateiumbenenner (MIT) verwendet folgende Komponenten. Diese werden per NuGet bez
 | Microsoft.Data.Sqlite | 8.0.11 | MIT | https://github.com/dotnet/efcore |
 | SQLitePCLRaw (bundle_e_sqlite3, transitiv) | 2.1.6 | Apache-2.0 | https://github.com/ericsink/SQLitePCL.raw |
 | SQLite (e_sqlite3, nativ) | 3.x | Public Domain | https://sqlite.org/copyright.html |
+| Microsoft.Recognizers.Text.DateTime / .NumberWithUnit (mit Microsoft.Recognizers.Text, .Number, .Definitions, .DataTypes.TimexExpression, transitiv) | 1.8.13 | MIT | https://github.com/microsoft/Recognizers-Text |
+| Microsoft.Extensions.Caching.Memory / .Caching.Abstractions / .Options / .Primitives / .DependencyInjection.Abstractions (transitiv über Recognizers-Text) | 2.2.0 | Apache-2.0 | https://github.com/dotnet/extensions |
 
 ### IniGenerator-Plugin (separates Repository)
 
@@ -29,6 +31,7 @@ Dateiumbenenner (MIT) verwendet folgende Komponenten. Diese werden per NuGet bez
 |---|---|---|---|
 | GeoNames Postleitzahlen Deutschland (`Dateiumbenenner/Data/GeoNames-DE.zip`, unverändert in die Programmdatei eingebettet) | 24.10.2026 | CC BY 4.0 | https://www.geonames.org/ (https://download.geonames.org/export/zip/DE.zip) |
 | OCR-Fachwortliste (`Dateiumbenenner/Data/OcrFachwoerter.txt`, in die Programmdatei eingebettet) | – | MIT (eigene Zusammenstellung, Teil von Dateiumbenenner) | – |
+| GLEIF LEI-Daten (Golden Copy, nicht mitgeliefert – nur optionaler Download im Programm, daraus Name/PLZ/Ort aktiver deutscher Firmen) | jeweils aktuell | CC0 1.0 | https://www.gleif.org/ (https://goldencopy.gleif.org/) |
 
 - **GeoNames**: Postleitzahlen-Daten von GeoNames (www.geonames.org), lizenziert unter Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/). Die Daten werden unverändert mitgeliefert (SHA-256 der ZIP: `295DC0017D2DA8C633C748A24DF989A50F039DCD96187B3F0C6EBB30DA10D15C`); Aktualisierungen im Programm laden ausschließlich von der oben genannten Adresse.
 

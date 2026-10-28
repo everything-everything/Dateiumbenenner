@@ -464,6 +464,8 @@ Klicken Sie auf ein unterstrichenes Thema, um es anzuzeigen. Mit den Schaltfläc
 * [[ocr|OCR-Korrektur und Wörterbücher]]
 * [[txtnummern|TXT-Nummern korrigieren]]
 * [[plz|PLZ-Verzeichnis]]
+* [[firmenverzeichnis|Firmenverzeichnis (eigene DB, GLEIF)]]
+* [[gegenpruefung|Hintergrund-Gegenprüfung Datum/Betrag]]
 * [[nummernregeln|Nummernmuster und Belegarten]]
 * [[profile|Profile]]
 * [[listen|Listen: Kopieren, Markieren, Filtern]]
@@ -650,6 +652,50 @@ In den GeoNames-Daten stehen bei Großkunden-PLZ teils Firmennamen statt Ortsnam
 
 Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
 
+            ("firmenverzeichnis", "Firmenverzeichnis (eigene DB, GLEIF)", @"Das Firmenverzeichnis stützt die Firmenerkennung: Bekannte Firmen bekommen Pluspunkte, besonders wenn ihre PLZ im Beleg steht. Es ersetzt die Erkennung nicht – Firmen, die in keiner Liste stehen (z. B. kleine Handwerker oder Händler vor Ort), werden nie abgewertet.
+
+# Aufruf
+Menü Extras → ""Firmenverzeichnis (eigene DB, GLEIF)..."". Der Stand wird rechts in der Statusleiste angezeigt.
+
+# Quellen
+* Eigene Datenbank: Firmen mit PLZ und Ort aus der Adress-Datenbank eines Plugins (z. B. INI Erzeugen). Wird nach dem Start im Hintergrund eingelesen und als Zwischenstand im Profil gespeichert; ist die Datenbank nicht erreichbar, bleibt der letzte Stand aktiv.
+* Gelernt: Firmen, die Sie bestätigt bzw. übertragen haben, sofern ihre PLZ im Beleg vorkommt.
+* GLEIF (optional): das freie Verzeichnis der Global Legal Entity Identifier Foundation (CC0) – rund 240.000 aktive deutsche Unternehmen mit eingetragenem Namen, PLZ und Ort. Überwiegend größere Firmen und Gesellschaften; Einzelunternehmer fehlen meist.
+
+# Pluspunkte
+* Eigene Datenbank oder gelernt: +1, mit passender PLZ im Text +3.
+* GLEIF: +0,5, mit passender PLZ im Text +2.
+* Verglichen wird ohne Rechtsform, Groß-/Kleinschreibung und Satzzeichen (""ZAPF GmbH"" = ""Zapf GmbH & Co. KG"", ""Siemens AG"" = ""Siemens Aktiengesellschaft"").
+* Die Punkte wirken bei neu eingelesenen bzw. neu ausgewerteten Belegen.
+
+# GLEIF herunterladen
+* Schaltfläche ""GLEIF herunterladen / aktualisieren"" – lädt die aktuelle Gesamtdatei (ca. 480 MB) im Hintergrund; Fortschritt in Fenster und Statusleiste, Abbrechen jederzeit möglich.
+* Geladen wird nur per HTTPS von goldencopy.gleif.org, ohne Umleitung; Größe und SHA-256 werden geprüft, die Daten auf Plausibilität kontrolliert.
+* Gespeichert werden nur aktive deutsche Firmen (Name, PLZ, Ort) als kompakte Datei Daten\gleif_de.dat (ca. 5 MB) für alle Profile; die heruntergeladene Datei wird danach gelöscht.
+* ""GLEIF entfernen"" löscht die Datei wieder.
+
+# Testfeld
+Firmenname und optional PLZ eingeben: angezeigt werden Vergleichsschlüssel, Pluspunkte und gefundene Einträge mit Quelle.
+
+Siehe auch: [[firmauebertragen|Firma übertragen]], [[lizenzen|Lizenzen und Drittanbieter]]"),
+
+            ("gegenpruefung", "Hintergrund-Gegenprüfung Datum/Betrag", @"Testfunktion: Datum und Betrag jedes Belegs werden im Hintergrund mit einer zweiten, unabhängigen Erkennung (Microsoft Recognizers-Text) gegengeprüft.
+
+# Aufruf
+Menü Extras → ""Hintergrund-Gegenprüfung Datum/Betrag (Test)"" ein- bzw. ausschalten. Die Einstellung bleibt erhalten.
+
+# Anzeige
+* Spalte ""Prüf."" in der Dokumentliste: ✓ bestätigt, ⚠ Abweichung, – nichts Vergleichbares gefunden. Der Tooltip zeigt die Einzelheiten.
+* Fortschritt und Ergebnis rechts in der Statusleiste (""Gegenprüfung: x / n"", ""Gegenprüfung fertig …"").
+* Findet die Gegenprüfung ein anderes Datum, wird es zusätzlich als Vorschlag in die Datumsauswahl aufgenommen.
+
+# Wichtig
+* Es wird nie etwas automatisch geändert oder überschrieben.
+* Die Prüfung läuft mit niedriger Priorität; Ergebnisse werden zwischengespeichert (crosscheck_cache.json) und nur bei geändertem Text oder Datum neu berechnet.
+* Grenzen: Schreibweisen wie 23Okt25, 25Oct23 oder 2025-MAY-10 kennt die Gegenprüfung nicht (– statt ⚠); erkannt werden nur Beträge in Euro.
+
+Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
+
             ("technik", "Aufbau und verwendete NuGet-Pakete", $@"# Plattform
 * Programmiersprache: C#
 * Framework: .NET 8, Zielplattform net8.0-windows10.0.19041.0
@@ -667,6 +713,8 @@ Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
 > System.Text.RegularExpressions  4.3.1           Mustererkennung
 > Microsoft.Data.Sqlite           8.0.11          interne Dokumentdatenbank je Profil
 > SQLitePCLRaw.bundle_e_sqlite3   2.1.6           SQLite-Anbindung (transitiv)
+> Microsoft.Recognizers.Text.DateTime       1.8.13  Gegenprüfung Datum
+> Microsoft.Recognizers.Text.NumberWithUnit 1.8.13  Gegenprüfung Betrag
 
 # IniGenerator-Plugin (separat)
 > MySqlConnector                  2.6.2           MySQL/MariaDB-Zugriff
@@ -708,6 +756,8 @@ Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2026 
 > Microsoft.Data.Sqlite    MIT (.NET Foundation)
 > SQLitePCLRaw             Apache License 2.0 (Eric Sink)
 > SQLite (e_sqlite3)       Public Domain
+> Microsoft.Recognizers.Text MIT (Microsoft Corporation)
+> Microsoft.Extensions.* 2.2 Apache License 2.0 (transitiv)
 
 # IniGenerator-Plugin
 > MySqlConnector           MIT
@@ -718,6 +768,7 @@ Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2026 
 # Mitgelieferte Daten
 > GeoNames-Postleitzahlen DE   CC BY 4.0, unverändert eingebettet
 > OCR-Fachwortliste            MIT, eigene Zusammenstellung
+> GLEIF-Firmenverzeichnis      CC0 1.0, optionaler Download
 
 Postleitzahlen-Daten von GeoNames (www.geonames.org), lizenziert unter Creative Commons Attribution 4.0 (creativecommons.org/licenses/by/4.0). Siehe [[plz|PLZ-Verzeichnis]].
 
@@ -845,8 +896,12 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 > D
 * [[ueber|Datenschutz / Kontakt]]
 * [[kompression|DPI]]
+> F
+* [[firmenverzeichnis|Firmenverzeichnis]]
 > G
+* [[gegenpruefung|Gegenprüfung Datum/Betrag]]
 * [[plz|GeoNames]]
+* [[firmenverzeichnis|GLEIF]]
 * [[kompression|Ghostscript]]
 * [[haftung|Gewährleistung]]
 > H
@@ -875,6 +930,7 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 * [[signatur|Prüfsummen]]
 > R
 * [[kompression|Rasterisieren]]
+* [[gegenpruefung|Recognizers-Text]]
 * [[umbenennen|Rechnungsnummer]]
 * [[nummernregeln|Maske]]
 * [[nummernregeln|Belegarten]]

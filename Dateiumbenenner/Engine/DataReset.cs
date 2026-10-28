@@ -22,6 +22,8 @@ namespace Dateiumbenenner.Engine
             "doc_templates.json",
             "address_debug.txt",
             "firma_umstellen.log",
+            "company_directory_",
+            "crosscheck_cache.json",
             OcrVocabulary.FileName,
         };
 
@@ -43,6 +45,8 @@ namespace Dateiumbenenner.Engine
         public static int Clear()
         {
             OcrVocabulary.Forget();
+            CrossCheck.Forget();
+            CompanyDirectory.ResetLocal();
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             GC.Collect();
             GC.WaitForPendingFinalizers();

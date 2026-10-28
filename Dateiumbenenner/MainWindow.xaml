@@ -22,6 +22,8 @@
             <Separator/>
             <MenuItem Header="_PLZ-Verzeichnis (DE) prüfen und aktualisieren..." Click="MenuPlzUpdate_Click" ToolTip="Eine PLZ-Liste ist mitgeliefert. Optional: Aktualisierung von download.geonames.org mit Prüfung und Vorschau vor der Übernahme."/>
             <MenuItem Header="PLZ-Verzeichnis: _mitgelieferte Liste verwenden..." Click="MenuPlzRestore_Click"/>
+            <MenuItem Header="_Firmenverzeichnis (eigene DB, GLEIF)..." Click="MenuCompanyDirectory_Click" ToolTip="Bekannte Firmen aus eigener Datenbank, Gelerntem und optional dem freien GLEIF-Verzeichnis geben bei der Firmenerkennung Pluspunkte – besonders, wenn ihre PLZ im Beleg steht."/>
+            <MenuItem x:Name="MenuCrossCheck" Header="Hintergrund-_Gegenprüfung Datum/Betrag (Test)" IsCheckable="True" Click="MenuCrossCheck_Click" ToolTip="Prüft Datum und Betrag aller Belege im Hintergrund mit Microsoft Recognizers-Text als Zweitmeinung. Ändert nichts – Abweichungen werden in der Spalte „Prüf.“ markiert."/>
             <Separator/>
             <MenuItem x:Name="MenuClearOnExit" Header="Datenbank und _Lerndaten beim Schließen leeren" IsCheckable="True" Click="MenuClearOnExit_Click" ToolTip="Beim Beenden werden Dokument-Datenbank und gelernte Daten des aktiven Profils gelöscht. Einstellungen bleiben erhalten."/>
             <MenuItem Header="Datenbank und Lerndaten _jetzt leeren..." Click="MenuClearNow_Click"/>
@@ -209,6 +211,16 @@
                                     <GridViewColumn.DisplayMemberBinding>
                                         <Binding Path="Date"/>
                                     </GridViewColumn.DisplayMemberBinding>
+                                </GridViewColumn>
+                                <GridViewColumn Width="42">
+                                    <GridViewColumn.Header>
+                                        <GridViewColumnHeader Tag="CrossCheckFlag" Content="Prüf." ToolTip="Hintergrund-Gegenprüfung (Extras): ✓ bestätigt, ⚠ Abweichung, – nichts vergleichbar"/>
+                                    </GridViewColumn.Header>
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding CrossCheckFlag}" ToolTip="{Binding CrossCheckInfo}" HorizontalAlignment="Center"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
                                 <GridViewColumn Width="50">
                                     <GridViewColumn.Header>
@@ -571,6 +583,9 @@
                     <!-- NEU: Ladefortschritt -->
                     <StatusBarItem>
                         <ProgressBar x:Name="LoadingProgress" Width="150" Height="16" Minimum="0" Maximum="100" Visibility="Collapsed"/>
+                    </StatusBarItem>
+                    <StatusBarItem HorizontalAlignment="Right">
+                        <TextBlock x:Name="TxtBackground" Foreground="DimGray" ToolTip="Hintergrundaufgaben (Gegenprüfung, Firmenverzeichnis)"/>
                     </StatusBarItem>
                 </StatusBar>
             </Grid>

@@ -52,6 +52,47 @@ Plugin-Dateien sowie `Server\dateiumbenenner_api.php` für die separate Installa
 auf dem Webserver. Der Plugin-Ordner wird unter `Plugins` neben der EXE installiert;
 die PHP-Datei gehört auf den Webserver, nicht in das Hauptprogramm-Verzeichnis.
 
+## XML-Dateinamen und Kennungen (INI-Generator-Plugin)
+Beim Erzeugen und Speichern von XML-Dateien werden Dateiname (ohne `.xml`) und
+XML-Kennung (`Kennunung`, Schreibweise des Archivformats) identisch bereinigt:
+Umlaute und Akzente werden zu Grundbuchstaben (`ä` → `a`, `Ü` → `U`, `é` → `e`),
+`ß` wird zu `ss`. Erlaubt sind nur ASCII-Buchstaben, Ziffern sowie die
+Kennungstrennzeichen `_` und `-`; andere Zeichen entfallen.
+Beispiel: `BE_AutohausAuftragsbestatigung_<GUID>.xml`.
+Firmenname, Belegart und Erkennungstexte innerhalb der XML bleiben unverändert.
+Wird eine ältere XML im Editor unter einem bereinigten Namen gespeichert, bleibt
+die Originaldatei erhalten. Existiert der neue Dateiname bereits, meldet der
+Editor einen Fehler, statt diese andere Datei zu überschreiben.
+
+## Erkennung der Belegdaten
+- **Belegart:** Ein alleinstehender Titel zählt am meisten. Nummernbezeichnungen
+  (`Rechnungsnummer`, `Rechnungs-Nr.`, `Lieferscheinnummer`, `Lieferschein-Nr.`,
+  `Lieferschein Nummer`, ebenso Gutschrift und Angebot) sind ein eigener Hinweis.
+  Titel und passende Nummernbezeichnung zusammen (z. B. `Lieferschein` +
+  `Lieferscheinnummer`) sind ein starker Hinweis. `Belegnummer` ist neutral.
+  Bezüge auf andere Belege (`Ihr Angebot vom …`, `zu Lieferschein-Nr. …`,
+  `gemäß unserem Angebot`) werden praktisch nicht gewertet.
+- **Betrag:** Eindeutige Endbeträge (`Gesamtbetrag`, `Rechnungsbetrag`,
+  `Endbetrag`, `Zahlbetrag`, `zu zahlen` …) haben Vorrang vor allgemeinen Begriffen
+  (`Summe`, `Gesamt`, `Brutto`, `Total`).
+  - Netto-, Zwischensummen- und Steuerzeilen gelten nicht als Endbetrag.
+  - Der Betrag darf bis zu drei Zeilen unter dem Begriff stehen.
+  - Neben dem Begriff wird auch `1 234,56` erkannt.
+  - Bei mehreren Belegen in einer Datei werden Beträge außerhalb des Belegs der
+    gewählten Firma abgewertet.
+- **Fahrgestellnummern (FIN/VIN):** 17-stellige FINs erscheinen als
+  Nummernvorschlag, mit Bezeichnung `Fahrgestell-Nr.`/`FIN`/`VIN` vorrangig. Sie
+  stehen hinter Rechnungs- und Belegnummern, außer Regeln oder eine gelernte
+  Fundstelle bevorzugen sie.
+- **Firmennamen:** Gruß- und Dankesformeln (`Mit freundlichen Grüßen`,
+  `Vielen Dank`, `Sehr geehrte …`, `MfG` usw.) werden nie als Firma vorgeschlagen,
+  gelernt oder als Absender übernommen – unabhängig von der Ausschlussliste.
+  Steht eine Firma mit Rechtsform direkt dahinter, wird nur diese übernommen.
+- **XML-Editor-Vorgaben** gelten nur für genau die Firma und Belegart, für die sie
+  gespeichert wurden. Ältere, firmenweite Vorgaben werden nicht mehr angewendet.
+  Wird eine Vorgabezeile im Beleg nicht über Rohzeile, Erkennungsmerkmal oder
+  Begriff gefunden, füllt sie nur leere Felder.
+
 ## Integrität / Signatur
 Releases enthalten `SHA256SUMS.txt` (SHA-256 aller Dateien), die Signatur `SHA256SUMS.txt.p7s` und das öffentliche, selbst ausgestellte Zertifikat `Dateiumbenenner-CodeSigning.cer`. EXE/DLL des Projekts sind Authenticode-signiert.
 

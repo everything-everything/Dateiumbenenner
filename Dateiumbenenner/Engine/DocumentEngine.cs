@@ -129,7 +129,7 @@ namespace Dateiumbenenner.Engine
 
         public void ConfirmSender(string? text, string company, string? street = null, string? zip = null, string? city = null)
         {
-            if (string.IsNullOrWhiteSpace(company) || CompanyMatcher.IsQuantity(company)) return;
+            if (string.IsNullOrWhiteSpace(company) || CompanyMatcher.IsQuantity(company) || CompanyExclusions.IsLetterPhrase(company)) return;
             CompanyMatcher.Learn(company);
             var fp = SenderProfileStore.ExtractFingerprints(text, street, zip);
             _profiles.Learn(company, fp, street, zip, city);
@@ -176,7 +176,17 @@ namespace Dateiumbenenner.Engine
 
         // ---------- Betrag ----------
         private static readonly Regex AmountRegex = new(@"(?<![\d,.])(\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2})(?![\d])", RegexOptions.Compiled);
-        private static readonly Regex AmountKeywordRegex = new(@"(Gesamtbetrag|Rechnungsbetrag|Endbetrag|Bruttobetrag|Brutto|Zahlbetrag|zu\s+zahlen|Gesamtsumme|Summe|Gesamt|Total)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Neben einem Begriff auch Tausender mit Leerzeichen/Apostroph ("1 234,56", "1'234,56")
+        private static readonly Regex LooseAmountRegex = new(@"(?<![\d,.])(\d{1,3}(?:[ \u00A0'.]\d{3})+,\d{2}|\d+,\d{2})(?![\d])", RegexOptions.Compiled);
+        // Eindeutige Endbeträge
+        private static readonly Regex StrongAmountKeyword = new(@"(Gesamtbetrag|Rechnungsbetrag|Endbetrag|Bruttobetrag|Zahlbetrag|Zahlungsbetrag|zu\s+zahlen|zahlbarer\s+Betrag|Gesamtsumme|Endsumme|Rechnungssumme|Bruttosumme|Gesamt\s*-?\s*brutto|Summe\s*-?\s*brutto|Total\s+amount|Amount\s+due|Grand\s+total)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Schwache Hinweise (nur als ganzes Wort: nicht "Gesamtgewicht", "Zwischensumme")
+        private static readonly Regex WeakAmountKeyword = new(@"\b(Brutto|Summe|Gesamt|Gesamtpreis|Total)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Teilbeträge: kein Endbetrag (außer ausdrücklich brutto/inkl.)
+        private static readonly Regex PartialAmountLine = new(@"netto|Zwischen\s*-?\s*summe|Teil\s*-?\s*summe|Zwischentotal|Subtotal", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Steuer/Abzüge: schließen nur schwache Begriffe aus ("Summe MwSt"), nicht "Gesamtbetrag ... davon MwSt"
+        private static readonly Regex TaxAmountLine = new(@"\b(MwSt|USt|Mehrwertsteuer|Umsatzsteuer|Steuer|VAT)\b|Rabatt|Skonto|Anzahlung", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex GrossHint = new(@"brutto|inkl|incl|einschl", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public Field ExtractAmount(string? text)
         {
@@ -184,24 +194,36 @@ namespace Dateiumbenenner.Engine
             if (string.IsNullOrEmpty(text)) return field;
             var lines = SplitLines(text);
             static decimal Parse(string s) => decimal.TryParse(s, NumberStyles.Number, DeCulture, out var d) ? d : 0m;
+            // Auf Begriffszeilen auch "1 234,56" (-> "1.234,56") statt nur "234,56"
+            static List<string> Values(string line) => LooseAmountRegex.Matches(line)
+                .Select(m => Regex.Replace(m.Groups[1].Value, @"[ \u00A0']", ".")).ToList();
 
             var all = new List<string>();
-            var keyword = new List<string>();
+            var strong = new List<string>();
+            var weak = new List<string>();
             for (int i = 0; i < lines.Count; i++)
             {
                 var found = AmountRegex.Matches(lines[i]).Select(m => m.Groups[1].Value).ToList();
                 all.AddRange(found);
-                if (AmountKeywordRegex.IsMatch(lines[i]))
+                bool isStrong = StrongAmountKeyword.IsMatch(lines[i]);
+                if (!isStrong && !WeakAmountKeyword.IsMatch(lines[i])) continue;
+                if ((PartialAmountLine.IsMatch(lines[i]) || (!isStrong && TaxAmountLine.IsMatch(lines[i]))) && !GrossHint.IsMatch(lines[i])) continue;
+
+                var values = Values(lines[i]);
+                // Betrag steht unter dem Begriff: nächste Zeilen mit Betrag (bis zu 3), aber nicht über den nächsten Begriff hinaus
+                for (int k = i + 1; values.Count == 0 && k < Math.Min(lines.Count, i + 4); k++)
                 {
-                    if (found.Count == 0 && i + 1 < lines.Count)
-                        found = AmountRegex.Matches(lines[i + 1]).Select(m => m.Groups[1].Value).ToList();
-                    keyword.AddRange(found);
+                    if (StrongAmountKeyword.IsMatch(lines[k]) || WeakAmountKeyword.IsMatch(lines[k]) || PartialAmountLine.IsMatch(lines[k]) || TaxAmountLine.IsMatch(lines[k])) break;
+                    values = Values(lines[k]);
                 }
+                (isStrong ? strong : weak).AddRange(values);
             }
-            // Schlüsselwort-Beträge zuerst (größter zuerst), danach die übrigen
-            var kw = keyword.Distinct().OrderByDescending(Parse).ToList();
+            // Eindeutige Endbeträge zuerst, dann schwache Schlüsselwörter (jeweils größter zuerst), danach die übrigen
+            var st = strong.Distinct().OrderByDescending(Parse).ToList();
+            for (int i = 0; i < st.Count; i++) field.Add(st[i], 2.5 - i * 0.01, "Schlüsselwort");
+            var kw = weak.Distinct().Except(st).OrderByDescending(Parse).ToList();
             for (int i = 0; i < kw.Count; i++) field.Add(kw[i], 2.0 - i * 0.01, "Schlüsselwort");
-            var rest = all.Distinct().Except(kw).OrderByDescending(Parse).ToList();
+            var rest = all.Distinct().Except(st).Except(kw).OrderByDescending(Parse).ToList();
             for (int i = 0; i < rest.Count; i++) field.Add(rest[i], 1.0 - i * 0.01, "Betragsmuster");
             return field;
         }

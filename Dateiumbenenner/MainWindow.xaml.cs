@@ -77,6 +77,11 @@ namespace Dateiumbenenner
         public bool NumberManuallySet { get; set; }
         public bool DateManuallySet { get; set; }
         public bool DocTypeManuallySet { get; set; }
+        /// <summary>Hintergrund-Gegenprüfung: "✓" bestätigt, "⚠" Abweichung, "–" nichts vergleichbar, leer = (noch) nicht geprüft.</summary>
+        private string? _crossCheckFlag; public string? CrossCheckFlag { get => _crossCheckFlag; set { if (_crossCheckFlag != value) { _crossCheckFlag = value; OnPropertyChanged(nameof(CrossCheckFlag)); } } }
+        private string? _crossCheckInfo; public string? CrossCheckInfo { get => _crossCheckInfo; set { if (_crossCheckInfo != value) { _crossCheckInfo = value; OnPropertyChanged(nameof(CrossCheckInfo)); } } }
+        /// <summary>Stand der letzten Gegenprüfung (Textreferenz und Datum), um Änderungen zu erkennen.</summary>
+        internal string? CrossCheckText; internal string? CrossCheckDate;
         public event PropertyChangedEventHandler? PropertyChanged; private void OnPropertyChanged(string n)=>PropertyChanged?.Invoke(this,new PropertyChangedEventArgs(n));
         public void RefreshSizeDisplay()=>OnPropertyChanged(nameof(FileSizeDisplay));
     }
@@ -283,6 +288,7 @@ namespace Dateiumbenenner
                 prefixTab?.AttachSplitInfo(TxtMainSplitInfo);
                 if (TxtMainNewPrefix != null) TxtMainNewPrefix.TextChanged += (_, _) => { if (_currentMeta != null) RefreshNewNamePreview(_currentMeta); };
                 if (CmbMainCompany != null) HookMainCompanyEditing();
+                InitBackgroundServices();
                 InitPlugins();
                 var txtSteps = FindName("TxtDocTypeNumberSteps") as System.Windows.Controls.TextBox;
                 if (txtSteps != null && string.IsNullOrEmpty(txtSteps.Text)) txtSteps.Text = _docTypeNumberSteps.ToString();
@@ -979,7 +985,7 @@ namespace Dateiumbenenner
             // Gelerntes Absender-Profil (USt-ID, IBAN, Telefon ...) hat Vorrang
             // pdfPath: gleichnamige Layout-TXT/PDF wird für die Adressbewertung genutzt
             var profile = Engine.IdentifySender(fullText, pdfPath);
-            if (profile != null && !Dateiumbenenner.Engine.CompanyExclusions.IsExcluded(profile.Company) && !own.Matches(profile.Company))
+            if (profile != null && !Dateiumbenenner.Engine.CompanyExclusions.IsExcluded(profile.Company) && !Dateiumbenenner.Engine.CompanyExclusions.IsLetterPhrase(profile.Company) && !own.Matches(profile.Company))
             {
                 list.RemoveAll(c => string.Equals(c, profile.Company, StringComparison.OrdinalIgnoreCase));
                 // Profil-Name steht nicht im Beleg (z. B. falsch gelerntes Merkmal) oder nur ähnlich, während eine andere ähnliche Firma wörtlich dasteht: nur als Alternative anbieten
@@ -1121,6 +1127,9 @@ namespace Dateiumbenenner
                 if (m.Success && HasLegalForm(c[m.Length..])) c = c[m.Length..].Trim();
                 var j = LeadingJunkRegex.Match(c);
                 if (j.Success && j.Length < c.Length && c[j.Length..].Trim().Length >= 3) c = c[j.Length..].Trim();
+                // "Mit freundlichen Grüßen Muster GmbH" -> "Muster GmbH" (ohne Rechtsform bleibt die Formel und wird als Rauschen verworfen)
+                int g = Dateiumbenenner.Engine.CompanyExclusions.LetterPhraseLength(c);
+                if (g > 0 && c[g..].Trim(EnclosingChars).Trim() is { Length: >= 3 } rest && HasLegalForm(rest)) c = rest;
                 if (!result.Contains(c, StringComparer.OrdinalIgnoreCase)) result.Add(c);
             }
             return result;
@@ -1131,6 +1140,8 @@ namespace Dateiumbenenner
         {
             var t = c.Trim();
             if (t.Length < 3 || NoiseWordRegex.IsMatch(t) || DocTypeWordRegex.IsMatch(t)) return true;
+            // Gruß-/Dankesformel ("Mit freundlichen Grüßen", "Vielen Dank")
+            if (Dateiumbenenner.Engine.CompanyExclusions.IsLetterPhrase(t) && !HasLegalForm(t)) return true;
             // Tabellenkopf ("Bezeichnung Auftragsmenge Einzelpreis Gesamtpreis")
             if (!HasLegalForm(t) && TableHeaderRegex.Matches(t).Count >= 2) return true;
             // PLZ + Ort ("D-55469 Simmern", "55469 Simmern") ist eine Adresse, keine Firma
@@ -1184,12 +1195,15 @@ namespace Dateiumbenenner
             int n = Math.Max(1, lines.Length);
             var layout = Dateiumbenenner.Engine.PdfLayoutReader.ReadPageLayout(pdfPath);
             list.RemoveAll(c => DocTypeWordRegex.IsMatch(c.Trim()));   // Belegtyp ist keine Firma
+            var zipsInText = Dateiumbenenner.Engine.CompanyDirectory.ZipsInText(fullText);
             double Score(string c, int order)
             {
                 double s = -order * 0.3;                                 // Adress-Ranking
                 if (HasLegalForm(c)) s += 4;
                 if (IndustryRegex.IsMatch(c)) s += 2;
                 var ct = c.Trim();
+                // Firmenverzeichnis (eigene DB, gelernt, GLEIF): bekannte Firma, ggf. mit ihrer PLZ im Text – nur Pluspunkte
+                s += Dateiumbenenner.Engine.CompanyDirectory.Bonus(ct, zipsInText);
                 if (!HasLegalForm(ct))
                 {
                     if (TableHeaderRegex.IsMatch(ct)) s -= 3;                     // Tabellenkopf/Positionstext
@@ -1778,6 +1792,13 @@ namespace Dateiumbenenner
             CompanyMatcher.Learn(src.CompanyName);
             if (!string.IsNullOrWhiteSpace(src.CompanyName) && src.FullText?.Contains(src.CompanyName!, StringComparison.OrdinalIgnoreCase) == true)
                 Engine.ConfirmSender(src.FullText, src.CompanyName!);
+            try
+            {
+                EnsureAddress(src);
+                if (!string.IsNullOrWhiteSpace(src.Zip) && src.FullText?.Contains(src.Zip!) == true)
+                    Dateiumbenenner.Engine.CompanyDirectory.Learn(src.CompanyName, src.Zip, src.City);
+            }
+            catch { }
             Dispatcher.BeginInvoke(new Action(() => OfferTemplates(new[] { src })), System.Windows.Threading.DispatcherPriority.Background);
         }
 
@@ -2781,6 +2802,7 @@ namespace Dateiumbenenner
         public void RegisterAddressProvider(Dateiumbenenner.Plugins.IAddressProvider provider)
         {
             if (provider != null && !_addressProviders.Contains(provider)) _addressProviders.Add(provider);
+            if (provider != null) RegisterCompanySource(provider);
         }
 
         /// <summary>DB-/Plugin-Adresse nur als Fallback: füllt ausschließlich leere Felder.</summary>

@@ -49,6 +49,26 @@ namespace Dateiumbenenner.Engine
                     return true;
             return false;
         }
+
+        // Gruß- und Dankesformeln aus Briefen sind nie ein Firmenname (fest eingebaut, gilt auch ohne Eintrag in der Liste).
+        // Auch OCR-Schreibweisen: "Grüßen", "Gruessen", "GrüBen", "Grusse".
+        private const string GreetWord = @"(?:Gr(?:\u00FC|ue|u)(?:\u00DF|ss|B|s)(?:en?)?|Gr(?:\u00FC|ue|u)(?:\u00DF|ss|B))";
+        private static readonly Regex LetterPhraseRx = new(
+            @"^\s*(?:(?:mit\s+)?(?:(?:den|einem)\s+)?(?:(?:freundliche[nmr]?|beste[nmr]?|herzliche[nmr]?|viele[nmr]?|liebe[nmr]?|sch(?:\u00F6|oe|o)ne[nmr]?|kollegiale[nmr]?|sonnige[nmr]?)\s+)+(?:" + GreetWord + @"|Dank)"
+            + @"|" + GreetWord + @"(?=\s*(?:$|aus|von|und|[,.!]))"
+            + @"|Danke(?:\s*sch(?:\u00F6|oe|o)n)?(?=\s*(?:$|f(?:\u00FC|ue|u)r|[,.!]))"
+            + @"|Hochachtungsvoll|Sehr\s+geehrte\w*|Guten\s+(?:Tag|Morgen|Abend)|Wir\s+(?:danken|bedanken|freuen)|Herzlichen\s+Gl(?:\u00FC|ue|u)ckwunsch|MfG)(?![\p{L}\d])",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>Länge einer Gruß-/Dankesformel am Anfang ("Mit freundlichen Grüßen", "Vielen Dank"), sonst 0.</summary>
+        public static int LetterPhraseLength(string? candidate)
+        {
+            if (string.IsNullOrEmpty(candidate)) return 0;
+            var m = LetterPhraseRx.Match(candidate);
+            return m.Success ? m.Length : 0;
+        }
+
+        public static bool IsLetterPhrase(string? candidate) => LetterPhraseLength(candidate) > 0;
     }
 
     /// <summary>Eigene Firmenadresse (Daten\own_company.json). Belege ohne fremde Adresse gelten als eigene/interne Belege.</summary>
