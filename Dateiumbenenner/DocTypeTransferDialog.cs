@@ -140,13 +140,16 @@ namespace Dateiumbenenner
                 foreach (var r in grp.Rows) { var gg = grp; r.SelectionChanged = () => { gg.Notify(); UpdateInfo(); }; }
                 return grp;
             }
-            List<Group> Build(IEnumerable<Row> rows, int mode) => rows
-                .GroupBy(r => KeyOf(r, mode), StringComparer.OrdinalIgnoreCase)
-                .Select(g => MakeGroup(g.ToList(), mode))
-                .OrderByDescending(g => g.Selected != false)
-                .ThenByDescending(g => g.Rows.Any(r => sameCompany(r.Item.CompanyName, source.CompanyName)))
-                .ThenByDescending(g => g.Count).ThenBy(g => g.Company)
-                .ToList();
+            List<Group> Build(IEnumerable<Row> rows, int mode)
+            {
+                var groups = rows.GroupBy(r => KeyOf(r, mode), StringComparer.OrdinalIgnoreCase).Select(g => MakeGroup(g.ToList(), mode));
+                // „Keine Gruppen“ bzw. „Gruppen wie Dateiliste“: Reihenfolge der Dateiliste (GroupBy behält die Reihenfolge des ersten Belegs)
+                return mode == Modes.Length - 1 || TransferSearch.GroupsInListOrder ? groups.ToList() : groups
+                    .OrderByDescending(g => g.Selected != false)
+                    .ThenByDescending(g => g.Rows.Any(r => sameCompany(r.Item.CompanyName, source.CompanyName)))
+                    .ThenByDescending(g => g.Count).ThenBy(g => g.Company)
+                    .ToList();
+            }
 
             var allRows = items.Select(i => { var sim = Jaccard(srcWords, Words(i.FullText)); return new Row { Item = i, Sim = sim, Similarity = $"{sim:P0}" }; }).ToList();
             // Vorauswahl immer nach Firma + Nummernaufbau + Belegart: Firma muss passen, dazu gleicher Nummernaufbau/-kreis oder ähnlicher Inhalt –
@@ -188,6 +191,8 @@ namespace Dateiumbenenner
             opts.Children.Add(new TextBlock { Text = "Gruppieren nach: ", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0) });
             var modeBox = new ComboBox { Width = 250, ItemsSource = Modes, SelectedIndex = _mode };
             opts.Children.Add(modeBox);
+            Action regroup = () => { };
+            opts.Children.Add(TransferSearch.CreateOrderOption(() => regroup()));
             fp.Children.Add(opts);
             _filter = new TextBox { ToolTip = "Sucht in Firmenname (aktuell, erkannt, früher erkannt), Dateiname, Belegart, Nummer, Datum – und optional im Belegtext" };
             fp.Children.Add(_filter);
@@ -332,6 +337,7 @@ namespace Dateiumbenenner
                 files.ItemsSource = (lv.SelectedItem as Group)?.Rows;
                 if (files.Items.Count > 0) files.SelectedIndex = 0;
             };
+            var anchorOf = ListKeyboard.KeepSelection(lv, files, g => ((Group)g).Rows);
             files.SelectionChanged += async (_, _) => await ShowPreview();
             chkText.Click += async (_, _) => await ShowPreview();
 
@@ -357,8 +363,13 @@ namespace Dateiumbenenner
             {
                 if (modeBox.SelectedIndex < 0 || modeBox.SelectedIndex == _mode) return;
                 _mode = modeBox.SelectedIndex;
-                var current = files.SelectedItem as Row ?? (lv.SelectedItem as Group)?.Rows.FirstOrDefault();
-                var rows = _groups.SelectMany(g => g.Rows).ToList();
+                regroup();
+            };
+            regroup = () =>
+            {
+                var current = anchorOf() as Row ?? files.SelectedItem as Row ?? (lv.SelectedItem as Group)?.Rows.FirstOrDefault();
+                var present = _groups.SelectMany(g => g.Rows).ToHashSet();
+                var rows = allRows.Where(present.Contains).ToList();
                 lv.SelectedItem = null;
                 _groups.Clear();
                 foreach (var g in Build(rows, _mode)) _groups.Add(g);

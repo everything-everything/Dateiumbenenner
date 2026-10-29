@@ -2077,6 +2077,15 @@ namespace Dateiumbenenner
         }
 
         /// <summary>„Namen übertragen“: Übersicht aller Dateien, markierte erhalten den Firmennamen der aktuellen Datei.</summary>
+        /// <summary>Belege in der Reihenfolge der Dateiliste (Sortierung wie angezeigt), weggefilterte danach in Ladereihenfolge –
+        /// damit die Übertragen-Dialoge die Belege so zeigen, wie man sie sich in der Dateiliste hinsortiert hat.</summary>
+        private List<DocumentMetadata> InListOrder(IEnumerable<DocumentMetadata> items)
+        {
+            var pos = new Dictionary<DocumentMetadata, int>(ReferenceEqualityComparer.Instance);
+            foreach (var o in LvFiles.Items) if (o is DocumentMetadata m) pos.TryAdd(m, pos.Count);
+            return items.Select((m, i) => (m, i)).OrderBy(t => pos.TryGetValue(t.m, out var p) ? p : int.MaxValue).ThenBy(t => t.i).Select(t => t.m).ToList();
+        }
+
         private async void BtnMainTransferName_Click(object sender, RoutedEventArgs e)
         {
             if (_currentMeta is not { } src) return;
@@ -2088,7 +2097,7 @@ namespace Dateiumbenenner
                 try { src.CompanyName = name; }
                 finally { _propagatingCompany = false; }
             }
-            var others = _items.Where(m => m != src).ToList();
+            var others = InListOrder(_items.Where(m => m != src));
             if (others.Count == 0) return;
             var dlg = new CompanyTransferDialog(others, name, n => !string.IsNullOrWhiteSpace(n) && SameCompany(n, name)) { Owner = this };
             if (dlg.ShowDialog() != true) return;
@@ -2147,7 +2156,7 @@ namespace Dateiumbenenner
                 src.DocumentType = type;
                 src.DocTypeManuallySet = true;
             }
-            var others = _items.Where(m => m != src && m.Loaded).ToList();
+            var others = InListOrder(_items.Where(m => m != src && m.Loaded));
             if (others.Count == 0) { TxtStatus.Text = "Keine weiteren geladenen Belege."; return; }
             var dlg = new DocTypeTransferDialog(src, others, Dateiumbenenner.Engine.DocTypeStore.Names,
                 (a, b) => !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) && SameCompany(a, b)) { Owner = this };
@@ -2590,7 +2599,7 @@ namespace Dateiumbenenner
         {
             if (_currentMeta is not { Loaded: true } src) { MessageBoxWpf.Show("Bitte zuerst ein Dokument auswählen.", "Eigenschaften übertragen"); return; }
             SaveCurrentSettings(src);
-            var others = _items.Where(m => m != src).ToList();
+            var others = InListOrder(_items.Where(m => m != src));
             if (others.Count == 0) { TxtStatus.Text = "Keine weiteren Dokumente zum Übertragen."; return; }
             var t = CaptureTemplate(src);
             var stored = Dateiumbenenner.Engine.DocTemplateStore.Get(src.CompanyName, src.DocumentType);

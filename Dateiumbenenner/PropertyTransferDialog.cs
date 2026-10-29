@@ -187,13 +187,16 @@ namespace Dateiumbenenner
                 foreach (var r in g.Rows) r.SelectionChanged = () => { g.Notify(); UpdateInfo(); };
                 return g;
             }
-            List<Group> Build(IEnumerable<Row> rows, int mode) => rows
-                .GroupBy(r => KeyOf(r, mode), StringComparer.OrdinalIgnoreCase)
-                .Select(g => MakeGroup(g.ToList(), mode))
-                .OrderByDescending(g => g.Selected != false)
-                .ThenByDescending(g => g.Suggested)
-                .ThenByDescending(g => g.Count).ThenBy(g => g.Company)
-                .ToList();
+            List<Group> Build(IEnumerable<Row> rows, int mode)
+            {
+                var groups = rows.GroupBy(r => KeyOf(r, mode), StringComparer.OrdinalIgnoreCase).Select(g => MakeGroup(g.ToList(), mode));
+                // „Keine Gruppen“ bzw. „Gruppen wie Dateiliste“: Reihenfolge der Dateiliste (GroupBy behält die Reihenfolge des ersten Belegs)
+                return mode == Modes.Length - 1 || TransferSearch.GroupsInListOrder ? groups.ToList() : groups
+                    .OrderByDescending(g => g.Selected != false)
+                    .ThenByDescending(g => g.Suggested)
+                    .ThenByDescending(g => g.Count).ThenBy(g => g.Company)
+                    .ToList();
+            }
 
             var allRows = targets.Select(d => { var sim = Jaccard(srcWords, Words(d.FullText)); return new Row { Doc = d, Sim = sim, Similarity = $"{sim:P0}" }; }).ToList();
             var pre = preselected?.ToHashSet() ?? new HashSet<object>();
@@ -278,6 +281,8 @@ namespace Dateiumbenenner
             right.Children.Add(new TextBlock { Text = "Gruppieren nach: ", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0) });
             var modeBox = new WpfComboBox { Width = 250, ItemsSource = Modes, SelectedIndex = _mode };
             right.Children.Add(modeBox);
+            Action regroup = () => { };
+            right.Children.Add(TransferSearch.CreateOrderOption(() => regroup()));
             fp.Children.Add(right);
             _filter = new WpfTextBox { ToolTip = "Sucht in Firmenname (aktuell, erkannt, früher erkannt), Dateiname, Belegart, Nummer, Datum – und optional im Belegtext" };
             fp.Children.Add(_filter);
@@ -365,6 +370,7 @@ namespace Dateiumbenenner
                 return ng;
             }, g => g.Notify(), UpdateInfo);
             ListKeyboard.LinkLists(lv, files);
+            var anchorOf = ListKeyboard.KeepSelection(lv, files, g => ((Group)g).Rows);
             var vsplit = new GridSplitter { Width = 5, HorizontalAlignment = WpfHorizontalAlignment.Stretch };
             Grid.SetColumn(vsplit, 1);
             bottom.Children.Add(vsplit);
@@ -440,8 +446,13 @@ namespace Dateiumbenenner
             {
                 if (modeBox.SelectedIndex < 0 || modeBox.SelectedIndex == _mode) return;
                 _mode = modeBox.SelectedIndex;
-                var current = files.SelectedItem as Row ?? (lv.SelectedItem as Group)?.Rows.FirstOrDefault();
-                var rows = _groups.SelectMany(g => g.Rows).ToList();
+                regroup();
+            };
+            regroup = () =>
+            {
+                var current = anchorOf() as Row ?? files.SelectedItem as Row ?? (lv.SelectedItem as Group)?.Rows.FirstOrDefault();
+                var present = _groups.SelectMany(g => g.Rows).ToHashSet();
+                var rows = allRows.Where(present.Contains).ToList();
                 lv.SelectedItem = null;
                 _groups.Clear();
                 foreach (var g in Build(rows, _mode)) _groups.Add(g);

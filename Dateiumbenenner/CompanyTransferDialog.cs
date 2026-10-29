@@ -95,7 +95,9 @@ namespace Dateiumbenenner
                 return new Row { Item = i, Company = i.CompanyName ?? "", Match = string.Join(" | ", matches.Distinct(StringComparer.OrdinalIgnoreCase)), Selected = inText };
             }
 
-            _groups = new ObservableCollection<Group>(Build(items.Select(MakeRow)));
+            // Reihenfolge wie übergeben (= Sortierung der Dateiliste) – bleibt in den Gruppen und beim Umgruppieren erhalten
+            var allRows = items.Select(MakeRow).ToList();
+            _groups = new ObservableCollection<Group>(Build(allRows));
 
             static string Disp(string? s) => string.IsNullOrWhiteSpace(s) ? "(leer)" : s.Trim();
             string KeyOf(Row r) => _mode switch
@@ -106,11 +108,15 @@ namespace Dateiumbenenner
                 4 => r.Item.FilePath,
                 _ => r.Item.CompanyName?.Trim() ?? ""
             };
-            List<Group> Build(IEnumerable<Row> rows) => rows
-                .GroupBy(KeyOf, StringComparer.OrdinalIgnoreCase)
-                .Select(g => NewGroup(_mode == 4 ? $"{Disp(g.First().Item.CompanyName)}  ({g.First().FileName})" : g.Key.Length == 0 ? "(leer)" : g.Key, g))
-                .OrderByDescending(g => g.Selected == true).ThenByDescending(g => g.Selected == null).ThenByDescending(g => g.Count).ThenBy(g => g.Name)
-                .ToList();
+            List<Group> Build(IEnumerable<Row> rows)
+            {
+                var groups = rows
+                    .GroupBy(KeyOf, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => NewGroup(_mode == 4 ? $"{Disp(g.First().Item.CompanyName)}  ({g.First().FileName})" : g.Key.Length == 0 ? "(leer)" : g.Key, g));
+                // „Keine Gruppen“ bzw. „Gruppen wie Dateiliste“: Reihenfolge der Dateiliste (GroupBy behält die Reihenfolge des ersten Belegs)
+                return _mode == 4 || TransferSearch.GroupsInListOrder ? groups.ToList()
+                    : groups.OrderByDescending(g => g.Selected == true).ThenByDescending(g => g.Selected == null).ThenByDescending(g => g.Count).ThenBy(g => g.Name).ToList();
+            }
 
             var root = new DockPanel { Margin = new Thickness(8) };
             var head = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
@@ -130,6 +136,8 @@ namespace Dateiumbenenner
             opts.Children.Add(new TextBlock { Text = "Gruppieren nach: ", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0) });
             var modeBox = new System.Windows.Controls.ComboBox { Width = 240, ItemsSource = Modes, SelectedIndex = _mode };
             opts.Children.Add(modeBox);
+            Action regroup = () => { };
+            opts.Children.Add(TransferSearch.CreateOrderOption(() => regroup()));
             fp.Children.Add(opts);
             _filter = new System.Windows.Controls.TextBox { ToolTip = "Sucht in aktuellem, erkanntem und früher erkanntem Firmennamen, Dateiname, Belegart, Nummer, Datum – und optional im Belegtext" };
             fp.Children.Add(_filter);
@@ -268,6 +276,7 @@ namespace Dateiumbenenner
             search.AttachShortcut(this);
             search.FollowFilter(_filter);
             ListKeyboard.LinkLists(lv, files);
+            var anchorOf = ListKeyboard.KeepSelection(lv, files, g => ((Group)g).Rows);
             Loaded += (_, _) => ListKeyboard.FocusSelected(lv);
             files.SelectionChanged += async (_, _) => await ShowPreview();
             chkText.Click += async (_, _) => await ShowPreview();
@@ -314,8 +323,13 @@ namespace Dateiumbenenner
             {
                 if (modeBox.SelectedIndex < 0 || modeBox.SelectedIndex == _mode) return;
                 _mode = modeBox.SelectedIndex;
-                var current = files.SelectedItem as Row ?? (lv.SelectedItem as Group)?.Rows.FirstOrDefault();
-                var rows = _groups.SelectMany(g => g.Rows).ToList();
+                regroup();
+            };
+            regroup = () =>
+            {
+                var current = anchorOf() as Row ?? files.SelectedItem as Row ?? (lv.SelectedItem as Group)?.Rows.FirstOrDefault();
+                var present = _groups.SelectMany(g => g.Rows).ToHashSet();
+                var rows = allRows.Where(present.Contains).ToList();
                 lv.SelectedItem = null;
                 _groups.Clear();
                 foreach (var g in Build(rows)) _groups.Add(g);

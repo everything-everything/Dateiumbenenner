@@ -44,6 +44,21 @@ namespace Dateiumbenenner
             return c;
         }
 
+        /// <summary>Gruppen in der Reihenfolge der Dateiliste (nach ihrem ersten Beleg) statt Vorschläge zuerst.</summary>
+        public static bool GroupsInListOrder { get; set; }
+
+        public static WpfCheckBox CreateOrderOption(Action changed)
+        {
+            var c = new WpfCheckBox
+            {
+                Content = "Gruppen wie Dateiliste", IsChecked = GroupsInListOrder, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
+                ToolTip = "Ein: Gruppen in der Reihenfolge der Dateiliste (die Gruppe mit dem obersten Beleg zuerst).\n"
+                    + "Aus: vorausgewählte bzw. vorgeschlagene Gruppen zuerst, dann nach Größe."
+            };
+            c.Click += (_, _) => { GroupsInListOrder = c.IsChecked == true; changed(); };
+            return c;
+        }
+
         /// <summary>Alle Suchwörter im Schlüssel bzw. – wenn eingeschaltet – im Belegtext.</summary>
         public static bool Matches(string[] words, string key, string? fullText)
             => words.All(w => key.Contains(w, StringComparison.OrdinalIgnoreCase))
@@ -109,6 +124,40 @@ namespace Dateiumbenenner
 
         /// <summary>Fokus auf die gewählte Zeile (sonst die erste), damit die Pfeiltasten sofort wirken.</summary>
         public static void FocusSelected(WpfListView list) => FocusSelected(list, true);
+
+        /// <summary>Merkt den zuletzt angesehenen Beleg (unten). Blendet Filtern/Umgruppieren dessen Gruppe aus, wird vorübergehend die erste
+        /// sichtbare Gruppe gewählt (sonst blieben Belegliste und Vorschau leer); ist sie wieder sichtbar, steht die Auswahl wieder auf dem Beleg.</summary>
+        /// <returns>Liefert den gemerkten Beleg (z. B. für das Umschalten der Gruppierung).</returns>
+        public static Func<object?> KeepSelection(WpfListView groups, WpfListView files, Func<object, System.Collections.IEnumerable> rowsOf)
+        {
+            object? anchor = null, fallback = null;
+            bool auto = false, pending = false;
+            files.SelectionChanged += (_, _) => { if (!auto && files.SelectedItem != null) anchor = files.SelectedItem; };
+            groups.SelectionChanged += (_, _) => { if (!auto && groups.SelectedItem != null) fallback = null; };
+            ((System.Collections.Specialized.INotifyCollectionChanged)groups.Items).CollectionChanged += (_, _) =>
+            {
+                if (pending) return;
+                pending = true;
+                groups.Dispatcher.BeginInvoke(() =>
+                {
+                    pending = false;
+                    var current = groups.SelectedItem;
+                    if (current != null && (fallback == null || !ReferenceEquals(current, fallback))) return;
+                    var home = anchor == null ? null : groups.Items.Cast<object>().FirstOrDefault(g => rowsOf(g).Cast<object>().Contains(anchor));
+                    if (home == null && (current != null || groups.Items.Count == 0)) return;
+                    auto = true;
+                    try
+                    {
+                        groups.SelectedItem = home ?? groups.Items[0];
+                        groups.ScrollIntoView(groups.SelectedItem);
+                        if (home != null) { files.SelectedItem = anchor; files.ScrollIntoView(anchor); }
+                        fallback = home == null ? groups.SelectedItem : null;
+                    }
+                    finally { auto = false; }
+                }, System.Windows.Threading.DispatcherPriority.Background);
+            };
+            return () => anchor;
+        }
 
         private static void FocusSelected(WpfListView list, bool retry)
         {
@@ -453,10 +502,44 @@ namespace Dateiumbenenner
                 opt.IsCaseSensitive = false;
                 opt.ShouldHighlightAllMatches = true;
                 opt.SuppressDefaultFindDialog = false;
+                // Das Suchfenster der PDF-Anzeige nimmt sich den Tastaturfokus – wer gerade im Filter/Suchfeld tippt, bleibt dort
+                var typing = Keyboard.FocusedElement as UIElement;
+                if (typing != null && (ReferenceEquals(typing, _web) || _web.IsKeyboardFocusWithin)) typing = null;
                 await core.Find.StartAsync(opt);
                 _webFind = true;
+                if (typing != null) KeepFocus(typing);
             }
             catch { _webFind = false; /* Suche der Anzeige nicht verfügbar */ }
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetFocus();
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr SetFocus(IntPtr hWnd);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool IsChild(IntPtr parent, IntPtr child);
+
+        /// <summary>Fokus zurück ins Eingabefeld, falls die PDF-Anzeige (eigenes Fenster-Handle) ihn übernommen hat –
+        /// sofort und kurz danach noch einmal, da das Suchfenster der Anzeige verzögert erscheint.</summary>
+        private void KeepFocus(UIElement element)
+        {
+            void Reclaim()
+            {
+                if (!element.IsVisible || PresentationSource.FromVisual(element) is not System.Windows.Interop.HwndSource src) return;
+                var focus = GetFocus();
+                if (focus == IntPtr.Zero || focus == src.Handle || !IsChild(src.Handle, focus)) return;
+                SetFocus(src.Handle);
+                element.Focus();
+            }
+            Reclaim();
+            foreach (var ms in new[] { 100, 300, 700 })
+            {
+                var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
+                t.Tick += (_, _) => { t.Stop(); Reclaim(); };
+                t.Start();
+            }
         }
 
         public async Task Find(bool forward)
