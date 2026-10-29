@@ -97,6 +97,11 @@
                             <DataGridTextColumn Header="Firma" Binding="{Binding Company, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
                             <DataGridTextColumn Header="Belegart" Binding="{Binding DocType, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
                             <DataGridTextColumn Header="Priorit&#228;t" Binding="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
+                            <DataGridCheckBoxColumn Binding="{Binding Exclude, UpdateSourceTrigger=PropertyChanged}" Width="85">
+                                <DataGridCheckBoxColumn.Header>
+                                    <TextBlock Text="Ausschlie&#223;en" ToolTip="Ausschlussregel: Nummern beim Begriff (mit passender Maske) bzw. ohne Begriff alle Nummern mit genau dieser Maske werden bei dieser Firma + Belegart nie als Nummer gew&#228;hlt &#8211; z. B. eine Rechnungsnummer, die auf Lieferscheinen mitgedruckt ist."/>
+                                </DataGridCheckBoxColumn.Header>
+                            </DataGridCheckBoxColumn>
                             <DataGridComboBoxColumn x:Name="ColKind" Header="Art" SelectedItemBinding="{Binding Kind}" Width="80"/>
                             <DataGridTemplateColumn Header="Beispielnummer (w&#228;hlen/eingeben)" Width="170">
                                 <DataGridTemplateColumn.CellTemplate>
@@ -162,6 +167,25 @@
                                     <TextBlock Text="Gelernt" ToolTip="Automatisch angelegt, als eine Nummer von Hand ausgew&#228;hlt wurde (niedrige Priorit&#228;t). Mit &#8222;Gelernte Regeln l&#246;schen&#8220; entfernbar; eigene Regeln haben Vorrang."/>
                                 </DataGridCheckBoxColumn.Header>
                             </DataGridCheckBoxColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+            <TabItem x:Name="TabTargets" Header="Nummernfeld">
+                <DockPanel Margin="5">
+                    <Border Style="{StaticResource HintBox}">
+                        <TextBlock Style="{StaticResource HintText}"
+                               Text="In welches Feld die Nummer je Firma/Belegart eingetragen wird (* = alle). Automatisch: Rechnung, Gutschrift, Storno, Barverkauf &#8594; Rechnungsnummer, sonst Belegnummer. Keine: Rechnungs- und Belegnummer bleiben leer. Die genaueste Zeile gewinnt (Firma + Belegart vor nur Firma bzw. nur Belegart)."/>
+                    </Border>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Zeile hinzuf&#252;gen" Style="{StaticResource BarButton}" Click="BtnAddTarget_Click" ToolTip="Neue Zeile f&#252;r die oben eingetragene Firma und Belegart"/>
+                        <Button Content="Markierte l&#246;schen" Style="{StaticResource BarButton}" Click="BtnDeleteTarget_Click"/>
+                    </StackPanel>
+                    <DataGrid x:Name="GridTargets" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Firma" Binding="{Binding Company, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
+                            <DataGridTextColumn Header="Belegart" Binding="{Binding DocType, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
+                            <DataGridComboBoxColumn x:Name="ColTarget" Header="Nummer eintragen als" SelectedItemBinding="{Binding Target}" Width="180"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>

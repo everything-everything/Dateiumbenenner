@@ -331,7 +331,9 @@
                                           LostFocus="CmbNumberCandidates_LostFocus" TextBoxBase.TextChanged="CmbNumberCandidates_TextChanged" 
                                           PreviewMouseLeftButtonDown="EditableCombo_PreviewMouseLeftButtonDown" 
                                           DropDownClosed="EditableCombo_DropDownClosed" KeyDown="EditableCombo_KeyDown" MaxDropDownHeight="180" 
-                                          Width="170" Margin="0,0,10,0"/>
+                                          Width="170" Margin="0,0,4,0"/>
+                                <Button Content="Art&#8230;" Padding="6,0" Margin="0,0,10,0" Click="BtnNumberType_Click"
+                                        ToolTip="Nummer f&#252;r Firma + Belegart: falsche Nummer (Begriff + Muster) ausschlie&#223;en, stattdessen eine andere bevorzugen oder das Nummernfeld (Rechnungsnummer / Belegnummer / keine) festlegen &#8211; gilt f&#252;r alle Belege dieser Firma + Belegart"/>
                                 <TextBlock Text=":" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <ComboBox x:Name="CmbNumberPosition" Width="90" SelectedIndex="0" SelectionChanged="InsertPosition_Changed">
                                     <ComboBoxItem Content="Position 1"/>
@@ -373,7 +375,8 @@
                                           LostFocus="CmbDateCandidates_LostFocus" TextBoxBase.TextChanged="CmbDateCandidates_TextChanged" 
                                           PreviewMouseLeftButtonDown="EditableCombo_PreviewMouseLeftButtonDown" 
                                           DropDownClosed="EditableCombo_DropDownClosed" KeyDown="EditableCombo_KeyDown" MaxDropDownHeight="180" 
-                                          Width="170" Margin="0,0,10,0"/>
+                                          Width="170" Margin="0,0,10,0"
+                                          ToolTip="Kurzeingabe: 0102 = 01.02. dieses Jahres, 010226 = 01.02.2026, 01022026 &#8211; mit Enter oder beim Verlassen vervollst&#228;ndigt"/>
                                 <TextBlock Text=":" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <ComboBox x:Name="CmbDatePosition" Width="90" SelectedIndex="1" SelectionChanged="InsertPosition_Changed">
                                     <ComboBoxItem Content="Position 1"/>

@@ -21,6 +21,7 @@ namespace Dateiumbenenner
         private readonly ObservableCollection<DocTypeRow> _docTypes;
         private readonly ObservableCollection<AmountRule> _amountRules;
         private readonly ObservableCollection<DateRule> _dateRules;
+        private readonly ObservableCollection<NumberTargetRule> _targets;
 
         /// <summary>Anzeige der Schreibweisen in der Datum-Tabelle.</summary>
         public sealed record FormatChoice(DateFormatKind Value, string Label);
@@ -56,7 +57,7 @@ namespace Dateiumbenenner
         {
             var f = TxtCompanyFilter.Text.Trim();
             var names = _samples.Select(s => s.Company).Concat(_rules.Select(r => r.Company))
-                .Concat(_dateRules.Select(r => r.Company)).Concat(_amountRules.Select(r => r.Company))
+                .Concat(_dateRules.Select(r => r.Company)).Concat(_amountRules.Select(r => r.Company)).Concat(_targets.Select(r => r.Company))
                 .Where(c => !string.IsNullOrWhiteSpace(c) && c != "*").Distinct(StringComparer.OrdinalIgnoreCase)
                 .Where(c => f.Length == 0 || c.Contains(f, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
@@ -73,8 +74,10 @@ namespace Dateiumbenenner
             GridRules.CommitEdit(DataGridEditingUnit.Row, true);
             GridDateRules.CommitEdit(DataGridEditingUnit.Row, true);
             GridAmountRules.CommitEdit(DataGridEditingUnit.Row, true);
+            GridTargets.CommitEdit(DataGridEditingUnit.Row, true);
             var views = new (System.ComponentModel.ICollectionView View, Func<object, string?> Company)[]
             {
+                (System.Windows.Data.CollectionViewSource.GetDefaultView(_targets), o => (o as NumberTargetRule)?.Company),
                 (System.Windows.Data.CollectionViewSource.GetDefaultView(_rules), o => (o as NumberRule)?.Company),
                 (System.Windows.Data.CollectionViewSource.GetDefaultView(_dateRules), o => (o as DateRule)?.Company),
                 (System.Windows.Data.CollectionViewSource.GetDefaultView(_amountRules), o => (o as AmountRule)?.Company),
@@ -161,6 +164,11 @@ namespace Dateiumbenenner
                 Company = r.Company, DocType = r.DocType, Keyword = r.Keyword, Position = r.Position, Format = r.Format, Mask = r.Mask, Priority = r.Priority
             }));
             GridDateRules.ItemsSource = _dateRules;
+            ColTarget.ItemsSource = Enum.GetValues(typeof(NumberTarget));
+            _targets = new ObservableCollection<NumberTargetRule>(NumberTargetStore.Rules
+                .Select(r => new NumberTargetRule { Company = r.Company, DocType = r.DocType, Target = r.Target })
+                .OrderBy(r => r.Company, StringComparer.OrdinalIgnoreCase).ThenBy(r => r.DocType, StringComparer.OrdinalIgnoreCase));
+            GridTargets.ItemsSource = _targets;
             TxtTestCompany.Text = company ?? "";
             TxtTestDocType.Text = docType ?? "";
         }
@@ -171,7 +179,7 @@ namespace Dateiumbenenner
             MinLength = r.MinLength, MaxLength = r.MaxLength, AllowDigits = r.AllowDigits, AllowLetters = r.AllowLetters,
             AllowSpace = r.AllowSpace, AllowSymbols = r.AllowSymbols,
             Prefix = r.Prefix, Learned = r.Learned, Example = r.Example,
-            Keyword = r.Keyword, KeywordPosition = r.KeywordPosition, KeywordEnd = r.KeywordEnd,
+            Keyword = r.Keyword, KeywordPosition = r.KeywordPosition, KeywordEnd = r.KeywordEnd, Exclude = r.Exclude,
             Examples = string.IsNullOrEmpty(r.Example) ? new() : new() { r.Example }
         };
 
@@ -190,6 +198,25 @@ namespace Dateiumbenenner
             System.Windows.Data.CollectionViewSource.GetDefaultView(_rules).Refresh();
             GridRules.SelectedItem = r;
             GridRules.ScrollIntoView(r);
+        }
+
+        private void BtnAddTarget_Click(object sender, RoutedEventArgs e)
+        {
+            var r = new NumberTargetRule
+            {
+                Company = string.IsNullOrWhiteSpace(TxtTestCompany.Text) ? "*" : TxtTestCompany.Text.Trim(),
+                DocType = string.IsNullOrWhiteSpace(TxtTestDocType.Text) ? "*" : TxtTestDocType.Text.Trim(),
+                Target = NumberTarget.Belegnummer
+            };
+            _targets.Insert(0, r);
+            System.Windows.Data.CollectionViewSource.GetDefaultView(_targets).Refresh();
+            GridTargets.SelectedItem = r;
+            GridTargets.ScrollIntoView(r);
+        }
+
+        private void BtnDeleteTarget_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var r in GridTargets.SelectedItems.OfType<NumberTargetRule>().ToList()) _targets.Remove(r);
         }
 
         private void BtnDeleteRule_Click(object sender, RoutedEventArgs e)
@@ -355,8 +382,16 @@ namespace Dateiumbenenner
             string company = TxtTestCompany.Text.Trim(), docType = TxtTestDocType.Text.Trim();
             bool Any(string? s) => string.IsNullOrWhiteSpace(s) || s.Trim() == "*";
             bool Eq(string? a, string? b) => string.Equals(a?.Trim(), b?.Trim(), StringComparison.OrdinalIgnoreCase);
+            var excluded = _rules.FirstOrDefault(r => r.Exclude && (Any(r.Company) || Eq(r.Company, company)) && (Any(r.DocType) || Eq(r.DocType, docType))
+                && (r.Kind == NumberRuleKind.Merkmale || !string.IsNullOrWhiteSpace(r.Mask)) && NumberRuleStore.Match(r, value) >= 0.999);
+            if (excluded != null)
+            {
+                TxtTestResult.Text = $"Ausgeschlossen durch {(excluded.Kind == NumberRuleKind.Maske ? excluded.Mask : "Merkmale")}"
+                    + (string.IsNullOrWhiteSpace(excluded.Keyword) ? "" : $" beim Begriff \u201E{excluded.Keyword}\u201C");
+                return;
+            }
             var best = _rules
-                .Where(r => (Any(r.Company) || Eq(r.Company, company)) && (Any(r.DocType) || Eq(r.DocType, docType)))
+                .Where(r => !r.Exclude && (Any(r.Company) || Eq(r.Company, company)) && (Any(r.DocType) || Eq(r.DocType, docType)))
                 .Select(r => (Rule: r, Match: NumberRuleStore.Match(r, value)))
                 .OrderByDescending(x => x.Match * x.Rule.Priority)
                 .FirstOrDefault();
@@ -483,7 +518,9 @@ namespace Dateiumbenenner
             GridDocTypes.CommitEdit(DataGridEditingUnit.Row, true);
             GridAmountRules.CommitEdit(DataGridEditingUnit.Row, true);
             GridDateRules.CommitEdit(DataGridEditingUnit.Row, true);
-            var empty = _rules.Count(r => r.Kind == NumberRuleKind.Maske && string.IsNullOrWhiteSpace(r.Mask));
+            GridTargets.CommitEdit(DataGridEditingUnit.Row, true);
+            bool HasShape(NumberRule r) => r.Kind == NumberRuleKind.Merkmale || !string.IsNullOrWhiteSpace(r.Mask) || !string.IsNullOrWhiteSpace(r.Keyword);
+            var empty = _rules.Count(r => !HasShape(r));
             bool keepEmpty = true;
             if (askEmpty && empty > 0)
             {
@@ -504,13 +541,19 @@ namespace Dateiumbenenner
                 Synonyms = Split(d.Synonyms),
                 NumberKeywords = Split(d.Keywords)
             }));
-            NumberRuleStore.Save(_rules.Where(r => keepEmpty || r.Kind == NumberRuleKind.Merkmale || !string.IsNullOrWhiteSpace(r.Mask)).Select(r =>
+            NumberRuleStore.Save(_rules.Where(r => keepEmpty || HasShape(r)).Select(r =>
             {
                 r.Company = string.IsNullOrWhiteSpace(r.Company) ? "*" : r.Company.Trim();
                 r.DocType = string.IsNullOrWhiteSpace(r.DocType) ? "*" : r.DocType.Trim();
                 r.Keyword = string.IsNullOrWhiteSpace(r.Keyword) ? null : r.Keyword.Trim();
                 r.KeywordEnd = string.IsNullOrWhiteSpace(r.KeywordEnd) ? null : r.KeywordEnd.Trim();
                 r.Prefix = string.IsNullOrWhiteSpace(r.Prefix) ? null : r.Prefix.Trim();
+                return r;
+            }));
+            NumberTargetStore.Save(_targets.Select(r =>
+            {
+                r.Company = string.IsNullOrWhiteSpace(r.Company) ? "*" : r.Company.Trim();
+                r.DocType = string.IsNullOrWhiteSpace(r.DocType) ? "*" : r.DocType.Trim();
                 return r;
             }));
             AmountRuleStore.Save(_amountRules.Select(r =>

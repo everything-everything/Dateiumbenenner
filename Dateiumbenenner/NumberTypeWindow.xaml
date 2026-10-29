@@ -1,0 +1,64 @@
+<Window x:Class="Dateiumbenenner.NumberTypeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Nummer f&#252;r Firma + Belegart" SizeToContent="Height" Width="600" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <StackPanel Margin="12">
+        <TextBlock x:Name="TxtHeader" FontWeight="SemiBold" TextWrapping="Wrap" />
+        <TextBlock x:Name="TxtCurrent" TextWrapping="Wrap" Margin="0,4,0,8" Foreground="DimGray"/>
+
+        <GroupBox Header="Falsche Nummer entfernen" Padding="6">
+            <StackPanel>
+                <CheckBox x:Name="ChkExclude" Content="Nummern dieser Art bei Firma + Belegart nie als Nummer w&#228;hlen (ausschlie&#223;en)"/>
+                <Grid Margin="20,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="130"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Begriff:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox x:Name="TxtExKeyword" Grid.Column="1" ToolTip="Text, der direkt vor der Nummer steht (gleiche Zeile oder Zeile dar&#252;ber), z. B. &#8222;Rechnungs-Nr.&#8220;. Leer = Nummer mit dem Muster an jeder Stelle."/>
+                    <TextBlock Grid.Column="2" Text="Muster:" VerticalAlignment="Center" Margin="10,0,4,0"/>
+                    <TextBox x:Name="TxtExMask" Grid.Column="3" FontFamily="Consolas" ToolTip="$ = Ziffer, ? = Buchstabe, # = Ziffer oder Buchstabe, * = beliebig. Leer = jede Nummer beim Begriff."/>
+                </Grid>
+                <TextBlock Margin="20,4,0,0" TextWrapping="Wrap" Foreground="Gray"
+                           Text="Begriff + Muster: nur Nummern mit diesem Aufbau direkt beim Begriff. Ohne Begriff: jede Nummer mit genau diesem Muster. Ohne Muster: jede Nummer beim Begriff."/>
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Header="Stattdessen andere Nummer verwenden" Padding="6" Margin="0,8,0,0">
+            <StackPanel>
+                <CheckBox x:Name="ChkPrefer" Content="Nummer bei diesem Begriff bevorzugen"/>
+                <Grid Margin="20,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="130"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Begriff:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <ComboBox x:Name="CmbPreferKeyword" Grid.Column="1" IsEditable="True" IsTextSearchEnabled="False" SelectionChanged="CmbPreferKeyword_SelectionChanged"
+                              ToolTip="Begriff der gew&#252;nschten Nummer, z. B. &#8222;Lieferschein-Nr.&#8220;. Die Liste zeigt Begriffe, die im Beleg bei anderen Nummern stehen."/>
+                    <TextBlock Grid.Column="2" Text="Muster:" VerticalAlignment="Center" Margin="10,0,4,0"/>
+                    <TextBox x:Name="TxtPreferMask" Grid.Column="3" FontFamily="Consolas" ToolTip="Aufbau der gew&#252;nschten Nummer (optional, wird bei Auswahl eines Begriffs vorgeschlagen)."/>
+                </Grid>
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Header="Nummernfeld" Padding="6" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Nummer eintragen als:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <ComboBox x:Name="CmbTarget" Width="260"
+                          ToolTip="Automatisch: Rechnung/Gutschrift &#8594; Rechnungsnummer, sonst Belegnummer. Keine: beide Felder bleiben leer (z. B. wenn der Beleg keine brauchbare Nummer hat)."/>
+            </StackPanel>
+        </GroupBox>
+
+        <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Foreground="Gray"
+                   Text="Gilt f&#252;r alle Belege dieser Firma + Belegart und wird sofort &#252;bernommen (von Hand gesetzte Nummern bleiben). &#196;ndern oder l&#246;schen unter &#8222;Belegarten &amp; Nummernmuster&#8220; (Spalte &#8222;Ausschlie&#223;en&#8220; bzw. Reiter &#8222;Nummernfeld&#8220;)."/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button Content="&#220;bernehmen" Width="100" IsDefault="True" Click="BtnOk_Click"/>
+            <Button Content="Abbrechen" Width="90" Margin="8,0,0,0" IsCancel="True"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

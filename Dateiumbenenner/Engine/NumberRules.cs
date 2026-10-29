@@ -42,6 +42,8 @@ namespace Dateiumbenenner.Engine
         public KeywordPosition KeywordPosition { get; set; } = KeywordPosition.Beliebig;
         /// <summary>Zweiter Begriff hinter der Nummer (nur bei "Umschlossen").</summary>
         public string? KeywordEnd { get; set; }
+        /// <summary>Ausschlussregel: passende Nummern (beim Begriff, mit Maske/Merkmalen) werden nie als Nummer gew\u00E4hlt.</summary>
+        public bool Exclude { get; set; }
         /// <summary>Bisher erkannte Nummern zur Auswahl (nur Dialog).</summary>
         [JsonIgnore] public List<string> Examples { get; set; } = new();
 
@@ -136,13 +138,52 @@ namespace Dateiumbenenner.Engine
         private static bool Eq(string? a, string? b) => string.Equals(a?.Trim(), b?.Trim(), StringComparison.OrdinalIgnoreCase);
         private static bool IsAny(string? s) => string.IsNullOrWhiteSpace(s) || s.Trim() == "*";
 
-        /// <summary>Passende Regeln mit Gewichtung nach Genauigkeit (Firma+Belegart 1.0, nur eins 0.8 bzw. 0.7, beides * 0.5).</summary>
-        public static List<(NumberRule Rule, double Specificity)> RulesFor(string? company, string? docType)
+        /// <summary>Quelle von Kandidaten, die durch eine Ausschlussregel entfernt wurden.</summary>
+        public const string ExcludedSource = "ausgeschlossen (Regel)";
+
+        /// <summary>Passende Regeln mit Gewichtung nach Genauigkeit (Firma+Belegart 1.0, nur eins 0.8 bzw. 0.7, beides * 0.5) \u2013 ohne Ausschlussregeln.</summary>
+        public static List<(NumberRule Rule, double Specificity)> RulesFor(string? company, string? docType) => Matching(company, docType, false);
+
+        /// <summary>Passende Ausschlussregeln.</summary>
+        public static List<(NumberRule Rule, double Specificity)> ExcludeRulesFor(string? company, string? docType) => Matching(company, docType, true);
+
+        public static bool HasExcludes(string? company, string? docType) => ExcludeRulesFor(company, docType).Count > 0;
+
+        /// <summary>Werte, die eine Ausschlussregel der Firma + Belegart trifft: Nummern beim Begriff (mit passender Maske/Merkmalen)
+        /// bzw. ohne Begriff alle Werte, die genau zur Maske/zu den Merkmalen passen.</summary>
+        public static HashSet<string> Excluded(string? company, string? docType, IEnumerable<string?> values, string? text)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var rules = ExcludeRulesFor(company, docType);
+            if (rules.Count == 0) return result;
+            var list = values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var (r, _) in rules)
+            {
+                bool shape = r.Kind == NumberRuleKind.Merkmale || !string.IsNullOrWhiteSpace(r.Mask);
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(r.Keyword))
+                    {
+                        if (string.IsNullOrEmpty(text)) continue;
+                        foreach (var v in NearKeyword(r, text))
+                            if (!shape || Match(r, v) >= 0.999) result.Add(v);
+                    }
+                    else if (shape)
+                        foreach (var v in list)
+                            if (Match(r, v) >= 0.999) result.Add(v);
+                }
+                catch { }
+            }
+            return result;
+        }
+
+        private static List<(NumberRule Rule, double Specificity)> Matching(string? company, string? docType, bool exclude)
         {
             var dt = DocTypeStore.Canonical(docType);
             var result = new List<(NumberRule, double)>();
             foreach (var r in Rules.ToList())
             {
+                if (r.Exclude != exclude) continue;
                 bool anyC = IsAny(r.Company), anyD = IsAny(r.DocType);
                 if (!anyC && !Eq(r.Company, company)) continue;
                 if (!anyD && !Eq(DocTypeStore.Canonical(r.DocType), dt)) continue;
@@ -294,6 +335,12 @@ namespace Dateiumbenenner.Engine
                 }
             // Gelernte Fundstelle (Begriff davor/dahinter, wievielte gleichartige Nummer, Lage) entscheidet zwischen gleich aufgebauten Nummern
             ValueLocationStore.Apply(number, ValueKind.Nummer, company, docType, text);
+            // Ausschlussregeln zuletzt: solche Nummern werden nie gew\u00E4hlt
+            var excluded = Excluded(company, docType, number.Candidates.Select(c => c.Value), text);
+            if (excluded.Count > 0)
+                for (int i = 0; i < number.Candidates.Count; i++)
+                    if (excluded.Contains(number.Candidates[i].Value))
+                        number.Candidates[i] = number.Candidates[i] with { Score = -1, Source = ExcludedSource };
         }
 
         /// <summary>Werte an der bevorzugten Begriffsposition (gleiche Zeile oder Folgezeile).</summary>
@@ -327,8 +374,8 @@ namespace Dateiumbenenner.Engine
             int n = 0;
             foreach (var c in candidates) f.Add(c, Math.Max(0, 1 - 0.01 * n++), "Kandidat");
             Apply(f, company, docType, text);
-            var best = f.Candidates.Select(c => (c.Value, S: Score(company, docType, c.Value), T: c.Score, L: c.Source == "Fundstelle"))
-                .Where(x => x.S > 0 || x.L).OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault();
+            var best = f.Candidates.Select(c => (c.Value, S: Score(company, docType, c.Value), T: c.Score, L: c.Source == "Fundstelle" || c.Source.StartsWith("Begriff ", StringComparison.Ordinal)))
+                .Where(x => x.T >= 0 && (x.S > 0 || x.L)).OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault();
             return best.Value;
         }
 
@@ -352,6 +399,91 @@ namespace Dateiumbenenner.Engine
             var r = list.FirstOrDefault(x => x.Learned && Eq(x.Company, company) && Eq(x.DocType, DocTypeStore.Canonical(docType)) && x.Mask == mask);
             if (r != null) r.Priority = Math.Min(MaxLearnedPriority, r.Priority + 1);
             else list.Add(new NumberRule { Company = company.Trim(), DocType = DocTypeStore.Canonical(docType) ?? docType.Trim(), Mask = mask, Priority = 1, Learned = true });
+            Save(list);
+        }
+    }
+
+    /// <summary>In welches Feld die Nummer eingetragen wird. Automatisch = nach Belegart (Rechnung \u2192 Rechnungsnummer, sonst Belegnummer).</summary>
+    public enum NumberTarget { Automatisch, Rechnungsnummer, Belegnummer, Keine }
+
+    public class NumberTargetRule
+    {
+        public string Company { get; set; } = "*";
+        public string DocType { get; set; } = "*";
+        public NumberTarget Target { get; set; }
+    }
+
+    /// <summary>Nummernfeld je Firma + Belegart ("*" = alle), z. B. Lieferschein von Firma X: Belegnummer bzw. keine Nummer.</summary>
+    public static class NumberTargetStore
+    {
+        private static List<NumberTargetRule>? _rules;
+        private static readonly object Sync = new();
+        private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
+
+        public static string FilePath => Path.Combine(Plugins.PluginManager.BaseDirectory, "number_targets.json");
+
+        public static List<NumberTargetRule> Rules
+        {
+            get
+            {
+                lock (Sync)
+                {
+                    if (_rules != null) return _rules;
+                    try
+                    {
+                        if (File.Exists(FilePath))
+                            _rules = JsonSerializer.Deserialize<List<NumberTargetRule>>(SecureStorage.ReadAllText(FilePath), JsonOptions);
+                    }
+                    catch { }
+                    return _rules ??= new List<NumberTargetRule>();
+                }
+            }
+        }
+
+        public static void Save(IEnumerable<NumberTargetRule> rules)
+        {
+            var list = rules.Where(r => r != null && r.Target != NumberTarget.Automatisch).ToList();
+            lock (Sync)
+            {
+                _rules = list;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                    SecureStorage.WriteAllText(FilePath, JsonSerializer.Serialize(list, JsonOptions));
+                }
+                catch { }
+            }
+        }
+
+        private static bool IsAny(string? s) => string.IsNullOrWhiteSpace(s) || s.Trim() == "*";
+
+        /// <summary>Eingestelltes Nummernfeld (genaueste Regel gewinnt), sonst Automatisch.</summary>
+        public static NumberTarget Get(string? company, string? docType)
+        {
+            var rules = Rules;
+            if (rules.Count == 0) return NumberTarget.Automatisch;
+            var dt = DocTypeStore.Canonical(docType);
+            NumberTarget best = NumberTarget.Automatisch;
+            int bestSpec = -1;
+            foreach (var r in rules)
+            {
+                bool anyC = IsAny(r.Company), anyD = IsAny(r.DocType);
+                if (!anyC && !string.Equals(r.Company.Trim(), company?.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+                if (!anyD && !string.Equals(DocTypeStore.Canonical(r.DocType), dt, StringComparison.OrdinalIgnoreCase)) continue;
+                int spec = (anyC ? 0 : 2) + (anyD ? 0 : 1);
+                if (spec > bestSpec) { bestSpec = spec; best = r.Target; }
+            }
+            return best;
+        }
+
+        /// <summary>Nummernfeld f\u00FCr genau diese Firma + Belegart setzen (Automatisch = Eintrag entfernen).</summary>
+        public static void Set(string? company, string? docType, NumberTarget target)
+        {
+            if (string.IsNullOrWhiteSpace(company) || string.IsNullOrWhiteSpace(docType)) return;
+            var dt = DocTypeStore.Canonical(docType) ?? docType.Trim();
+            var list = Rules.Where(r => !(string.Equals(r.Company.Trim(), company.Trim(), StringComparison.OrdinalIgnoreCase)
+                                          && string.Equals(DocTypeStore.Canonical(r.DocType), dt, StringComparison.OrdinalIgnoreCase))).ToList();
+            if (target != NumberTarget.Automatisch) list.Add(new NumberTargetRule { Company = company.Trim(), DocType = dt, Target = target });
             Save(list);
         }
     }

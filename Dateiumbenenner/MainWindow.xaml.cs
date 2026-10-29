@@ -211,21 +211,40 @@ namespace Dateiumbenenner
         private void AutoAssignNumbers(DocumentMetadata meta)
         { 
             if(meta==null) return; 
+            // Ausschlussregeln der Firma + Belegart: solche Nummern nie wählen
+            var excluded=Dateiumbenenner.Engine.NumberRuleStore.Excluded(meta.CompanyName, meta.DocumentType, meta.NumberCandidates.Append(meta.SelectedNumber), meta.FullText);
+            if(excluded.Count>0)
+            {
+                meta.NumberCandidates.RemoveAll(excluded.Contains);
+                if(!meta.NumberManuallySet && meta.SelectedNumber!=null && excluded.Contains(meta.SelectedNumber.Trim())) meta.SelectedNumber=null;
+            }
             // Verhindere �berschreiben einer manuell gesetzten Nummer
             if(!meta.NumberManuallySet && (string.IsNullOrEmpty(meta.SelectedNumber) || !IsValidNumber(meta.SelectedNumber)))
             { 
                 var mapped=GetAppropriateNumber(meta,meta.DocumentType); 
+                if(excluded.Count>0)
+                {
+                    meta.NumberCandidates.RemoveAll(excluded.Contains);
+                    if(mapped!=null && excluded.Contains(mapped.Trim())) mapped=meta.NumberCandidates.FirstOrDefault(IsValidNumber);
+                }
                 if(!string.IsNullOrEmpty(mapped) && IsValidNumber(mapped))
                     meta.SelectedNumber=mapped; 
             }
-            if(!string.IsNullOrEmpty(meta.DocumentType)&&!string.IsNullOrEmpty(meta.SelectedNumber))
+            // Nummernfeld je Firma + Belegart (Belegarten & Nummernmuster bzw. Schnellaktion neben der Nummer)
+            var target=Dateiumbenenner.Engine.NumberTargetStore.Get(meta.CompanyName, meta.DocumentType);
+            if(target==Dateiumbenenner.Engine.NumberTarget.Keine)
+            {
+                meta.InvoiceNumber=null;
+                meta.DocumentNumber=null;
+            }
+            else if(!string.IsNullOrEmpty(meta.DocumentType)&&!string.IsNullOrEmpty(meta.SelectedNumber))
             { 
-                if(IsInvoiceType(meta.DocumentType))
+                if(target==Dateiumbenenner.Engine.NumberTarget.Rechnungsnummer || target==Dateiumbenenner.Engine.NumberTarget.Automatisch && IsInvoiceType(meta.DocumentType))
                 { 
                     meta.InvoiceNumber=meta.SelectedNumber; 
                     meta.DocumentNumber=null; 
                 } 
-                else if(IsDocType(meta.DocumentType))
+                else if(target==Dateiumbenenner.Engine.NumberTarget.Belegnummer || IsDocType(meta.DocumentType))
                 { 
                     meta.DocumentNumber=meta.SelectedNumber; 
                     meta.InvoiceNumber=null; 
@@ -1630,6 +1649,11 @@ namespace Dateiumbenenner
                     if (bonus > 0) number.Add(c.Value, c.Score + bonus, c.Source);
                 }
             Dateiumbenenner.Engine.NumberRuleStore.Apply(number, meta.CompanyName, docType, meta.FullText);
+            foreach (var c in number.Candidates.Where(c => c.Score < 0 && c.Source == Dateiumbenenner.Engine.NumberRuleStore.ExcludedSource))
+            {
+                meta.NumberCandidates.RemoveAll(n => n.Equals(c.Value, StringComparison.OrdinalIgnoreCase));
+                if (!meta.NumberManuallySet && string.Equals(meta.SelectedNumber?.Trim(), c.Value, StringComparison.OrdinalIgnoreCase)) { meta.SelectedNumber = null; meta.InvoiceNumber = null; }
+            }
             for (int i = number.Values.Count - 1; i >= 0; i--)
             { meta.NumberCandidates.Remove(number.Values[i]); meta.NumberCandidates.Insert(0, number.Values[i]); }
             if (!meta.NumberManuallySet && number.Value != null) { meta.InvoiceNumber = number.Value; meta.SelectedNumber = number.Value; }
@@ -1638,6 +1662,7 @@ namespace Dateiumbenenner
         private bool NeedsNumberRules(DocumentMetadata m) => !m.NumberManuallySet
             && (Dateiumbenenner.Engine.NumberPatternStore.Get(m.CompanyName, m.DocumentType) != null
                 || Dateiumbenenner.Engine.NumberRuleStore.RulesFor(m.CompanyName, m.DocumentType).Count > 0
+                || Dateiumbenenner.Engine.NumberRuleStore.HasExcludes(m.CompanyName, m.DocumentType)
                 || Dateiumbenenner.Engine.ValueLocationStore.Has(Dateiumbenenner.Engine.ValueKind.Nummer, m.CompanyName, m.DocumentType));
 
         private static bool NeedsDateRules(DocumentMetadata m) => !m.DateManuallySet
@@ -2253,6 +2278,65 @@ namespace Dateiumbenenner
         }
 
         private void MenuRecalcNumbers_Click(object sender, RoutedEventArgs e) => RecalculateNumbers();
+
+        /// <summary>Schnellaktion neben der Nummer: falsche Nummer für Firma + Belegart ausschließen, andere bevorzugen, Nummernfeld festlegen –
+        /// danach auf alle Belege dieser Firma + Belegart anwenden.</summary>
+        private async void BtnNumberType_Click(object sender, RoutedEventArgs e)
+        {
+            var meta = _currentMeta;
+            if (meta == null || string.IsNullOrWhiteSpace(meta.CompanyName) || string.IsNullOrWhiteSpace(meta.DocumentType))
+            {
+                MessageBoxWpf.Show(this, "Bitte zuerst Firma und Belegart des Belegs festlegen.", "Nummer für Firma + Belegart");
+                return;
+            }
+            var number = CmbNumberCandidates?.Text?.Trim();
+            if (string.IsNullOrEmpty(number)) number = meta.SelectedNumber;
+            var dlg = new NumberTypeWindow(meta.CompanyName, meta.DocumentType, number, meta.FullText, meta.NumberCandidates) { Owner = this };
+            if (dlg.ShowDialog() != true) return;
+            await ReapplyNumbersAsync(meta.CompanyName, meta.DocumentType);
+        }
+
+        /// <summary>Nummern aller Belege einer Firma + Belegart nach den aktuellen Regeln neu ermitteln (Erkennung parallel im Hintergrund,
+        /// Übernahme mit Fortschritt). Von Hand gesetzte Nummern bleiben; das Nummernfeld wird bei allen angepasst.</summary>
+        private async Task ReapplyNumbersAsync(string? company, string? docType)
+        {
+            var dt = Dateiumbenenner.Engine.DocTypeStore.Canonical(docType);
+            var list = _items.Where(i => i.Loaded && !string.IsNullOrEmpty(i.FullText)
+                    && string.Equals(i.CompanyName?.Trim(), company?.Trim(), StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(Dateiumbenenner.Engine.DocTypeStore.Canonical(i.DocumentType), dt, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (list.Count == 0) return;
+            var input = list.Select(m => (Auto: !m.NumberManuallySet, Text: m.FullText!, Path: m.FilePath)).ToArray();
+            var fields = new Dateiumbenenner.Engine.Field?[input.Length];
+            TxtStatus.Text = $"Nummern für {company} / {docType} werden neu ermittelt ({list.Count:N0} Belege)...";
+            await Task.Run(() => Parallel.For(0, input.Length, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1) }, k =>
+            {
+                if (input[k].Auto) try { fields[k] = Engine.ExtractNumber(input[k].Text, input[k].Path); } catch { }
+            }));
+            var tick = System.Diagnostics.Stopwatch.StartNew();
+            int changed = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var m = list[i];
+                string? sel = m.SelectedNumber, inv = m.InvoiceNumber, doc = m.DocumentNumber;
+                if (fields[i] is { } f && !m.NumberManuallySet) ApplyNumberField(m, f, m.DocumentType);
+                AutoAssignNumbers(m);
+                if (sel != m.SelectedNumber || inv != m.InvoiceNumber || doc != m.DocumentNumber)
+                {
+                    changed++;
+                    RefreshNewNamePreview(m);
+                    ScheduleStoreSave(m);
+                }
+                if (tick.ElapsedMilliseconds >= 40)
+                {
+                    tick.Restart();
+                    TxtStatus.Text = $"Nummern für {company} / {docType}: {i + 1:N0} / {list.Count:N0}...";
+                    await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                }
+            }
+            if (_currentMeta is { } cur && list.Contains(cur)) RefreshAfterRules(cur);
+            LvFiles.Items.Refresh();
+            TxtStatus.Text = $"Nummernregel für {company} / {docType} angewendet: {changed:N0} von {list.Count:N0} Beleg(en) geändert.";
+        }
 
         /// <summary>TXT-Datei eines Belegs: A-Modus-Quelle, die Datei selbst oder eine gleichnamige .txt.</summary>
         private static string? TxtOf(DocumentMetadata m)
@@ -3220,14 +3304,16 @@ namespace Dateiumbenenner
                 + (learned > 0 ? $" Gelernte Nummer/Datum bei {learned:N0} Beleg(en) übernommen." : "");
         }
         private void EditableCombo_DropDownClosed(object sender,EventArgs e){ if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } if(sender==CmbDocType) ScheduleDocTypeAsk(false); }
-        private void EditableCombo_KeyDown(object sender,System.Windows.Input.KeyEventArgs e){ if(e.Key==System.Windows.Input.Key.Enter){ if(sender is SWC.ComboBox combo){ combo.IsDropDownOpen=false; if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } if(combo==CmbDocType) ScheduleDocTypeAsk(true); } } }
+        private void EditableCombo_KeyDown(object sender,System.Windows.Input.KeyEventArgs e){ if(e.Key==System.Windows.Input.Key.Enter){ if(sender is SWC.ComboBox combo){ combo.IsDropDownOpen=false; if(combo==CmbDateCandidates) ExpandDateInput(); if(_currentMeta is { Loaded:true } cm){ SaveCurrentSettings(cm); AutoAssignNumbers(cm); ShowDetails(cm); RefreshNewNamePreview(cm); } if(combo==CmbDocType) ScheduleDocTypeAsk(true); } } }
         private void InsertPosition_Changed(object sender,RoutedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ SaveCurrentSettings(meta); UpdateMetadataFromSelections(meta); RefreshNewNamePreview(meta); } }
         private void CmbNumberCandidates_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.NumberManuallySet=true; UpdateMetadataFromSelections(meta); if(e!=null) LearnNumberPattern(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); LvFiles.Items.Refresh(); } }
         private void CmbNumberCandidates_LostFocus(object s,RoutedEventArgs e)=>CmbNumberCandidates_SelectionChanged(s,null!);
         private void CmbNumberCandidates_TextChanged(object s,TextChangedEventArgs e)=>CmbNumberCandidates_SelectionChanged(s,null!);
         private void EditableCombo_PreviewMouseLeftButtonDown(object s,System.Windows.Input.MouseButtonEventArgs e){ }
         private void CmbDateCandidates_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DateManuallySet=true; UpdateMetadataFromSelections(meta); AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); LvFiles.Items.Refresh(); } }
-        private void CmbDateCandidates_LostFocus(object s,RoutedEventArgs e)=>CmbDateCandidates_SelectionChanged(s,null!);
+        private void CmbDateCandidates_LostFocus(object s,RoutedEventArgs e){ ExpandDateInput(); CmbDateCandidates_SelectionChanged(s,null!); }
+        /// <summary>Kurzeingabe im Datumsfeld vervollständigen (0102 → 01.02.aktuelles Jahr, 010226 → 01.02.2026).</summary>
+        private void ExpandDateInput(){ if(Dateiumbenenner.Engine.DateInput.Expand(CmbDateCandidates.Text) is { } full){ CmbDateCandidates.Text=full; if(CmbDateCandidates.Template?.FindName("PART_EditableTextBox",CmbDateCandidates) is SWC.TextBox tb) tb.CaretIndex=full.Length; } }
         private void CmbDateCandidates_TextChanged(object s,TextChangedEventArgs e)=>CmbDateCandidates_SelectionChanged(s,null!);
         private void DelimiterRelated_Changed(object s,TextChangedEventArgs e){ if(_currentMeta is { Loaded:true } m){ SaveCurrentSettings(m); RefreshNewNamePreview(m); } }
         private void TxtSegmentIndex_TextChanged(object s,TextChangedEventArgs e){ if(_currentMeta is { Loaded:true } m){ SaveCurrentSettings(m); RefreshNewNamePreview(m); } }
