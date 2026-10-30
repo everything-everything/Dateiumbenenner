@@ -501,7 +501,9 @@ namespace Dateiumbenenner
                 opt.FindTerm = term;
                 opt.IsCaseSensitive = false;
                 opt.ShouldHighlightAllMatches = true;
-                opt.SuppressDefaultFindDialog = false;
+                // Eigenes Suchfenster der Anzeige nicht öffnen: es nahm sich die Tastatur, sodass Eingaben im Filter dort landeten.
+                // Trefferzahl und Weiterblättern übernimmt die Suchzeile darüber, die Markierungen bleiben.
+                opt.SuppressDefaultFindDialog = true;
                 // Das Suchfenster der PDF-Anzeige nimmt sich den Tastaturfokus – wer gerade im Filter/Suchfeld tippt, bleibt dort
                 var typing = Keyboard.FocusedElement as UIElement;
                 if (typing != null && (ReferenceEquals(typing, _web) || _web.IsKeyboardFocusWithin)) typing = null;

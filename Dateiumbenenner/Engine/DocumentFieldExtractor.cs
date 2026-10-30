@@ -25,6 +25,33 @@ namespace Dateiumbenenner.Engine
 
         private static readonly Regex TokenAtStart = new(@"^\s*(?<value>[A-Z0-9OIl][A-Z0-9OIl\-/]{2,})", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // Bezeichnung ohne "Nr.": "Invoice: INV-129229 /G2", "Numero W12243 - G 1"
+        private static readonly Regex LooseLabel = new(
+            @"(?<![\p{L}\-])(?<label>Invoice|Numero|Número|Numéro|Nummer|Number)\b\.?\s*(?:[:#]\s*|\s+)(?<value>[A-Z]{0,5}-?\d[A-Z0-9\-/]*)",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static double LooseLabelWeight(string label) => label.ToLowerInvariant() switch
+        {
+            "invoice" => 4.5,
+            "numero" or "número" or "numéro" => 2,
+            _ => 1.5
+        };
+
+        private static readonly Regex AlnumToken = new(@"(?<![A-Za-z0-9])[A-Za-z0-9]{6,}(?![A-Za-z0-9])", RegexOptions.Compiled);
+
+        /// <summary>Gleich lang und nur an 1–2 Stellen Buchstabe statt Ziffer (OCR: 4700D012354425 neben 47000012354425).</summary>
+        private static bool IsOcrTwin(string a, string b)
+        {
+            if (a.Length != b.Length || a.Length < 6 || string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) return false;
+            int diff = 0;
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (char.ToUpperInvariant(a[i]) == char.ToUpperInvariant(b[i])) continue;
+                if (char.IsDigit(a[i]) == char.IsDigit(b[i]) || ++diff > 2) return false;
+            }
+            return a.Count(char.IsDigit) >= a.Length / 2;
+        }
+
         // Fahrgestellnummer (FIN/VIN): 17 Zeichen, Buchstaben und Ziffern ohne I, O, Q
         private static readonly Regex VinRegex = new(@"(?<![A-Za-z0-9])(?<value>[A-HJ-NPR-Z0-9]{17})(?![A-Za-z0-9])", RegexOptions.Compiled);
         private static readonly Regex VinLabel = new(@"Fahrgestell|Fahrzeug\s*-?\s*Ident|Fzg\.?\s*-?\s*Ident|Ident\s*-?\s*Nr|\bFIN\b|\bVIN\b|Chassis", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -52,12 +79,22 @@ namespace Dateiumbenenner.Engine
             return -1;   // Kunden-, Auftrags-, Steuer-, USt-, Bestell-Nr. -> keine Rechnungsnummer
         }
 
-        /// <summary>Korrigiert typische OCR-Verwechslungen in überwiegend numerischen Werten.</summary>
+        /// <summary>Korrigiert typische OCR-Verwechslungen in überwiegend numerischen Werten.
+        /// Nur einzelne O/I/l zwischen Ziffern – Buchstabenpräfixe wie "INV" bleiben erhalten.</summary>
         private static string FixDigits(string v)
         {
             int digits = v.Count(char.IsDigit);
             if (digits < v.Length / 2) return v;
-            return v.Replace('O', '0').Replace('o', '0').Replace('I', '1').Replace('l', '1');
+            static bool Confusable(char c) => c is 'O' or 'o' or 'I' or 'l';
+            static bool RealLetter(char c) => char.IsLetter(c) && !Confusable(c);
+            var chars = v.ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                if (!Confusable(v[i])) continue;
+                if (i > 0 && RealLetter(v[i - 1]) || i + 1 < v.Length && RealLetter(v[i + 1])) continue;
+                chars[i] = v[i] is 'O' or 'o' ? '0' : '1';
+            }
+            return new string(chars);
         }
 
         private static readonly Regex StopWord = new(@"^(vom|von|am|Datum|Date|Seite|Page|Kunden\w*|Rechnung\w*|Auftrag\w*|USt\w*)$|^\d{1,2}\.\d{1,2}\.\d{2,4}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -91,7 +128,7 @@ namespace Dateiumbenenner.Engine
             if (string.IsNullOrEmpty(text)) return field;
             var lines = text.Replace("\t", "    ").Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
             var block = new LineBlock(lines);
-            var hit = block.Mark(VinRegex, block.Mark(PlainNumber, block.Mark(NumberLabel)));
+            var hit = block.Mark(LooseLabel, block.Mark(VinRegex, block.Mark(PlainNumber, block.Mark(NumberLabel))));
 
             for (int i = 0; i < lines.Length; i++)
             {
@@ -131,6 +168,16 @@ namespace Dateiumbenenner.Engine
                     field.Add(FixDigits(pv.Trim('-', '/', '|', ':', '.')), 1.0, "Nr.");
                 }
 
+                foreach (Match m in LooseLabel.Matches(lines[i]))
+                {
+                    // Teil einer vollständigen Bezeichnung ("Invoice Number", "Kunden Nummer") – dort bewertet bzw. ausgeschlossen
+                    if (NumberLabel.Matches(lines[i]).Any(n => n.Index <= m.Index && m.Index < n.Index + n.Length)) continue;
+                    var lv = ReadValue(lines[i], m.Groups["value"].Index) ?? m.Groups["value"].Value;
+                    lv = FixDigits(lv.Trim('-', '/', '|', ':', '.'));
+                    if (lv.Count(char.IsDigit) < 3) continue;
+                    field.Add(lv, LooseLabelWeight(m.Groups["label"].Value) + (i < 30 ? 0.5 : 0), m.Groups["label"].Value);
+                }
+
                 // Fahrgestellnummer: als Vorschlag anbieten, aber hinter Rechnungs-/Belegnummern (außer Regeln bevorzugen sie)
                 foreach (Match m in VinRegex.Matches(lines[i]))
                 {
@@ -140,6 +187,13 @@ namespace Dateiumbenenner.Engine
                     field.Add(vin, labeled ? 0.9 : 0.5, labeled ? "Fahrgestell-Nr." : "FIN-Muster");
                 }
             }
+
+            // OCR-Varianten gefundener Nummern an anderer Stelle ebenfalls anbieten (etwas dahinter)
+            var found = field.Candidates.Where(c => c.Score >= 0 && c.Value.Length >= 6 && c.Value.All(char.IsLetterOrDigit)).ToList();
+            if (found.Count > 0)
+                foreach (Match m in AlnumToken.Matches(text))
+                    if (found.FirstOrDefault(c => IsOcrTwin(c.Value, m.Value)) is { } twin)
+                        field.Add(m.Value, Math.Max(0, twin.Score - 1), twin.Source + " (OCR-Variante)");
             return field;
         }
 
