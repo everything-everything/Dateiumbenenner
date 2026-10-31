@@ -654,13 +654,25 @@ namespace Dateiumbenenner
             bool aMode=AMode;
             var exts=aMode? new[]{".pdf"} : new[]{".pdf",".txt",".csv"};
             var naturalSort=_useNaturalSort;
-            var metas=await Task.Run(()=>{
-                var fis=new DirectoryInfo(folder).EnumerateFiles().Where(f=>exts.Contains(f.Extension.ToLowerInvariant())).ToList();
+            var (metas, listingScope)=await Task.Run(()=>{
+                // Ordner nur einmal auflisten (großer Puffer: weniger Anfragen ans Laufwerk), PDF und TXT danach über den Namen zuordnen
+                var listOptions=new EnumerationOptions{ BufferSize=64*1024, AttributesToSkip=0, IgnoreInaccessible=false, MatchType=MatchType.Win32 };
+                var fis=new List<FileInfo>();
+                var listed=new List<(string Path,long Size,long Ticks)>();
+                HashSet<string>? txts=aMode? new HashSet<string>(StringComparer.OrdinalIgnoreCase) : null;
+                foreach(var fi in new DirectoryInfo(folder).EnumerateFiles("*", listOptions)){
+                    listed.Add((fi.FullName, fi.Length, fi.LastWriteTimeUtc.Ticks));
+                    var ext=fi.Extension.ToLowerInvariant();
+                    if(exts.Contains(ext)) fis.Add(fi);
+                    else if(txts!=null && ext==".txt") txts.Add(fi.FullName);
+                }
+                // Größe/Änderungszeit und gemerkte TXT-Prüfsummen aus der Auflistung statt Einzelabfragen je Beleg
+                IDisposable? scope=null;
+                try{ scope=DocumentStore.UseListing(folder, listed); } catch{ }
                 fis=naturalSort? fis.OrderBy(f=>f.Name,_naturalComparer).ToList(): fis.OrderBy(f=>f.FullName).ToList();
-                HashSet<string>? txts=null;
-                if(aMode) txts=new HashSet<string>(Directory.EnumerateFiles(folder,"*.txt"),StringComparer.OrdinalIgnoreCase);
-                return fis.Select(fi=>{ var f=fi.FullName; var meta=new DocumentMetadata{ FilePath=f, FileSizeBytes=fi.Length, Dpi=fi.Extension.Equals(".pdf",StringComparison.OrdinalIgnoreCase)?72:null, SavedDelimiter=null, SavedSegmentIndex=2, SavedInsertValueIndex=0, DelimiterAutoDetected=true, UseDelimiterPosition=true }; if(txts!=null){ var txt=Path.ChangeExtension(f,".txt"); if(txts.Contains(txt)) meta.TextSourcePath=txt; } return meta; }).ToList();
+                return (fis.Select(fi=>{ var f=fi.FullName; var meta=new DocumentMetadata{ FilePath=f, FileSizeBytes=fi.Length, Dpi=fi.Extension.Equals(".pdf",StringComparison.OrdinalIgnoreCase)?72:null, SavedDelimiter=null, SavedSegmentIndex=2, SavedInsertValueIndex=0, DelimiterAutoDetected=true, UseDelimiterPosition=true }; if(txts!=null){ var txt=Path.ChangeExtension(f,".txt"); if(txts.Contains(txt)) meta.TextSourcePath=txt; } return meta; }).ToList(), scope);
             });
+            using var listingLease=listingScope;
             if(loadVersion!=_loadVersion) return;
             int total=metas.Count, processed=0;
             _isBulkLoading=true;
@@ -715,6 +727,8 @@ namespace Dateiumbenenner
                     toSave[x.i]=true;
                 }
                 int done=Interlocked.Increment(ref processed); if((done&15)==0 || done==total) ((IProgress<int>)progress).Report(done); });
+            // Auflistung nur für das Einlesen: danach wieder die echten Dateiangaben verwenden
+            listingLease?.Dispose();
             // Wurde inzwischen neu geladen (z. B. Sortierung/A-Modus umgeschaltet), dieses Ergebnis verwerfen
             if(loadVersion!=_loadVersion) return;
             // UI-Thread: Nummern zuordnen und Liste in Originalreihenfolge in einem Durchgang füllen
@@ -740,7 +754,7 @@ namespace Dateiumbenenner
         private string TextSourceKey(string path)
         {
             if(!AMode) return "";
-            try{ var txt=Path.ChangeExtension(path,".txt"); return File.Exists(txt) ? "|txt:"+DocumentStore.Stamp(txt, out _, out _) : ""; }
+            try{ var txt=Path.ChangeExtension(path,".txt"); return DocumentStore.Exists(txt) ? "|txt:"+DocumentStore.TextStamp(txt) : ""; }
             catch{ return ""; }
         }
 
@@ -1067,7 +1081,7 @@ namespace Dateiumbenenner
         private static bool IsPlainWord(string c)
         {
             var words = c.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            return words.Length is > 0 and <= 3 && !HasLegalForm(c.Trim())
+            return words.Length is > 0 and <= 3 && !HasLegalForm(c.Trim()) && !InstitutionRegex.IsMatch(c)
                 && words.All(t => t.Length > 1 && char.IsUpper(t[0]) && t.Skip(1).All(char.IsLower));
         }
 
@@ -1090,7 +1104,7 @@ namespace Dateiumbenenner
             System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Multiline);
 
         private static readonly Regex IndustryRegex = new(
-            @"\b(Versicherung(en)?|Versicherungs\w*|Sparkasse|Volksbank|Raiffeisenbank|Bank|Stadtwerke|Stadtverwaltung|Gemeindeverwaltung|Landratsamt|Finanzamt|KfW|Krankenkasse|AOK|BKK|IKK|Verlag|Werke|Schotterwerke?|Gruppe|Telekom|Energie)\b",
+            @"\b(Versicherung(en)?|Versicherungs\w*|\p{L}*sparkasse|Volksbank|Raiffeisenbank|Commerzbank|Postbank|Landesbank|Bank|Stadtwerke|Stadtverwaltung|Gemeindeverwaltung|Landratsamt|Finanzamt|KfW|Krankenkasse|AOK|BKK|IKK|Verlag|Werke|Schotterwerke?|Gruppe|Telekom|Energie)\b",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex DocTypeWordRegex = new(
             @"^(Rechnung|Stornorechnung|Gutschrift|Mahnung|Zahlungserinnerung|Angebot|Lieferschein|Auftragsbestätigung|Auftrag|Bestellung|Beleg|Quittung|Kostenvoranschlag|Invoice|Kundennummer|Seite|Page|Blatt|Gebucht|Eingegangen)\b",
@@ -1219,6 +1233,8 @@ namespace Dateiumbenenner
             {
                 double s = -order * 0.3;                                 // Adress-Ranking
                 if (HasLegalForm(c)) s += 4;
+                // Öffentliche/genossenschaftliche Institute haben keine Rechtsform im Namen ("Stadtsparkasse Augsburg")
+                else if (InstitutionRegex.IsMatch(c)) s += 2;
                 if (IndustryRegex.IsMatch(c)) s += 2;
                 var ct = c.Trim();
                 // Firmenverzeichnis (eigene DB, gelernt, GLEIF): bekannte Firma, ggf. mit ihrer PLZ im Text – nur Pluspunkte
@@ -1235,9 +1251,11 @@ namespace Dateiumbenenner
                 s += Math.Min(3, hits - 1) * 0.7;
                 if (c.Trim().Split(' ').Any(w => w.Length == 1 && char.IsLetter(w[0]))) s -= 2;   // Fragmente wie "i DIE GARAGE S"
                 // Impressum-Block ("Sitz der Gesellschaft", "Registergericht", "Geschäftsführung") direkt beim Namen = Aussteller
-                if (Regex.IsMatch(fullText, Regex.Escape(c) + @"[\s\S]{0,120}?\b(Sitz\s+der\s+Gesellschaft|Registergericht|HRB|HRA|Geschäftsführ\w*)", RegexOptions.IgnoreCase)) s += 4;
+                if (Regex.IsMatch(fullText, Regex.Escape(c) + @"[\s\S]{0,120}?\b(Sitz\s+der\s+Gesellschaft|Registergericht|HRB|HRA|Geschäftsführ\w*|Anstalt\s+des\s+öffentlichen\s+Rechts|Vorstand|Verwaltungsrat\w*)", RegexOptions.IgnoreCase)) s += 4;
                 // Name direkt hinter Register-/Bankangabe ("HRA 706214 Hans Widmann Verwaltungs GmbH")
                 if (Regex.IsMatch(fullText, @"\b(HR[AB]|Handelsregister|Amtsgericht|BIC|IBAN|Steuer\S*|USt\S*)\b[^\n]{0,60}?" + Regex.Escape(ct), RegexOptions.IgnoreCase)) s += 2;
+                // Ausdrücklich als Absender gekennzeichnet ("Absender: Muster GmbH", "Abs.: …")
+                if (Regex.IsMatch(fullText, @"\b(Absender|Abs\.)\s*:?\s*" + Regex.Escape(ct), RegexOptions.IgnoreCase)) s += 3;
                 int idx = Array.FindIndex(lines, l => l.Contains(c, StringComparison.OrdinalIgnoreCase));
                 if (idx < 0) return s - 10;                              // steht nicht im Dokument
                 // Position auf der Seite (3x3-Raster): Briefkopf oben, Fußzeile unten; Querformat: Absender eher oben links
@@ -1263,10 +1281,20 @@ namespace Dateiumbenenner
                 }
                 for (int k = Math.Max(0, idx - 5); k <= Math.Min(n - 1, idx + 5); k++)
                     if (RegisterRegex.IsMatch(lines[k])) { s += 1.5; break; }
+                // Bank direkt bei IBAN/BIC ist die Bankverbindung des Absenders, nicht der Absender selbst
+                if (BankNameRegex.IsMatch(ct))
+                    for (int k = Math.Max(0, idx - 1); k <= Math.Min(n - 1, idx + 1); k++)
+                        if (BankDetailRegex.IsMatch(lines[k])) { s -= 4; break; }
                 return s;
             }
             return list.Select((c, i) => (c, s: Score(c, i))).OrderByDescending(x => x.s).Select(x => x.c).ToList();
         }
+
+        private static readonly Regex BankNameRegex = new(@"sparkasse|bank(?!\p{L})", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex InstitutionRegex = new(
+            @"sparkasse|\b(Volksbank|Raiffeisenbank|VR[\s-]?Bank|Landesbank|Finanzamt|Landratsamt|Stadtverwaltung|Gemeindeverwaltung|Krankenkasse|AOK|BKK|IKK|Stadtwerke)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex BankDetailRegex = new(@"\b(IBAN|BIC|SWIFT|BLZ|Bankverbindung|Kontonummer|Konto-Nr)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly System.Text.RegularExpressions.Regex LegalFormEndRegex = new(
             @"\s(?i:GmbH(\s*&\s*Co\.?\s*KG)?|mbH)|\s(AG|KG|UG|OHG|GbR|SE|e\.\s?V\.|e\.\s?K\.)\.?$", System.Text.RegularExpressions.RegexOptions.Compiled);

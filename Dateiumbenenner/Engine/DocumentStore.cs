@@ -130,15 +130,201 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
         /// <summary>Bereits berechnete Teil-Hashes (gültig, solange Größe und Änderungszeit gleich sind).</summary>
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Size, long Ticks, string Hash)> StampCache = new(StringComparer.OrdinalIgnoreCase);
 
-        public static string Stamp(string path, out long size, out long ticks)
+        public static string Stamp(string path, out long size, out long ticks) => StampCore(path, false, out size, out ticks);
+
+        /// <summary>Teil-Hash einer Textquelle (TXT im A-Modus): wird dauerhaft gemerkt, damit die Datei beim nächsten Einlesen
+        /// nur bei geänderter Größe oder Änderungszeit erneut gelesen wird. Gleicher Wert wie <see cref="Stamp"/>.</summary>
+        public static string TextStamp(string path) => StampCore(path, true, out _, out _);
+
+        private static string StampCore(string path, bool persist, out long size, out long ticks)
         {
-            var fi = new FileInfo(path);
+            var full = Path.GetFullPath(path);
+            (size, ticks) = StatOf(full);
+            if (StampCache.TryGetValue(full, out var s) && s.Size == size && s.Ticks == ticks) return s.Hash;
+            if (persist && !Listed(full, out _, out _, out _) && StoredStamp(full) is { } st && st.Size == size && st.Ticks == ticks)
+            {
+                StampCache[full] = (size, ticks, st.Hash);
+                return st.Hash;
+            }
+            var hash = PartialHash(full, size);
+            StampCache[full] = (size, ticks, hash);
+            if (persist)
+            {
+                lock (PendingSync) PendingStamps[full] = (size, ticks, hash);
+                StartFlusher();
+            }
+            return hash;
+        }
+
+        /// <summary>Ordnerauflistung eines Ladevorgangs: Größe und Änderungszeit liefert die Auflistung ohnehin mit –
+        /// erspart je Datei eine eigene Abfrage beim Laufwerk (Netzlaufwerk: spürbar bei Tausenden Dateien).</summary>
+        private sealed class ListingScope : IDisposable
+        {
+            public readonly string Folder;
+            public readonly Dictionary<string, (long Size, long Ticks)> Files;
+            public ListingScope(string folder, Dictionary<string, (long Size, long Ticks)> files) { Folder = folder; Files = files; }
+            public void Dispose()
+            {
+                lock (ScopeSync) _listings = _listings.Where(s => s != this).ToArray();
+            }
+        }
+        private static volatile ListingScope[] _listings = Array.Empty<ListingScope>();
+
+        /// <summary>
+        /// Hinterlegt die vollständige Auflistung eines Ordners (alle Dateien mit Größe und Änderungszeit) bis zum Freigeben:
+        /// Existenz-, Größen- und Zeitabfragen für Dateien dieses Ordners kommen dann aus der Liste, gemerkte TXT-Prüfsummen
+        /// werden gebündelt vorab gelesen. Nur für die Dauer des Einlesens verwenden (danach können sich Dateien ändern).
+        /// </summary>
+        public static IDisposable UseListing(string folder, IEnumerable<(string Path, long Size, long Ticks)> files)
+        {
+            var dir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+            var dict = new Dictionary<string, (long Size, long Ticks)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in files) dict[Path.GetFullPath(f.Path)] = (f.Size, f.Ticks);
+            var scope = new ListingScope(dir, dict);
+            try { LoadStamps(dir, dict); } catch { }
+            lock (ScopeSync) _listings = _listings.Append(scope).ToArray();
+            return scope;
+        }
+
+        /// <summary>True, wenn die Datei in einer hinterlegten Ordnerauflistung liegt (dann gilt <paramref name="exists"/>).</summary>
+        private static bool Listed(string full, out bool exists, out long size, out long ticks)
+        {
+            var ls = _listings;
+            if (ls.Length > 0)
+            {
+                var dir = Path.GetDirectoryName(full);
+                foreach (var s in ls)
+                {
+                    if (!string.Equals(dir, s.Folder, StringComparison.OrdinalIgnoreCase)) continue;
+                    exists = s.Files.TryGetValue(full, out var st);
+                    (size, ticks) = st;
+                    return true;
+                }
+            }
+            exists = false;
+            size = ticks = 0;
+            return false;
+        }
+
+        private static (long Size, long Ticks) StatOf(string full)
+        {
+            if (Listed(full, out var exists, out var size, out var ticks) && exists) return (size, ticks);
+            var fi = new FileInfo(full);
+            return (fi.Length, fi.LastWriteTimeUtc.Ticks);
+        }
+
+        /// <summary>Größe und Änderungszeit (UTC-Ticks); false, wenn die Datei fehlt. Nutzt eine hinterlegte Ordnerauflistung.</summary>
+        public static bool TryStat(string path, out long size, out long ticks)
+        {
+            var full = Path.GetFullPath(path);
+            if (Listed(full, out var exists, out size, out ticks) && exists) return true;
+            var fi = new FileInfo(full);
+            if (!fi.Exists) { size = ticks = 0; return false; }
             size = fi.Length;
             ticks = fi.LastWriteTimeUtc.Ticks;
-            if (StampCache.TryGetValue(fi.FullName, out var s) && s.Size == size && s.Ticks == ticks) return s.Hash;
-            var hash = PartialHash(path, size);
-            StampCache[fi.FullName] = (size, ticks, hash);
-            return hash;
+            return true;
+        }
+
+        /// <summary>Wie <see cref="File.Exists"/>, aber aus einer hinterlegten Ordnerauflistung, wenn vorhanden.</summary>
+        public static bool Exists(string path)
+        {
+            try
+            {
+                var full = Path.GetFullPath(path);
+                return Listed(full, out var exists, out _, out _) ? exists : File.Exists(full);
+            }
+            catch { return false; }
+        }
+
+        private static readonly Dictionary<string, (long Size, long Ticks, string Hash)> PendingStamps = new(StringComparer.OrdinalIgnoreCase);
+        private static bool _stampTable;
+
+        private static void EnsureStampTable()
+        {
+            _ = ConnectionString;
+            if (_stampTable) return;
+            using var c = Open();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS Stamps(
+  Path TEXT PRIMARY KEY COLLATE NOCASE,
+  Size INTEGER NOT NULL,
+  Ticks INTEGER NOT NULL,
+  Hash TEXT NOT NULL);";
+            cmd.ExecuteNonQuery();
+            _stampTable = true;
+        }
+
+        /// <summary>Gemerkte Prüfsummen eines Ordners gebündelt lesen (nur gültige: Größe und Zeit wie in der Auflistung).</summary>
+        private static void LoadStamps(string dir, Dictionary<string, (long Size, long Ticks)> files)
+        {
+            lock (Sync)
+            {
+                EnsureStampTable();
+                using var c = Open();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT Path, Size, Ticks, Hash FROM Stamps WHERE Path >= $lo AND Path < $hi";
+                cmd.Parameters.AddWithValue("$lo", dir.TrimEnd('\\') + "\\");
+                cmd.Parameters.AddWithValue("$hi", dir.TrimEnd('\\') + "]");
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                {
+                    var p = r.GetString(0);
+                    long size = r.GetInt64(1), ticks = r.GetInt64(2);
+                    if (files.TryGetValue(p, out var f) && f.Size == size && f.Ticks == ticks) StampCache[p] = (size, ticks, r.GetString(3));
+                }
+            }
+        }
+
+        private static (long Size, long Ticks, string Hash)? StoredStamp(string full)
+        {
+            try
+            {
+                lock (PendingSync) if (PendingStamps.TryGetValue(full, out var p)) return p;
+                lock (Sync)
+                {
+                    EnsureStampTable();
+                    using var c = Open();
+                    using var cmd = c.CreateCommand();
+                    cmd.CommandText = "SELECT Size, Ticks, Hash FROM Stamps WHERE Path=$p";
+                    cmd.Parameters.AddWithValue("$p", full);
+                    using var r = cmd.ExecuteReader();
+                    return r.Read() ? (r.GetInt64(0), r.GetInt64(1), r.GetString(2)) : null;
+                }
+            }
+            catch { return null; }
+        }
+
+        private static void FlushStamps()
+        {
+            List<KeyValuePair<string, (long Size, long Ticks, string Hash)>> batch;
+            lock (PendingSync) batch = PendingStamps.ToList();
+            if (batch.Count == 0) return;
+            try
+            {
+                lock (Sync)
+                {
+                    EnsureStampTable();
+                    using var c = Open();
+                    using var tx = c.BeginTransaction();
+                    using var cmd = c.CreateCommand();
+                    cmd.Transaction = tx;
+                    cmd.CommandText = "INSERT INTO Stamps(Path,Size,Ticks,Hash) VALUES($p,$s,$t,$h) ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,Hash=$h";
+                    var pp = cmd.Parameters.Add("$p", SqliteType.Text);
+                    var ps = cmd.Parameters.Add("$s", SqliteType.Integer);
+                    var pt = cmd.Parameters.Add("$t", SqliteType.Integer);
+                    var ph = cmd.Parameters.Add("$h", SqliteType.Text);
+                    foreach (var (p, v) in batch)
+                    {
+                        pp.Value = p; ps.Value = v.Size; pt.Value = v.Ticks; ph.Value = v.Hash;
+                        cmd.ExecuteNonQuery();
+                    }
+                    tx.Commit();
+                }
+            }
+            catch { }
+            lock (PendingSync)
+                foreach (var (p, v) in batch)
+                    if (PendingStamps.TryGetValue(p, out var cur) && cur == v) PendingStamps.Remove(p);
         }
 
         private static string PartialHash(string path, long length)
@@ -176,8 +362,7 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
                     upToDate = pd.SettingsKey == settingsKey;
                     return JsonSerializer.Deserialize(pd.Data, StoreJsonContext.Default.Record);
                 }
-                var fi = new FileInfo(full);
-                long size = fi.Length, ticks = fi.LastWriteTimeUtc.Ticks;
+                var (size, ticks) = StatOf(full);
                 if (!TakeDoc(full, out var row))
                 {
                     lock (Sync)
@@ -320,6 +505,7 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
         {
             FlushDocuments();
             FlushPluginData();
+            FlushStamps();
         }
 
         private static bool? _fts;
@@ -422,8 +608,7 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                 var key = PendingKey(pluginId, full);
                 lock (PendingSync)
                     if (Pending.TryGetValue(key, out var p)) return p.Data;
-                var fi = new FileInfo(full);
-                long size = fi.Length, ticks = fi.LastWriteTimeUtc.Ticks;
+                var (size, ticks) = StatOf(full);
                 if (!TakePlugin(key, out var row))
                 {
                     lock (Sync)
@@ -487,7 +672,7 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
             {
                 Thread.Sleep(250);
                 lock (PendingSync)
-                    if (Pending.Count == 0 && PendingDocs.Count == 0) { _flushRunning = false; return; }
+                    if (Pending.Count == 0 && PendingDocs.Count == 0 && PendingStamps.Count == 0) { _flushRunning = false; return; }
                 try { Flush(); }
                 catch { }
             }
@@ -850,6 +1035,25 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Ticks=$t,Data=$d
                         if (EnsureFts(c)) { del.CommandText = "DELETE FROM DocText WHERE Path=$p"; del.ExecuteNonQuery(); }
                     }
                     tx.Commit();
+                    try
+                    {
+                        EnsureStampTable();
+                        var goneStamps = new List<string>();
+                        using (var cmd = c.CreateCommand())
+                        {
+                            cmd.CommandText = "SELECT Path FROM Stamps";
+                            using var r = cmd.ExecuteReader();
+                            while (r.Read()) if (!File.Exists(r.GetString(0))) goneStamps.Add(r.GetString(0));
+                        }
+                        using var tx2 = c.BeginTransaction();
+                        using var delStamp = c.CreateCommand();
+                        delStamp.Transaction = tx2;
+                        delStamp.CommandText = "DELETE FROM Stamps WHERE Path=$p";
+                        var dsp = delStamp.Parameters.Add("$p", SqliteType.Text);
+                        foreach (var p in goneStamps) { dsp.Value = p; delStamp.ExecuteNonQuery(); }
+                        tx2.Commit();
+                    }
+                    catch { }
                     return gone.Count;
                 }
             }

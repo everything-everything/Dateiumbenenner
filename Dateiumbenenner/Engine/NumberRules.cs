@@ -388,15 +388,98 @@ namespace Dateiumbenenner.Engine
             return list.OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault().Value;
         }
 
-        /// <summary>Manuelle Masken-Regel setzen/entfernen (z. B. aus dem INI-Plugin).</summary>
-        public static void SetManualMask(string? company, string? docType, string? mask)
+        /// <summary>Mehrere Masken in einem Feld, getrennt durch „;“ (ein „/“ kann Teil der Nummer sein).</summary>
+        public static List<string> SplitMasks(string? masks) =>
+            (masks ?? "").Split(';').Select(m => m.Trim()).Where(m => m.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+
+        /// <summary>Manuelle Masken-Regeln setzen/entfernen (z. B. aus dem INI-Plugin). Mehrere Masken mit „;“ – die erste hat Vorrang.
+        /// Ausschlussregeln bleiben unverändert.</summary>
+        public static void SetManualMask(string? company, string? docType, string? mask) => SetManualMask(company, docType, mask, null, null);
+
+        /// <summary>Wie oben; mit Belegtext wird bei Regeln ohne Begriff der Begriff an der Fundstelle der Nummer eingetragen
+        /// (z. B. „Rechnung-Nr.“ links daneben → Begriff vor Nummer).</summary>
+        public static void SetManualMask(string? company, string? docType, string? mask, string? text, string? value)
         {
             if (string.IsNullOrWhiteSpace(company) || string.IsNullOrWhiteSpace(docType)) return;
+            var masks = SplitMasks(mask);
+            var dt = DocTypeStore.Canonical(docType);
             var list = Rules.ToList();
-            list.RemoveAll(r => !r.Learned && r.Kind == NumberRuleKind.Maske && Eq(r.Company, company) && Eq(r.DocType, docType));
-            if (!string.IsNullOrWhiteSpace(mask))
-                list.Add(new NumberRule { Company = company.Trim(), DocType = DocTypeStore.Canonical(docType) ?? docType.Trim(), Mask = mask.Trim(), Priority = 10 });
+            // Regeln nur mit Begriff (ohne Maske) bleiben unverändert
+            bool Own(NumberRule r) => !r.Learned && !r.Exclude && r.Kind == NumberRuleKind.Maske
+                                      && (!string.IsNullOrWhiteSpace(r.Mask) || string.IsNullOrWhiteSpace(r.Keyword))
+                                      && Eq(r.Company, company) && Eq(DocTypeStore.Canonical(r.DocType), dt);
+            list.RemoveAll(r => Own(r) && !masks.Contains(r.Mask?.Trim() ?? "", StringComparer.Ordinal));
+            for (int i = 0; i < masks.Count; i++)
+            {
+                int priority = Math.Max(MaxLearnedPriority + 1, 10 - i);
+                var own = list.Where(x => Own(x) && string.Equals(x.Mask?.Trim(), masks[i], StringComparison.Ordinal)).ToList();
+                if (own.Count == 0)
+                {
+                    var r = new NumberRule { Company = company.Trim(), DocType = dt ?? docType.Trim(), Mask = masks[i] };
+                    list.Add(r);
+                    own.Add(r);
+                }
+                foreach (var r in own)
+                {
+                    r.Priority = priority;
+                    if (string.IsNullOrWhiteSpace(r.Keyword) && TermFromText(masks[i], text, value) is { } term)
+                    {
+                        r.Keyword = term.Keyword;
+                        r.KeywordEnd = null;
+                        r.KeywordPosition = term.Position;
+                        if (r.Example == null && Match(r, term.Value) >= 0.999) r.Example = term.Value;
+                    }
+                }
+            }
             Save(list);
+        }
+
+        /// <summary>Bestehende Masken-Regeln der Firma + Belegart ohne Begriff: Begriff an der Fundstelle im Belegtext nachtragen.</summary>
+        public static bool FillMaskKeywords(string? company, string? docType, string? text, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(company) || string.IsNullOrWhiteSpace(docType) || string.IsNullOrEmpty(text)) return false;
+            var dt = DocTypeStore.Canonical(docType);
+            var list = Rules.ToList();
+            bool changed = false;
+            foreach (var r in list.Where(r => !r.Learned && !r.Exclude && r.Kind == NumberRuleKind.Maske && !string.IsNullOrWhiteSpace(r.Mask)
+                                              && string.IsNullOrWhiteSpace(r.Keyword) && Eq(r.Company, company) && Eq(DocTypeStore.Canonical(r.DocType), dt)))
+            {
+                if (TermFromText(r.Mask, text, value) is not { } term) continue;
+                r.Keyword = term.Keyword;
+                r.KeywordEnd = null;
+                r.KeywordPosition = term.Position;
+                if (r.Example == null && Match(r, term.Value) >= 0.999) r.Example = term.Value;
+                changed = true;
+            }
+            if (changed) Save(list);
+            return changed;
+        }
+
+        /// <summary>Begriff an der Fundstelle der Nummer zur Maske: bevorzugt <paramref name="value"/>, sonst die erste passende Nummer im Text.
+        /// Nur Begriffe mit Nummern-Thema
+        public static (string Keyword, KeywordPosition Position, string Value)? TermFromText(string? mask, string? text, string? value = null)
+        {
+            if (string.IsNullOrWhiteSpace(mask) || string.IsNullOrEmpty(text)) return null;
+            try
+            {
+                var rx = MaskToRegex(mask.Trim());
+                var values = new List<string>();
+                if (!string.IsNullOrWhiteSpace(value) && Regex.IsMatch(value.Trim(), "^" + rx + "$", RegexOptions.IgnoreCase)) values.Add(value.Trim());
+                values.AddRange(Regex.Matches(text, @"(?<![\p{L}\d])" + rx + @"(?![\p{L}\d])", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1))
+                    .Select(m => m.Value.Trim()).Where(v => v.Any(char.IsDigit)).Distinct(StringComparer.OrdinalIgnoreCase).Take(5));
+                // Zuletzt die Fundstelle der erkannten Nummer selbst, auch wenn sie (noch) nicht zur Maske passt
+                if (!string.IsNullOrWhiteSpace(value) && !values.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase)) values.Add(value.Trim());
+                foreach (var v in values)
+                {
+                    var hit = ValueSources.Locate(SourceField.Nummer, text, v);
+                    if (hit?.Label == null || !ValueSources.IsTopicOf(SourceField.Nummer, hit.Topic)) continue;
+                    var kw = hit.Label.Trim().TrimEnd(':', '#').Trim();
+                    if (kw.Length == 0 || !kw.Any(char.IsLetter)) continue;
+                    return (kw, hit.Where == "rechts daneben" ? KeywordPosition.HinterNummer : KeywordPosition.VorNummer, v);
+                }
+            }
+            catch { }
+            return null;
         }
 
         /// <summary>Aus manueller Auswahl lernen: gelernte Regel anlegen bzw. verst\u00E4rken (max. Priorit\u00E4t 5).</summary>

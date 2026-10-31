@@ -842,6 +842,7 @@ Passende Masken werden zuerst im Text gesucht und vor der allgemeinen Nummernerk
 * Seite egal: ein einzelner Begriff darf vor oder hinter der Nummer stehen
 
 Nummern an dieser Stelle werden bevorzugt; gleich aufgebaute Nummern an anderer Stelle bleiben möglich.
+* Automatisch: Ist ein Beleg geöffnet, wird bei Masken-Regeln der Firma + Belegart ohne Begriff der Begriff an der Fundstelle der Nummer eingetragen (z. B. ""Rechnung-Nr."" links daneben → Begriff vor Nummer; rechts daneben → nach Nummer) – ebenso beim Wählen einer Beispielnummer und beim Speichern eines Musters im INI-Generator. Mit ""Speichern"" übernehmen; ein eingetragener Begriff wird nie überschrieben.
 
 # Weitere Spalten
 * Art: ""Maske"" (genaues Muster, Normalfall) oder ""Merkmale"" (nur ungefähre Länge und erlaubte Zeichen)

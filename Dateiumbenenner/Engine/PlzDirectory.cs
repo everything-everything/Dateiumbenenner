@@ -292,10 +292,20 @@ namespace Dateiumbenenner.Engine
         private static readonly char[] PlaceSeparators = { ' ', '-', '/', '(', ')', '.', ',' };
         private HashSet<string>? _placeWords;
 
+        // Die Liste enthält auch Großkunden ("Stadtsparkasse Augsburg", "Kreissparkasse Ostalb"): Namen mit Institutionswort sind kein Ort
+        private static readonly System.Text.RegularExpressions.Regex InstitutionRegex = new(
+            @"sparkasse|bank(?![\p{L}])|versicherung|kasse(?![\p{L}])|stadtwerke|verlag(?![\p{L}])|kammer(?![\p{L}])|gericht(?![\p{L}])|agentur|finanzamt|landratsamt|verwaltung",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+        private static readonly System.Text.RegularExpressions.Regex CreditInstitutionRegex = new(
+            @"sparkasse|bank(?![\p{L}])", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
         /// <summary>true, wenn der Text ein Ortsname oder nur aus Ortsbestandteilen besteht (z. B. "Schwäbisch", "Schwäbisch Hall").</summary>
         public bool IsPlaceName(string? text)
         {
             if (string.IsNullOrWhiteSpace(text) || !IsLoaded) return false;
+            var parts = text.Split(PlaceSeparators, StringSplitOptions.RemoveEmptyEntries);
+            // Einzelwort nur bei Kreditinstitut ("Kreissparkasse"), sonst bleiben allgemeine Wörter wie "Verwaltung" ausgefiltert
+            if (InstitutionRegex.IsMatch(text) && (parts.Length >= 2 || CreditInstitutionRegex.IsMatch(text))) return false;
             var words = _placeWords;
             if (words == null)
             {
@@ -308,7 +318,6 @@ namespace Dateiumbenenner.Engine
                 }
                 _placeWords = words;
             }
-            var parts = text.Split(PlaceSeparators, StringSplitOptions.RemoveEmptyEntries);
             return words.Contains(Fold(text)) || (parts.Length > 0 && parts.All(p => words.Contains(Fold(p))));
         }
 

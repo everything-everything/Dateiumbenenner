@@ -421,6 +421,12 @@ namespace Dateiumbenenner
             r.Example = value;
             r.Mask = mask;
             r.Kind = NumberRuleKind.Maske;
+            if (string.IsNullOrWhiteSpace(r.Keyword) && (NumberRuleStore.TermFromText(mask, _docText, value) ?? NumberRuleStore.TermFromText(mask, _docText, _docNumber)) is { } term)
+            {
+                r.KeywordEnd = null;
+                r.Keyword = term.Keyword;
+                r.KeywordPosition = term.Position;
+            }
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 GridRules.Items.Refresh();
@@ -433,6 +439,7 @@ namespace Dateiumbenenner
 
         private string? _docPath;
         private string? _docText;
+        private string? _docNumber;
         private string? _docDate;
         private PdfPreviewWindow? _preview;
         private readonly List<ValueHit> _hits = new();
@@ -448,6 +455,7 @@ namespace Dateiumbenenner
         {
             _docPath = filePath;
             _docText = fullText;
+            _docNumber = number;
             _docDate = date;
             UpdateDateTest();
             if (string.IsNullOrEmpty(filePath)) { PnlDocument.Visibility = Visibility.Collapsed; return; }
@@ -475,6 +483,27 @@ namespace Dateiumbenenner
                 }
                 PnlSources.Children.Add(tb);
             }
+            FillTermsFromDocument(number);
+        }
+
+        /// <summary>Masken-Regeln der Firma + Belegart des Belegs ohne Begriff: Begriff an der Fundstelle der Nummer eintragen (gespeichert mit „Speichern“).</summary>
+        private void FillTermsFromDocument(string? number)
+        {
+            string company = TxtTestCompany.Text.Trim(), docType = DocTypeStore.Canonical(TxtTestDocType.Text) ?? "";
+            if (company.Length == 0 || docType.Length == 0 || string.IsNullOrEmpty(_docText)) return;
+            bool changed = false;
+            foreach (var r in _rules.Where(r => !r.Learned && !r.Exclude && r.Kind == NumberRuleKind.Maske && !string.IsNullOrWhiteSpace(r.Mask)
+                                               && string.IsNullOrWhiteSpace(r.Keyword)
+                                               && string.Equals(r.Company?.Trim(), company, StringComparison.OrdinalIgnoreCase)
+                                               && string.Equals(DocTypeStore.Canonical(r.DocType), docType, StringComparison.OrdinalIgnoreCase)))
+            {
+                if ((NumberRuleStore.TermFromText(r.Mask, _docText, r.Example) ?? NumberRuleStore.TermFromText(r.Mask, _docText, number)) is not { } term) continue;
+                r.KeywordEnd = null;
+                r.Keyword = term.Keyword;
+                r.KeywordPosition = term.Position;
+                changed = true;
+            }
+            if (changed) GridRules.Items.Refresh();
         }
 
         private static readonly System.Windows.Media.Brush HintBrush = Freeze(new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x3A, 0x6E, 0xA5)));

@@ -66,6 +66,9 @@ namespace Dateiumbenenner.Engine
         private static (string Topic, Regex Rx)[] TopicsOf(SourceField f) =>
             f == SourceField.Nummer ? NumberTopics : f == SourceField.Datum ? DateTopics : AmountTopics;
 
+        /// <summary>Gehört das Thema zum Feld (z. B. „Rechnungsnummer“ zu Nummer)?</summary>
+        public static bool IsTopicOf(SourceField field, string? topic) => topic != null && TopicsOf(field).Any(t => t.Topic == topic);
+
         /// <summary>Thema eines Begriffs (z. B. „Rg.-Nr.:“ → Rechnungsnummer); zuerst passend zum Feld, sonst aus den anderen Feldern.</summary>
         public static string? Classify(SourceField field, string? label)
         {
