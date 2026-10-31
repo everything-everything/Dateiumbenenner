@@ -12,10 +12,14 @@ namespace Dateiumbenenner.Engine
     /// <summary>Fundstelle eines Wertes im Belegtext: Zeile, Begriff im Umfeld und dessen Thema.</summary>
     public sealed record ValueHit(int Line, int Index, int Length, string LineText, string? Label, string Where, string Topic, int LabelIndex = -1, int LabelLength = 0)
     {
+        /// <summary>Gesetzt, wenn die Nummer nur als Teil einer längeren Zeichenfolge im Text steht (z. B. OCR-Zeichen zu viel: „12023-106771“).</summary>
+        public string? Token { get; init; }
+
         /// <summary>Kurzbeschreibung, z. B. „Zeile 12: „Rechnungs-Nr.:“ links daneben → Rechnungsnummer“.</summary>
-        public string Describe() => Label == null
+        public string Describe() => (Label == null
             ? $"Zeile {Line}: kein Begriff im Umfeld"
-            : $"Zeile {Line}: \u201E{Label}\u201C {Where} \u2192 {Topic}";
+            : $"Zeile {Line}: \u201E{Label}\u201C {Where} \u2192 {Topic}")
+            + (Token == null ? "" : $" (Teil von \u201E{Token}\u201C)");
     }
 
     /// <summary>
@@ -94,6 +98,9 @@ namespace Dateiumbenenner.Engine
             foreach (var (idx, len) in hits)
             {
                 var src = Describe(field, text, lineStarts, idx, len);
+                if (field == SourceField.Nummer && TokenAround(text, idx, len) is { } tok)
+                    // Begriff vor/nach der ganzen Zeichenfolge suchen, markiert wird nur die Nummer
+                    src = Describe(field, text, lineStarts, tok.Start, tok.Length) with { Index = idx, Length = len, Token = text.Substring(tok.Start, tok.Length) };
                 int score = src.Label == null ? 0 : fieldTopics.Contains(src.Topic) ? 2 : 1;
                 // Gleichwertig: Beträge stehen als Summe meist unten, Nummer/Datum im Kopf
                 if (score > bestScore || (score == bestScore && field == SourceField.Betrag)) { best = src; bestScore = score; }
@@ -122,8 +129,18 @@ namespace Dateiumbenenner.Engine
                             var c => Regex.Escape(c.ToString())
                         });
                     }
+                    var core = sb.ToString(@"(?<![\p{L}\d])".Length, sb.Length - @"(?<![\p{L}\d])".Length);
                     sb.Append(@"(?![\p{L}\d])");
                     foreach (Match m in Regex.Matches(text, sb.ToString(), RegexOptions.IgnoreCase, Timeout)) result.Add((m.Index, m.Length));
+                    // Nicht eigenständig gefunden: als Teil einer Zeichenfolge mit höchstens 2 zusätzlichen Zeichen (OCR: „12023-106771“ für „2023-106771“)
+                    if (result.Count == 0 && chars.Count(char.IsLetterOrDigit) >= 5)
+                        foreach (Match m in Regex.Matches(text, core, RegexOptions.IgnoreCase, Timeout))
+                        {
+                            int s = m.Index, e = m.Index + m.Length;
+                            while (s > 0 && char.IsLetterOrDigit(text[s - 1])) s--;
+                            while (e < text.Length && char.IsLetterOrDigit(text[e])) e++;
+                            if (m.Index - s + e - (m.Index + m.Length) <= 2) result.Add((m.Index, m.Length));
+                        }
                     break;
                 }
                 case SourceField.Datum:
@@ -179,6 +196,15 @@ namespace Dateiumbenenner.Engine
             if (mo < 1 || mo > 12 || d < 1 || y < 1900 || y > 2099 || d > DateTime.DaysInMonth(y, mo)) return false;
             date = new DateTime(y, mo, d);
             return true;
+        }
+
+        /// <summary>Zeichenfolge rund um den Treffer, wenn direkt davor oder dahinter Buchstaben/Ziffern stehen; sonst null.</summary>
+        private static (int Start, int Length)? TokenAround(string text, int idx, int len)
+        {
+            int s = idx, e = idx + len;
+            while (s > 0 && char.IsLetterOrDigit(text[s - 1])) s--;
+            while (e < text.Length && char.IsLetterOrDigit(text[e])) e++;
+            return s == idx && e == idx + len ? null : (s, e - s);
         }
 
         private static string LineAt(string text, List<int> lineStarts, int line)
