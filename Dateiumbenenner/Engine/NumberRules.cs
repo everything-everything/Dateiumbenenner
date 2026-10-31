@@ -374,9 +374,18 @@ namespace Dateiumbenenner.Engine
             int n = 0;
             foreach (var c in candidates) f.Add(c, Math.Max(0, 1 - 0.01 * n++), "Kandidat");
             Apply(f, company, docType, text);
-            var best = f.Candidates.Select(c => (c.Value, S: Score(company, docType, c.Value), T: c.Score, L: c.Source == "Fundstelle" || c.Source.StartsWith("Begriff ", StringComparison.Ordinal)))
-                .Where(x => x.T >= 0 && (x.S > 0 || x.L)).OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault();
-            return best.Value;
+            var list = f.Candidates.Select(c => (c.Value, S: Score(company, docType, c.Value), T: c.Score, L: c.Source == "Fundstelle" || c.Source.StartsWith("Begriff ", StringComparison.Ordinal)))
+                .Where(x => x.T >= 0 && (x.S > 0 || x.L)).ToList();
+            // Von Hand vorgegebenes Muster hat Vorrang vor einer gelernten Fundstelle anders aufgebauter Nummern
+            // (z. B. Muster „$$$$$ ?“ → „12345 B“, nicht die Kundennummer „12345“ darüber)
+            var manual = RulesFor(company, docType).Where(x => !x.Rule.Learned && x.Rule.Kind == NumberRuleKind.Maske && !string.IsNullOrEmpty(x.Rule.Mask)).ToList();
+            if (manual.Count > 0)
+            {
+                var spec = manual.Max(x => x.Specificity);
+                var fit = list.Where(x => manual.Any(m => m.Specificity == spec && Match(m.Rule, x.Value) >= 0.999)).ToList();
+                if (fit.Count > 0) list = fit;
+            }
+            return list.OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault().Value;
         }
 
         /// <summary>Manuelle Masken-Regel setzen/entfernen (z. B. aus dem INI-Plugin).</summary>

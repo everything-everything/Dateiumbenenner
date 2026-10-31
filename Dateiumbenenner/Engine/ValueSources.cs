@@ -35,7 +35,7 @@ namespace Dateiumbenenner.Engine
         private static readonly Regex RunRx = new(@"\S+(?: \S+)*", RegexOptions.Compiled);
 
         private static readonly (string Topic, Regex Rx)[] NumberTopics = Topics(
-            ("Rechnungsnummer", @"rechnungs?\s*-?\s*(nr|nummer|no)|\b(re|rg)\.?\s*-?\s*nr|invoice"),
+            ("Rechnungsnummer", @"rechnungs?\s*-?\s*(nr|nummer|no)|\b(re|rg)\.?\s*-?\s*nr|invoice|\brechnung\b"),
             ("Gutschriftsnummer", @"gutschrift"),
             ("Lieferscheinnummer", @"lieferschein"),
             ("Auftragsnummer", @"auftrag|\border"),
@@ -43,7 +43,7 @@ namespace Dateiumbenenner.Engine
             ("Kundennummer", @"kunden|customer"),
             ("Angebotsnummer", @"angebot"),
             ("Belegnummer", @"beleg|dokument|document"),
-            ("Nummer", @"\bnr\b|nr\.|nummer|\bno\b|#"));
+            ("Nummer", @"\bnr\b|nr\.|nummer|\bno\b|#|num[eé]ro|número|\bnumber"));
 
         private static readonly (string Topic, Regex Rx)[] DateTopics = Topics(
             ("Rechnungsdatum", @"rechnungsdatum|invoice\s*date"),
