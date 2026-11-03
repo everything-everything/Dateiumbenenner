@@ -1296,8 +1296,9 @@ namespace Dateiumbenenner
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex BankDetailRegex = new(@"\b(IBAN|BIC|SWIFT|BLZ|Bankverbindung|Kontonummer|Konto-Nr)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // „… AG & Co. KG“ auch in OCR-Schreibweise ohne Leerzeichen („AG&Co.KG“, „GmbH & Co.KG“)
         private static readonly System.Text.RegularExpressions.Regex LegalFormEndRegex = new(
-            @"\s(?i:GmbH(\s*&\s*Co\.?\s*KG)?|mbH)|\s(AG|KG|UG|OHG|GbR|SE|e\.\s?V\.|e\.\s?K\.)\.?$", System.Text.RegularExpressions.RegexOptions.Compiled);
+            @"\s(?i:(?:GmbH|mbH|AG|SE|UG)\s*(?:&|\+|u\.|und)\s*Co\.?\s*(?:KGaA|KG|OHG)\.?$|GmbH|mbH)|\s(AG|KG|KGaA|UG|OHG|GbR|SE|e\.\s?V\.|e\.\s?K\.)\.?$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
         private static bool HasLegalForm(string c) => LegalFormEndRegex.IsMatch(c.Trim());
 
