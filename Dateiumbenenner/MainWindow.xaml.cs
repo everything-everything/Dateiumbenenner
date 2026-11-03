@@ -1098,9 +1098,18 @@ namespace Dateiumbenenner
             return BicRegex.IsMatch(t) || Regex.IsMatch(fullText, @"\b(BIC|SWIFT)\b[^\n]{0,40}" + Regex.Escape(t), RegexOptions.IgnoreCase);
         }
 
+        // GmbH, gGmbH, G.m.b.H., Ges.m.b.H., Ges. m. b. H., GesmbH, mbH, m. b. H.
+        private const string MbhPattern = @"(?i:(?:g?g\.?[ ]?|ges\.?[ ]?)?m\.?[ ]?b\.?[ ]?h\.?)";
+        // Rechtsform: auch „mbH & Co. OHG“, „Ohg“, „Gbr“, „e. K.“, „PartG mbB“, „Ltd.“
+        private const string LegalFormPattern =
+            @"(?:(?i:(?:" + MbhPattern + @"|AG|SE|UG(?:\s*\(haftungsbeschr(?:ä|ae)nkt\))?|Ltd\.?)\s*(?:&|\+|u\.|und)\s*Co\.?\s*(?:KGaA|KG|OHG))" +
+            @"|" + MbhPattern + @"|AG|KGaA|KG|UG|SE|(?i:OHG|GbR)|PartG(?:\s*mbB)?|e\.[ ]?(?:Kfm|Kfr|V|K|G)\.?|eG|(?:Ltd|LTD|Inc|INC)\.?)";
+        // Bindestrich vor der Rechtsform („EDEKA Minden-Hannover Zentralverwaltungs-OHG“, „Muster-GmbH“)
+        private const string LegalFormSeparator = @"(?:\s+|-(?=(?i:OHG|GbR|g?mbh)(?![\p{L}\d])|AG(?![\p{L}\d])))";
+
         // Name (1-5 Wörter) direkt vor einer Rechtsform; Beginn am Zeilenanfang oder nach ':', '|', ';', ',' bzw. Tab/Mehrfach-Leerzeichen
         private static readonly System.Text.RegularExpressions.Regex LegalFormNameRegex = new(
-            @"(?<![\p{L}\d&.'\-])((?:(?:[\p{L}\d][\p{L}\d&.'\-]*|&|\+)\s+){0,4}?[\p{L}\d][\p{L}\d&.'\-]*\s+(?:(?i:(?:GmbH|mbH|AG|SE|UG(?:\s*\(haftungsbeschr(?:ä|ae)nkt\))?)\s*(?:&|\+|u\.|und)\s*Co\.?\s*(?:KGaA|KG|OHG))|(?i:GmbH)|AG|KGaA|KG|UG|OHG|GbR|SE|e\.\s?V\.))(?![\p{L}\d])",
+            @"(?<![\p{L}\d&.'\-])(?<name>(?:(?:[\p{L}\d][\p{L}\d&.'\-]*|&|\+)\s+){0,4}?[\p{L}\d][\p{L}\d&.'\-]*?)(?<sep>" + LegalFormSeparator + @")(?<lf>" + LegalFormPattern + @")(?![\p{L}\d])",
             System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Multiline);
 
         private static readonly Regex IndustryRegex = new(
@@ -1298,7 +1307,7 @@ namespace Dateiumbenenner
 
         // „… AG & Co. KG“ auch in OCR-Schreibweise ohne Leerzeichen („AG&Co.KG“, „GmbH & Co.KG“)
         private static readonly System.Text.RegularExpressions.Regex LegalFormEndRegex = new(
-            @"\s(?i:(?:GmbH|mbH|AG|SE|UG)\s*(?:&|\+|u\.|und)\s*Co\.?\s*(?:KGaA|KG|OHG)\.?$|GmbH|mbH)|\s(AG|KG|KGaA|UG|OHG|GbR|SE|e\.\s?V\.|e\.\s?K\.)\.?$", System.Text.RegularExpressions.RegexOptions.Compiled);
+            @"\s(?i:GmbH|mbH)|" + LegalFormSeparator + "(?:" + LegalFormPattern + @")\.?$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
         private static bool HasLegalForm(string c) => LegalFormEndRegex.IsMatch(c.Trim());
 
@@ -1308,6 +1317,38 @@ namespace Dateiumbenenner
         private static readonly HashSet<string> LeadingFillWords = new(StringComparer.OrdinalIgnoreCase)
         { "i", "an", "von", "die", "der", "das", "den", "dem", "und", "firma", "fa", "fa.", "bei", "für", "empfänger", "absender", "lieferant" };
 
+        private static readonly char[] LineBreakChars = { '\r', '\n', '\f' };
+        private static readonly Regex LegalFormWordRegex = new(@"(?:^|-)(?:" + LegalFormPattern + @")[.,;]?$", RegexOptions.Compiled);
+
+        /// <summary>Rechtsform in einheitlicher Schreibweise: Leerräume zusammengefasst, Satzende-Punkt weg ("OHG." → "OHG", "m. b. H." bleibt).</summary>
+        private static string LegalFormText(string lf)
+        {
+            var t = Regex.Replace(lf.Trim(), @"\s+", " ");
+            var last = t[(t.LastIndexOf(' ') + 1)..];
+            return last.Length > 2 && last.IndexOf('.') == last.Length - 1 ? t[..^1] : t;
+        }
+
+        /// <summary>Langer Name, der allein in seiner Zeile/Spalte vor der Rechtsform steht, auch mit Artikel
+        /// ("Gemeinnützige Wohnungsbaugesellschaft der Stadt Kassel m. b. H."); sonst null.</summary>
+        private static (List<string> Words, int Start)? WholeSegmentName(string text, int nameStart, int nameEnd, int matchedWords)
+        {
+            int s = nameStart;
+            while (s > 0 && text[s - 1] is not ('\n' or '\r' or '\f' or '\t' or '|' or ':' or ';' or ',') && !(text[s - 1] == ' ' && s > 1 && text[s - 2] == ' ')) s--;
+            var words = text[s..nameEnd].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ToList();
+            while (words.Count > 1 && LeadingFillWords.Contains(words[0])) words.RemoveAt(0);
+            if (words.Count < 2 || words.Count > 8 || DocTypeWordRegex.IsMatch(words[0])) return null;
+            bool article = false;
+            for (int j = 0; j < words.Count; j++)
+            {
+                var w = words[j];
+                if (j > 0 && j < words.Count - 1 && NameArticles.Contains(w)) { article = true; continue; }
+                // Eine weitere Firma davor ("Huber GesmbH und Holz G.m.b.H.")
+                if (!(char.IsUpper(w[0]) || w is "&" or "+") || w.EndsWith(':') || LegalFormWordRegex.IsMatch(w)) return null;
+            }
+            if (!article && words.Count <= matchedWords) return null;
+            return (words, text.IndexOf(words[0], s, StringComparison.Ordinal));
+        }
+
         /// <summary>Firmennamen mit Rechtsform (z. B. "ZAPF GmbH", "ean50 GmbH", "X GmbH &amp; Co. KG") aus dem Text nach vorne;
         /// Kurzformen davon ("ZAPF", "DFH") und bekannte Firmen, die nicht im Text stehen, nach hinten.</summary>
         private static List<string> PreferLegalFormNames(List<string> list, string? fullText)
@@ -1316,36 +1357,45 @@ namespace Dateiumbenenner
             var legal = new List<string>();
             foreach (System.Text.RegularExpressions.Match m in LegalFormNameRegex.Matches(fullText))
             {
-                var matched = m.Groups[1].Value;
-                int nl = matched.LastIndexOfAny(new[] { '\r', '\n', '\f' });
-                int lineOffset = nl + 1;
+                var nameGroup = m.Groups["name"];
+                var sep = m.Groups["sep"].Value;
+                var lfRaw = m.Groups["lf"].Value;
                 // Name endet nie über einen Zeilenumbruch hinweg ("Freundliche Grüße\nBux der Einrichter GmbH")
+                if (sep.IndexOfAny(LineBreakChars) >= 0 || lfRaw.IndexOfAny(LineBreakChars) >= 0) continue;
+                var matched = nameGroup.Value;
+                int lineOffset = matched.LastIndexOfAny(LineBreakChars) + 1;
                 var words = matched.Substring(lineOffset).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ToList();
-                int absStart = m.Groups[1].Index + lineOffset;
+                if (words.Count == 0) continue;
+                int absStart = nameGroup.Index + lineOffset;
                 int ls = absStart;
                 while (ls > 0 && fullText[ls - 1] is ' ' or '\t') ls--;   // Einrückung (" Bux der Einrichter GmbH") zählt als Zeilenanfang
                 bool atLineStart = ls == 0 || fullText[ls - 1] is '\n' or '\r' or '\f';
                 // Artikel mitten im Namen ("Bux der Einrichter GmbH") nur, wenn der Name allein am Zeilenanfang steht
                 bool InnerArticle(int j) => atLineStart && j == 1 && NameArticles.Contains(words[j])
                     && words.Take(j).All(x => char.IsUpper(x[0]) && !LeadingFillWords.Contains(x)) && !DocTypeWordRegex.IsMatch(words[0]);
-                // Satzanfang abschneiden: "Jahren die Zapf GmbH" -> "Zapf GmbH" (vorne klein geschriebene Wörter und Füllwörter weg)
-                if (words.Count < 2) continue;
-                int cut = -1;
-                for (int j = words.Count - 2; j >= 0; j--)
+                int start;
+                var whole = WholeSegmentName(fullText, absStart, nameGroup.Index + nameGroup.Length, words.Count);
+                if (whole != null) (words, start) = whole.Value;
+                else
                 {
-                    var w = words[j];
-                    if (InnerArticle(j)) continue;
-                    if ((char.IsLower(w[0]) && !w.Any(char.IsDigit)) || LeadingFillWords.Contains(w.TrimEnd(':')) || w.EndsWith(':') || w.EndsWith(')')) { cut = j; break; }
+                    // Satzanfang abschneiden: "Jahren die Zapf GmbH" -> "Zapf GmbH" (vorne klein geschriebene Wörter und Füllwörter weg)
+                    int cut = -1;
+                    for (int j = words.Count - 1; j >= 0; j--)
+                    {
+                        var w = words[j];
+                        if (InnerArticle(j)) continue;
+                        if ((char.IsLower(w[0]) && !w.Any(char.IsDigit)) || LeadingFillWords.Contains(w.TrimEnd(':')) || w.EndsWith(':') || w.EndsWith(')')) { cut = j; break; }
+                    }
+                    // Kleingeschriebener Name direkt vor der Rechtsform (\"ean50 GmbH\") bleibt erhalten
+                    if (cut == words.Count - 1 && !LeadingFillWords.Contains(words[cut].TrimEnd(':')) && !words[cut].EndsWith(':') && !words[cut].EndsWith(')')) cut--;
+                    if (cut >= 0) words.RemoveRange(0, cut + 1);
+                    if (words.Count < 1) continue;
+                    while (words.Count > 1 && LeadingFillWords.Contains(words[0].TrimEnd(':'))) words.RemoveAt(0);
+                    start = absStart + matched.Substring(lineOffset).IndexOf(words[0], StringComparison.Ordinal);
                 }
-                // Kleingeschriebener Name direkt vor der Rechtsform (\"ean50 GmbH\") bleibt erhalten
-                if (cut == words.Count - 2 && !LeadingFillWords.Contains(words[cut].TrimEnd(':')) && !words[cut].EndsWith(':') && !words[cut].EndsWith(')')) cut--;
-                if (cut >= 0) words.RemoveRange(0, cut + 1);
-                if (words.Count < 2) continue;
-                while (words.Count > 2 && LeadingFillWords.Contains(words[0].TrimEnd(':'))) words.RemoveAt(0);
-                var name = string.Join(" ", words);
+                var name = string.Join(" ", words) + (sep == "-" ? "-" : " ") + LegalFormText(lfRaw);
                 if (name.Length < 5) continue;
                 // Ortsname nur verwerfen, wenn eine PLZ davor steht ("95448 Bayreuth GmbH"); "ZAPF" ist auch ein Ort, aber hier Firmenname
-                int start = m.Groups[1].Index + lineOffset + matched.Substring(lineOffset).IndexOf(words[0], StringComparison.Ordinal);
                 if (Dateiumbenenner.Engine.DocumentEngine.Plz.IsPlaceName(words[0])
                     && System.Text.RegularExpressions.Regex.IsMatch(fullText.Substring(Math.Max(0, start - 8), Math.Min(8, start)), @"\d{5}\s*$")) continue;
                 if (System.Text.RegularExpressions.Regex.IsMatch(name, @"\b(Bank|Sparkasse|Volksbank|Amtsgericht|Registergericht|HRB|IBAN|BIC)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;

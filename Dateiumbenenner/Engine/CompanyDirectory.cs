@@ -80,7 +80,7 @@ namespace Dateiumbenenner.Engine
         private static readonly Regex LegalForms = new(
             @"\b(gesellschaft\s+mit\s+beschraenkter\s+haftung|kommanditgesellschaft\s+auf\s+aktien|aktiengesellschaft|kommanditgesellschaft|" +
             @"offene\s+handelsgesellschaft|unternehmergesellschaft|eingetragene[rn]?\s+(?:kaufmann|kauffrau|genossenschaft|verein)|europaeische\s+gesellschaft|" +
-            @"gmbh\s*&\s*co\.?\s*kgaa|gmbh\s*&\s*co\.?\s*kg|ag\s*&\s*co\.?\s*kg|ug\s*\(haftungsbeschraenkt\)|haftungsbeschraenkt|ggmbh|gmbh|mbh|kgaa|ag|kg|ohg|gbr|ug|" +
+            @"(?:g?(?:g\.?\s*|ges\.?\s*)?m\.?\s*b\.?\s*h|ag|se|ug)\s*(?:&|\+|u\.|und)\s*co\.?\s*(?:kgaa|kg|ohg)|ug\s*\(haftungsbeschraenkt\)|haftungsbeschraenkt|g?(?:g\.?\s*|ges\.?\s*)?m\.?\s*b\.?\s*h|kgaa|ag|kg|ohg|gbr|ug|" +
             @"partgmbb|partg|e\.?\s*k(fm|fr)?\.?|e\.?\s*v\.?|e\.?\s*g\.?|se|ltd|inc|co|corp|llc|bv|nv|sarl|s\.?a\.?r\.?l|sa|spa|srl)\b\.?",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
         private static readonly Regex NonWord = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
