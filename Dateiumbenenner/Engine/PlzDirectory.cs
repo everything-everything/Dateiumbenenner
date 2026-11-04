@@ -46,6 +46,7 @@ namespace Dateiumbenenner.Engine
         public void Reload()
         {
             var map = new Dictionary<string, List<string>>();
+            var orgs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             string source = "keine PLZ-Liste";
             string? warning = null;
             bool bundled = false;
@@ -54,23 +55,26 @@ namespace Dateiumbenenner.Engine
                 if (File.Exists(GeoNamesPath))
                 {
                     var update = new Dictionary<string, List<string>>();
-                    var problem = Check(Load(File.ReadLines(GeoNamesPath, Encoding.UTF8), update), update.Count);
-                    if (problem == null) { map = update; source = DescribeUpdate(); }
+                    var updateOrgs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var problem = Check(Load(File.ReadLines(GeoNamesPath, Encoding.UTF8), update, updateOrgs), update.Count);
+                    if (problem == null) { map = update; orgs = updateOrgs; source = DescribeUpdate(); }
                     else warning = $"Daten\\DE.txt wird nicht verwendet: {problem}";
                 }
-                if (map.Count == 0 && LoadBundled(map) is { } b) { source = b; bundled = true; }
+                if (map.Count == 0 && LoadBundled(map, orgs) is { } b) { source = b; bundled = true; }
                 if (File.Exists(FilePath))
                 {
                     Load(File.ReadLines(FilePath, Encoding.UTF8), map);
                     source += " + eigene Ergänzungen (plz.csv)";
                 }
             }
-            catch { map.Clear(); }
+            catch { map.Clear(); orgs.Clear(); }
             _map = map;
+            _organisations = orgs;
             Source = source;
             Warning = warning;
             IsBundled = bundled;
             _placeWords = null;
+            _localityWords = null;
             System.Threading.Interlocked.Increment(ref _version);
         }
 
@@ -90,7 +94,7 @@ namespace Dateiumbenenner.Engine
             }
         }
 
-        private static string? LoadBundled(Dictionary<string, List<string>> map)
+        private static string? LoadBundled(Dictionary<string, List<string>> map, HashSet<string> orgs)
         {
             using var s = typeof(PlzDirectory).Assembly.GetManifestResourceStream(BundledResource);
             if (s == null) return null;
@@ -98,7 +102,7 @@ namespace Dateiumbenenner.Engine
             var entry = zip.GetEntry("DE.txt");
             if (entry == null) return null;
             using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
-            Load(ReadLines(reader), map);
+            Load(ReadLines(reader), map, orgs);
             return $"mitgeliefert (GeoNames, Stand {entry.LastWriteTime:dd.MM.yyyy})";
         }
 
@@ -254,8 +258,9 @@ namespace Dateiumbenenner.Engine
         /// Erkennt je Zeile das Format:
         /// - GeoNames:  "DE ⇥ 73330 ⇥ Schwäbisch Hall ⇥ ..." (Ländercode, PLZ, Ort)
         /// - Einfach:   "73330;Schwäbisch Hall" (Trenner ; , oder Tab)
+        /// GeoNames-Großkunden (Firmen/Behörden, numerischer statt Buchstaben-Ländercode, z. B. "Zapf GmbH") kommen zusätzlich in <paramref name="orgs"/>.
         /// </summary>
-        private static LoadStats Load(IEnumerable<string> lines, Dictionary<string, List<string>> map)
+        private static LoadStats Load(IEnumerable<string> lines, Dictionary<string, List<string>> map, HashSet<string>? orgs = null)
         {
             int total = 0, accepted = 0, invalid = 0, unusual = 0;
             foreach (var line in lines)
@@ -268,8 +273,9 @@ namespace Dateiumbenenner.Engine
                 for (int k = 0; k < parts.Length; k++) parts[k] = parts[k].Trim().Trim('"').Trim();
 
                 string zip, city;
+                bool org = false;
                 if (parts.Length >= 3 && parts[0].Length == 2 && parts[0].All(char.IsLetter) && IsZip(parts[1]))
-                { zip = parts[1]; city = parts[2]; }                 // GeoNames
+                { zip = parts[1]; city = parts[2]; org = parts.Length > 4 && parts[4].Length > 0 && parts[4].All(char.IsDigit); }   // GeoNames
                 else
                 { zip = parts[0]; city = parts[1]; }                 // PLZ;Ort
 
@@ -280,6 +286,7 @@ namespace Dateiumbenenner.Engine
                 accepted++;
                 if (!map.TryGetValue(zip, out var list)) map[zip] = list = new List<string>();
                 if (!list.Contains(city, StringComparer.OrdinalIgnoreCase)) list.Add(city);
+                if (org) orgs?.Add(city);
             }
             return new LoadStats(total, accepted, invalid, unusual);
         }
@@ -291,6 +298,8 @@ namespace Dateiumbenenner.Engine
 
         private static readonly char[] PlaceSeparators = { ' ', '-', '/', '(', ')', '.', ',' };
         private HashSet<string>? _placeWords;
+        private HashSet<string>? _localityWords;
+        private volatile HashSet<string> _organisations = new();
 
         // Die Liste enthält auch Großkunden ("Stadtsparkasse Augsburg", "Kreissparkasse Ostalb"): Namen mit Institutionswort sind kein Ort
         private static readonly System.Text.RegularExpressions.Regex InstitutionRegex = new(
@@ -307,19 +316,34 @@ namespace Dateiumbenenner.Engine
             // Einzelwort nur bei Kreditinstitut ("Kreissparkasse"), sonst bleiben allgemeine Wörter wie "Verwaltung" ausgefiltert
             if (InstitutionRegex.IsMatch(text) && (parts.Length >= 2 || CreditInstitutionRegex.IsMatch(text))) return false;
             var words = _placeWords;
-            if (words == null)
+            var localities = _localityWords;
+            if (words == null || localities == null)
             {
+                var orgs = _organisations;
                 words = new HashSet<string>(StringComparer.Ordinal);
+                localities = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var city in _map.Values.SelectMany(v => v))
                 {
+                    var set = orgs.Contains(city) ? null : localities;
                     words.Add(Fold(city));
+                    set?.Add(Fold(city));
                     foreach (var w in city.Split(PlaceSeparators, StringSplitOptions.RemoveEmptyEntries))
-                        if (w.Length >= 3) words.Add(Fold(w));
+                        if (w.Length >= 3) { words.Add(Fold(w)); set?.Add(Fold(w)); }
                 }
+                _localityWords = localities;
                 _placeWords = words;
             }
-            return words.Contains(Fold(text)) || (parts.Length > 0 && parts.All(p => words.Contains(Fold(p))));
+            // Einzelwort: auch Bestandteile von Großkunden ("Verwaltung", "Zapf") bleiben ausgefiltert;
+            // mehrere Wörter nur, wenn sie aus echten Orten stammen ("Hellmann Worldwide Logistics" ist ein Großkunde, kein Ort)
+            if (parts.Length <= 1) return words.Contains(Fold(text)) || (parts.Length == 1 && words.Contains(Fold(parts[0])));
+            if (localities.Contains(Fold(text))) return true;
+            // Rechtsform neben einem Ort ("Haus GmbH", "Ruhr mbH") ist ein Namensbruchstück und zählt wie bisher als Ort
+            var rest = parts.Where(p => !LegalFormToken.IsMatch(p)).ToList();
+            return rest.Count > 0 && rest.All(p => localities.Contains(Fold(p)));
         }
+
+        private static readonly System.Text.RegularExpressions.Regex LegalFormToken = new(
+            @"^(g?GmbH|mbH|AG|KG|KGaA|SE|OHG|GbR|UG|eG|Co|Ltd|Inc)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
 
         /// <summary>true, wenn PLZ bekannt ist (oder kein Verzeichnis geladen).</summary>
         public bool IsValid(string zip) => !IsLoaded || _map.ContainsKey(zip);

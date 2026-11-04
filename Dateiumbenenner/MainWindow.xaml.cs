@@ -1003,6 +1003,8 @@ namespace Dateiumbenenner
             list = CleanCandidates(list);
             list = PreferLegalFormNames(list, fullText);
             AddIndustryNames(list, fullText);
+            foreach (var (name, _) in LabeledNames(fullText))
+                if (!list.Contains(name, StringComparer.OrdinalIgnoreCase)) list.Add(name);
             list = CleanCandidates(list);
             list.RemoveAll(Dateiumbenenner.Engine.CompanyExclusions.IsExcluded);
             list.RemoveAll(IsNoiseCandidate);
@@ -1064,13 +1066,19 @@ namespace Dateiumbenenner
                 result.Insert(full, part);
                 i--;
             }
-            // Einzelne normale Wörter ("Jahre", "Herr") nicht vor einen erkannten Namen mit Rechtsform ("DFH Haus GmbH")
+            // Einzelne normale Wörter ("Jahre", "Herr") nicht vor einen erkannten Namen mit Rechtsform ("DFH Haus GmbH");
+            // ausdrücklich gekennzeichnete Namen ("Versender: Hellmann Worldwide Logistics") bleiben, wo sie sind
             if (result.Any(HasLegalForm))
             {
-                var plain = result.Where(IsPlainWord).ToList();
-                result.RemoveAll(IsPlainWord);
+                var labeled = SenderNames(fullText);
+                bool Demote(string c) => IsPlainWord(c) && !labeled.Contains(c.Trim());
+                var plain = result.Where(Demote).ToList();
+                result.RemoveAll(Demote);
                 result.AddRange(plain);
             }
+            // Hinteres Bruchstück eines längeren Namens mit Rechtsform ("Haus GmbH" aus "DFH Haus GmbH") nur weiter hinten anbieten
+            var tails = result.Where(c => HasLegalForm(c) && result.Any(l => l.Length > c.Length && l.EndsWith(" " + c.Trim(), StringComparison.OrdinalIgnoreCase))).ToList();
+            if (tails.Count > 0 && tails.Count < result.Count) { result.RemoveAll(tails.Contains); result.AddRange(tails); }
             // Straßenähnliche Namen
             var streets = result.Where(IsStreetLike).ToList();
             if (streets.Count < result.Count) { result.RemoveAll(IsStreetLike); result.AddRange(streets); }
@@ -1137,8 +1145,52 @@ namespace Dateiumbenenner
             }
         }
 
+        // Ausdrücklich gekennzeichnete Firma ("Versender: Hellmann Worldwide Logistics"), auch ohne Rechtsform und mitten im Beleg
+        private static readonly Regex NameLabelRegex = new(
+            @"(?<!\p{L})(?<label>Versender|Absender|Abs\.|Lieferant|Rechnungssteller|Verk(?:ä|ae)ufer|Auftragnehmer|Leistungserbringer|Vermieter|Verlader|Spediteur|Spedition|Frachtf(?:ü|ue)hrer)[ \t]*:[ \t]*(?:\r?\n[ \t]*)?(?<name>[^\r\n\f\t|;,·•]+)",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex CarrierLabelRegex = new(@"^(Spediteur|Spedition|Frachtf(ü|ue)hrer)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Hier endet der gekennzeichnete Name ("Versender: Muster Logistik Tel. 0711 …")
+        private static readonly Regex LabelStopRegex = new(@"^(Tel|Telefon|Fax|Telefax|E-?Mail|Mail|Web|Internet|Datum|Seite|Page|Blatt|Nr|Kd|Kunden?\w*|USt\w*|IBAN|BIC|Empfänger|Gewicht|Menge)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex LegalFormAtRegex = new(@"\G(?:" + LegalFormPattern + @")(?![\p{L}\d])", RegexOptions.Compiled);
+
+        /// <summary>Namen hinter "Versender:", "Absender:", "Lieferant:" …; Sender = false bei Spediteur/Frachtführer.</summary>
+        private static List<(string Name, bool Sender)> LabeledNames(string? fullText)
+        {
+            var result = new List<(string Name, bool Sender)>();
+            if (string.IsNullOrEmpty(fullText) || !fullText.Contains(':')) return result;
+            foreach (Match m in NameLabelRegex.Matches(fullText))
+            {
+                var seg = Regex.Split(m.Groups["name"].Value, @"\s{2,}")[0];
+                var keep = new List<string>();
+                string? legalForm = null;
+                foreach (Match t in Regex.Matches(seg, @"\S+"))
+                {
+                    if (keep.Count > 0 && LegalFormAtRegex.Match(seg, t.Index) is { Success: true } lf) { legalForm = LegalFormText(lf.Value); break; }
+                    var w = t.Value;
+                    var bare = w.TrimEnd(':', '.', ',');
+                    if (keep.Count >= 8 || w.EndsWith(':') || LabelStopRegex.IsMatch(bare) || DocTypeWordRegex.IsMatch(bare)) break;
+                    bool ok = w is "&" or "+" || (keep.Count > 0 && NameArticles.Contains(w))
+                        || ((char.IsUpper(w[0]) || char.IsDigit(w[0])) && w.Any(char.IsLetter) && w.Count(char.IsDigit) * 2 <= w.Length);
+                    if (!ok) break;
+                    keep.Add(w);
+                }
+                while (keep.Count > 0 && (keep[^1] is "&" or "+" || NameArticles.Contains(keep[^1]))) keep.RemoveAt(keep.Count - 1);
+                if (keep.Count == 0) continue;
+                var name = string.Join(" ", keep).Trim(EnclosingChars);
+                name = legalForm != null ? name + " " + legalForm : name.TrimEnd('.');
+                if (name.Length < 3 || IsNoiseCandidate(name) || Dateiumbenenner.Engine.DocumentEngine.Plz.IsPlaceName(name)) continue;
+                if (!result.Any(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                    result.Add((name, !CarrierLabelRegex.IsMatch(m.Groups["label"].Value)));
+            }
+            return result;
+        }
+
+        private static HashSet<string> SenderNames(string? fullText) =>
+            LabeledNames(fullText).Where(x => x.Sender).Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         private static readonly Regex NoiseWordRegex = new(
-            @"^(EUR|Euro|USD|CHF|MwSt|USt|Netto|Brutto|Summe|Gesamt|Betrag|Datum|Seite|Page|Blatt|Hiermit|Bitte|Ihre?|Unsere?|Sehr|Geehrte\w*|Anlage|Kunde|Kunden\w*|Konto|IBAN|BIC|Bank|Gebucht|Gebuch|Eingetragen|Eingegangen|Eingang|Bezahlt|Erledigt|Geprüft|Kopie|Original|Urlaub|Dieser Betrag|Total|Telefon|Fax|Tel)$",
+            @"^(Versender|Absender|Abs|Lieferant|Spediteur|Spedition|Frachtführer|Verlader|Empfänger|Rechnungssteller|EUR|Euro|USD|CHF|MwSt|USt|Netto|Brutto|Summe|Gesamt|Betrag|Datum|Seite|Page|Blatt|Hiermit|Bitte|Ihre?|Unsere?|Sehr|Geehrte\w*|Anlage|Kunde|Kunden\w*|Konto|IBAN|BIC|Bank|Gebucht|Gebuch|Eingetragen|Eingegangen|Eingang|Bezahlt|Erledigt|Geprüft|Kopie|Original|Urlaub|Dieser Betrag|Total|Telefon|Fax|Tel)$",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex TableHeaderRegex = new(
@@ -1151,7 +1203,7 @@ namespace Dateiumbenenner
             @"^.*?\b(HR[AB]|Handelsregister|Amtsgericht|Registergericht|Steuer\S*|USt\S*|BIC|IBAN|Gesellschafter\w*)\b.*?(\d{3,}|:)[\s:,.]+(?=\p{Lu})",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex LeadingJunkRegex = new(
-            @"^((AGB|Auftrag|Rechnung|Lieferschein|Bezeichnung|Artikel|und|Pers\.?|haft\.?|persönlich|Komplementär\w*|Gesellschafter\w*:?|Inhaber:?|Bankverbindung:?|Sitz:?)\s+)+",
+            @"^((AGB|Auftrag|Rechnung|Lieferschein|Bezeichnung|Artikel|und|Pers\.?|haft\.?|persönlich|Komplementär\w*|Gesellschafter\w*:?|Inhaber:?|Bankverbindung:?|Sitz:?|(Versender|Absender|Abs\.|Lieferant|Spediteur|Spedition|Frachtführer|Verlader|Rechnungssteller):)\s+)+",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>Zeichen, die Firmennamen umschließen können ("\ Haus GmbH \", "|Haus GmbH|", ": Haus GmbH:").</summary>
@@ -1238,6 +1290,7 @@ namespace Dateiumbenenner
             var layout = Dateiumbenenner.Engine.PdfLayoutReader.ReadPageLayout(pdfPath);
             list.RemoveAll(c => DocTypeWordRegex.IsMatch(c.Trim()));   // Belegtyp ist keine Firma
             var zipsInText = Dateiumbenenner.Engine.CompanyDirectory.ZipsInText(fullText);
+            var senders = SenderNames(fullText);
             double Score(string c, int order)
             {
                 double s = -order * 0.3;                                 // Adress-Ranking
@@ -1264,7 +1317,10 @@ namespace Dateiumbenenner
                 // Name direkt hinter Register-/Bankangabe ("HRA 706214 Hans Widmann Verwaltungs GmbH")
                 if (Regex.IsMatch(fullText, @"\b(HR[AB]|Handelsregister|Amtsgericht|BIC|IBAN|Steuer\S*|USt\S*)\b[^\n]{0,60}?" + Regex.Escape(ct), RegexOptions.IgnoreCase)) s += 2;
                 // Ausdrücklich als Absender gekennzeichnet ("Absender: Muster GmbH", "Abs.: …")
-                if (Regex.IsMatch(fullText, @"\b(Absender|Abs\.)\s*:?\s*" + Regex.Escape(ct), RegexOptions.IgnoreCase)) s += 3;
+                if (senders.Contains(ct)) s += 5;
+                else if (Regex.IsMatch(fullText, @"\b(Absender|Abs\.)\s*:?\s*" + Regex.Escape(ct), RegexOptions.IgnoreCase)) s += 3;
+                // Ausdrücklich als Empfänger gekennzeichnet ("Empfänger: Muster GmbH"; "Zahlungsempfänger" ist dagegen der Aussteller)
+                else if (Regex.IsMatch(fullText, @"(?<!\p{L})(Empfänger|Warenempfänger|Lieferanschrift|Rechnungsanschrift)[ \t]*:[ \t]*(?:\r?\n[ \t]*)?" + Regex.Escape(ct), RegexOptions.IgnoreCase)) s -= 3;
                 int idx = Array.FindIndex(lines, l => l.Contains(c, StringComparison.OrdinalIgnoreCase));
                 if (idx < 0) return s - 10;                              // steht nicht im Dokument
                 // Position auf der Seite (3x3-Raster): Briefkopf oben, Fußzeile unten; Querformat: Absender eher oben links
