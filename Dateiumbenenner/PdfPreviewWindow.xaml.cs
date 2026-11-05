@@ -51,6 +51,20 @@ namespace Dateiumbenenner
             await UpdatePdfPreviewAsync();
         }
 
+        /// <summary>Beleg als PDF (Ansicht „Auto“) oder direkt als Text anzeigen; die Suche funktioniert in beiden Ansichten.</summary>
+        public async Task ShowDocumentAsync(string filePath, string? fullText, bool asText)
+        {
+            _marks.Clear();
+            _currentFilePath = filePath;
+            _fullText = fullText;
+            TxtFileName.Text = Path.GetFileName(filePath);
+            int mode = asText ? 2 : 0;
+            // Moduswechsel lädt die Vorschau über SelectionChanged neu
+            if (CmbPdfPreviewMode.SelectedIndex != mode) CmbPdfPreviewMode.SelectedIndex = mode;
+            else await UpdatePdfPreviewAsync();
+            TxtSearch.Focus();
+        }
+
         private async Task UpdatePdfPreviewAsync()
         {
             if (string.IsNullOrEmpty(_currentFilePath))
