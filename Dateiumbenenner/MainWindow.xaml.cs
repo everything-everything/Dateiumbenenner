@@ -290,6 +290,7 @@ namespace Dateiumbenenner
             {
                 CmbDocType.ItemsSource = Dateiumbenenner.Engine.DocTypeStore.Names;
                 CmbDocType.IsEditable = true;
+                Dateiumbenenner.Engine.DocTypeStore.Changed += (_, _) => Dispatcher.BeginInvoke(new Action(RefreshDocTypeList));
             }
             this.Loaded += (s, e) =>
             {
@@ -2422,6 +2423,20 @@ namespace Dateiumbenenner
         }
 
         private void MenuRecalcNumbers_Click(object sender, RoutedEventArgs e) => RecalculateNumbers();
+
+        /// <summary>Belegarten neu einlesen (z. B. im Plugin angelegt); eingetragene Belegart bleibt stehen.</summary>
+        private void RefreshDocTypeList()
+        {
+            if (CmbDocType == null) return;
+            var text = CmbDocType.Text;
+            _isPopulatingSelectors = true;
+            try
+            {
+                CmbDocType.ItemsSource = Dateiumbenenner.Engine.DocTypeStore.Names;
+                CmbDocType.Text = text;
+            }
+            finally { _isPopulatingSelectors = false; }
+        }
 
         /// <summary>Schnellaktion neben der Nummer: falsche Nummer für Firma + Belegart ausschließen, andere bevorzugen, Nummernfeld festlegen –
         /// danach auf alle Belege dieser Firma + Belegart anwenden.</summary>

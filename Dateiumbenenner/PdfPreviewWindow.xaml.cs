@@ -24,7 +24,9 @@ namespace Dateiumbenenner
         public PdfPreviewWindow()
         {
             InitializeComponent();
-            
+            // auch bei offenen Dialogen (z. B. Datenbank – Suchen und wählen) verschieb- und bedienbar
+            DialogExemption.Attach(this);
+
             // Event-Handler für das Schließen des Fensters
             this.Closed += (s, e) =>
             {

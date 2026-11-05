@@ -657,6 +657,9 @@ namespace Dateiumbenenner.Engine
 
         public static List<string> Names => Items.Select(d => d.Name).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
 
+        /// <summary>Belegarten wurden gespeichert (z. B. neue Belegart aus einem Plugin) – Auswahllisten neu füllen.</summary>
+        public static event EventHandler? Changed;
+
         public static void Save(IEnumerable<DocTypeDefinition> items)
         {
             var list = items.Where(d => !string.IsNullOrWhiteSpace(d.Name)).ToList();
@@ -670,6 +673,7 @@ namespace Dateiumbenenner.Engine
                 }
                 catch { }
             }
+            Changed?.Invoke(null, EventArgs.Empty);
         }
 
         public static DocTypeDefinition? Get(string? nameOrSynonym)
