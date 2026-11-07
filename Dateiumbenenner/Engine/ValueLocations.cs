@@ -174,7 +174,14 @@ namespace Dateiumbenenner.Engine
             }
         }
 
-        private static double Similarity(ValueLocation s, Occ o)
+        private static string NumberLabel(string w) => Regex.Replace(w, "(?:nummer|number|no)$", "nr");
+
+        /// <summary>Nächster Begriff vor dem Wert, Schreibvarianten vereinheitlicht („belegnummer“ = „beleg nr“ = „belegnr“).</summary>
+        private static string Head(List<string> before)
+            => before.Count == 0 ? "" : before.Count > 1 && NumberLabel(before[0]) == "nr" ? NumberLabel(before[1] + before[0]) : NumberLabel(before[0]);
+
+        /// <summary>Ähnlichkeit der Fundstelle getrennt nach Umfeld (Wörter davor/dahinter) und Position (wievielter Wert, Lage).</summary>
+        private static (double Words, double Position) Similarity(ValueLocation s, Occ o)
         {
             double b = 0;
             for (int i = 0; i < Math.Min(3, Math.Min(s.Before.Count, o.Before.Count)); i++)
@@ -182,14 +189,16 @@ namespace Dateiumbenenner.Engine
                 if (s.Before[i] != o.Before[i]) break;
                 b += i == 0 ? 20 : i == 1 ? 6 : 3;
             }
+            if (b == 0 && s.Before.Count > 0 && o.Before.Count > 0 && Head(s.Before) is { Length: > 1 } h && h == Head(o.Before)) b += 20;
             if (b == 0 && s.Before.Count > 0 && o.Before.Contains(s.Before[0])) b += 6;
             if (s.After.Count > 0 && o.After.Count > 0 && s.After[0] == o.After[0])
                 b += 8 + (s.After.Count > 1 && o.After.Count > 1 && s.After[1] == o.After[1] ? 3 : 0);
-            if (s.Total > 1 && s.Occurrence == o.Occurrence) b += 6;
-            if (s.Total > 1 && s.FromEnd == o.FromEnd) b += 4;
-            b += 4 * Math.Max(0, 1 - Math.Abs(s.LinePos - o.LinePos) * 5);
-            if (s.Mask.Length > 0 && s.Mask != o.Mask) b *= 0.5;
-            return b;
+            double p = 0;
+            if (s.Total > 1 && s.Occurrence == o.Occurrence) p += 6;
+            if (s.Total > 1 && s.FromEnd == o.FromEnd) p += 4;
+            p += 4 * Math.Max(0, 1 - Math.Abs(s.LinePos - o.LinePos) * 5);
+            double f = s.Mask.Length > 0 && s.Mask != o.Mask ? 0.5 : 1;
+            return (b * f, p * f);
         }
 
         /// <summary>
@@ -209,9 +218,13 @@ namespace Dateiumbenenner.Engine
                 double weight = (i == 0 ? 1.0 : 0.5) * (1 + Math.Min(s.Count, 5) * 0.05);
                 var cacheKey = kind == ValueKind.Betrag ? "" : s.Mask;
                 if (!cache.TryGetValue(cacheKey, out var occs)) cache[cacheKey] = occs = Occurrences(kind, text, s.Mask);
-                foreach (var o in occs)
+                var sims = occs.Select(o => (o, Sim: Similarity(s, o))).ToList();
+                // Steht das gelernte Umfeld (Begriff) bei einem Wert, zählt die Position (wievielter Wert, Lage) nicht für andere Werte
+                bool worded = sims.Any(x => x.Sim.Words >= 8);
+                foreach (var (o, sim) in sims)
                 {
-                    var bonus = Similarity(s, o) * weight;
+                    if (worded && sim.Words < 8) continue;
+                    var bonus = (sim.Words + sim.Position) * weight;
                     var n = Norm(kind, o.Value);
                     if (!best.TryGetValue(n, out var cur) || cur.Bonus < bonus) best[n] = (o.Value, bonus);
                 }

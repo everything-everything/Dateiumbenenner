@@ -306,10 +306,18 @@ namespace Dateiumbenenner.Engine
                     {
                         // Bevorzugte Position: zusätzlich zum Muster-Treffer (gleich aufgebaute Nummern an anderer Stelle
                         // bleiben möglich, liegen aber dahinter)
-                        foreach (var v in NearKeyword(r, text).Distinct(StringComparer.OrdinalIgnoreCase))
+                        var near = NearKeyword(r, text, true).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        foreach (var v in near)
                         {
                             var existing = number.Candidates.FirstOrDefault(c => c.Value.Equals(v, StringComparison.OrdinalIgnoreCase))?.Score ?? 0;
                             number.Add(v, Math.Max(existing, 50 + r.Priority * spec * Math.Max(0.3, Match(r, v))) + 20, "Begriff " + r.Keyword!.Trim());
+                        }
+                        // Begriff mit Abstand (weiter hinten in der Zeile, Spalte darunter): schwächer als direkt daneben
+                        foreach (var (v, s) in KeywordProximity(r, text))
+                        {
+                            if (near.Contains(v)) continue;
+                            var existing = number.Candidates.FirstOrDefault(c => c.Value.Equals(v, StringComparison.OrdinalIgnoreCase))?.Score ?? 0;
+                            number.Add(v, Math.Max(existing, 50 + r.Priority * spec * Math.Max(0.3, Match(r, v))) + 15 * s, "Begriff " + r.Keyword!.Trim());
                         }
                     }
                     catch { }
@@ -343,10 +351,88 @@ namespace Dateiumbenenner.Engine
                         number.Candidates[i] = number.Candidates[i] with { Score = -1, Source = ExcludedSource };
         }
 
-        /// <summary>Werte an der bevorzugten Begriffsposition (gleiche Zeile oder Folgezeile).</summary>
-        private static IEnumerable<string> NearKeyword(NumberRule r, string text)
+        private static readonly Regex NumberWordRx = new(@"^(?<stem>.*?\p{L})[\s\-.]*(?:nummer|number|nr|no)\.?$", RegexOptions.IgnoreCase);
+
+        /// <summary>Begriff als Regex. <paramref name="loose"/>: „…nummer“, „…-Nr.“, „… Nr“ und „… No.“ gelten als gleich
+        /// (Fugen-s optional), Leerzeichen/Bindestriche/Punkte im Begriff sind beliebig.</summary>
+        private static string KeywordRegex(string keyword, bool loose)
         {
-            string Kw(string k) => @"(?<!\p{L})" + Regex.Escape(k.Trim()) + @"(?!\p{L})\.?\s*[:#]?";
+            var k = keyword.Trim();
+            if (!loose) return Regex.Escape(k);
+            k = k.TrimEnd(':', '#').Trim();
+            static string Flex(string s) => string.Join(@"[\s\-.]*", Regex.Split(s, @"[\s\-.]+").Where(p => p.Length > 0).Select(Regex.Escape));
+            var m = NumberWordRx.Match(k);
+            if (!m.Success) return Flex(k);
+            var stem = m.Groups["stem"].Value;
+            var core = stem.Length > 3 && stem.EndsWith("s", StringComparison.OrdinalIgnoreCase) ? Flex(stem[..^1]) + "s?" : Flex(stem);
+            return core + @"[\s\-.]*(?:nummer|number|nr|no)(?!\p{L})";
+        }
+
+        private static List<int> LineStarts(string text)
+        {
+            var starts = new List<int> { 0 };
+            for (int i = 0; i < text.Length; i++) if (text[i] == '\n') starts.Add(i + 1);
+            return starts;
+        }
+
+        private static int LineOf(List<int> starts, int index)
+        {
+            int l = starts.BinarySearch(index);
+            return l < 0 ? ~l - 1 : l;
+        }
+
+        /// <summary>Werte zum Begriff einer Masken-Regel mit Abstand: weiter entfernt in derselben Zeile (andere Wörter dazwischen)
+        /// oder bis zu 3 Zeilen darunter in derselben Spalte (Tabellenkopf). Stärke 0..1 je Wert.</summary>
+        private static Dictionary<string, double> KeywordProximity(NumberRule r, string text)
+        {
+            var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(r.Keyword) || r.Kind != NumberRuleKind.Maske || string.IsNullOrEmpty(r.Mask) || string.IsNullOrEmpty(text)) return result;
+            var values = Regex.Matches(text, @"(?<![\p{L}\d])" + MaskToRegex(r.Mask) + @"(?![\p{L}\d])", RegexOptions.IgnoreCase)
+                .Where(m => m.Value.Any(char.IsDigit)).ToList();
+            if (values.Count == 0) return result;
+            var keys = Regex.Matches(text, @"(?<!\p{L})(?:" + KeywordRegex(r.Keyword, true) + @")(?!\p{L})", RegexOptions.IgnoreCase);
+            if (keys.Count == 0) return result;
+            var starts = LineStarts(text);
+            bool before = r.KeywordPosition != KeywordPosition.HinterNummer;
+            bool after = r.KeywordPosition is KeywordPosition.Beliebig or KeywordPosition.HinterNummer;
+            foreach (Match k in keys)
+            {
+                int kl = LineOf(starts, k.Index), kc = k.Index - starts[kl], ke = kc + k.Length;
+                foreach (var v in values)
+                {
+                    int vl = LineOf(starts, v.Index), vc = v.Index - starts[vl], ve = vc + v.Length;
+                    double s = 0;
+                    if (vl == kl)
+                    {
+                        bool right = v.Index >= k.Index + k.Length;
+                        if (right ? !before : !after || v.Index + v.Length > k.Index) continue;
+                        int from = right ? k.Index + k.Length : v.Index + v.Length, to = right ? v.Index : k.Index;
+                        int words = Regex.Matches(text.Substring(from, to - from), @"\p{L}{2,}").Count;
+                        int between = values.Count(o => o.Index >= from && o.Index + o.Length <= to);
+                        s = 0.9 - 0.1 * Math.Min(words, 4) - 0.3 * between;
+                    }
+                    else if (before && vl > kl && vl - kl <= 3 && vc < ke + 3 && ve > kc - 3)
+                    {
+                        // Spalte unter dem Begriff; ein gleich aufgebauter Wert dazwischen ist näher dran,
+                        // ein eigener Begriff direkt davor („Auftrag 9876-54“) gehört zu diesem Wert
+                        int between = values.Count(o => o != v && LineOf(starts, o.Index) is int ol && ol > kl && ol < vl
+                                                        && o.Index - starts[ol] < ke + 3 && o.Index - starts[ol] + o.Length > kc - 3);
+                        bool ownLabel = Regex.IsMatch(text.Substring(starts[vl], vc), @"\p{L}{2,}\.?[:#]?[^\S\n]{0,2}$");
+                        s = 0.85 - 0.1 * (vl - kl - 1) - 0.3 * between - (ownLabel ? 0.4 : 0);
+                    }
+                    if (s <= 0.1) continue;
+                    var key = v.Value.Trim();
+                    if (!result.TryGetValue(key, out var cur) || cur < s) result[key] = s;
+                }
+            }
+            return result;
+        }
+
+        /// <summary>Werte an der bevorzugten Begriffsposition (gleiche Zeile oder Folgezeile).
+        /// <paramref name="loose"/>: Schreibvarianten des Begriffs („Belegnummer“ = „Beleg-Nr.“) zulassen.</summary>
+        private static IEnumerable<string> NearKeyword(NumberRule r, string text, bool loose = false)
+        {
+            string Kw(string k) => @"(?<!\p{L})(?:" + KeywordRegex(k, loose) + @")(?!\p{L})\.?\s*[:#]?";
             string val = r.Kind == NumberRuleKind.Maske && !string.IsNullOrEmpty(r.Mask)
                 ? @"(?<![\p{L}\d])(?<v>" + MaskToRegex(r.Mask) + @")(?![\p{L}\d])"
                 : @"(?<![\p{L}\d])(?<v>[\p{L}\d][\p{L}\d\-/]{2,})";
@@ -355,9 +441,9 @@ namespace Dateiumbenenner.Engine
             if (r.KeywordPosition is KeywordPosition.Beliebig or KeywordPosition.VorNummer)
                 patterns.Add(Kw(r.Keyword!) + gap + val);
             if (r.KeywordPosition is KeywordPosition.Beliebig or KeywordPosition.HinterNummer)
-                patterns.Add(val + gap + @"(?<!\p{L})" + Regex.Escape(r.Keyword!.Trim()) + @"(?!\p{L})");
+                patterns.Add(val + gap + @"(?<!\p{L})(?:" + KeywordRegex(r.Keyword!, loose) + @")(?!\p{L})");
             if (r.KeywordPosition == KeywordPosition.Umschlossen)
-                patterns.Add(Kw(r.Keyword!) + gap + val + gap + (string.IsNullOrWhiteSpace(r.KeywordEnd) ? "" : @"(?<!\p{L})" + Regex.Escape(r.KeywordEnd.Trim()) + @"(?!\p{L})"));
+                patterns.Add(Kw(r.Keyword!) + gap + val + gap + (string.IsNullOrWhiteSpace(r.KeywordEnd) ? "" : @"(?<!\p{L})(?:" + KeywordRegex(r.KeywordEnd, loose) + @")(?!\p{L})"));
             foreach (var p in patterns)
                 foreach (Match m in Regex.Matches(text, p, RegexOptions.IgnoreCase))
                 {
@@ -382,8 +468,35 @@ namespace Dateiumbenenner.Engine
             if (manual.Count > 0)
             {
                 var spec = manual.Max(x => x.Specificity);
-                var fit = list.Where(x => manual.Any(m => m.Specificity == spec && Match(m.Rule, x.Value) >= 0.999)).ToList();
-                if (fit.Count > 0) list = fit;
+                var top = manual.Where(m => m.Specificity == spec).ToList();
+                var fit = list.Where(x => top.Any(m => Match(m.Rule, x.Value) >= 0.999)).ToList();
+                if (fit.Count > 0)
+                {
+                    list = fit;
+                    // Muster + Begriff vor Position: steht eine passende Nummer beim Begriff der Regel (auch mit Abstand),
+                    // entscheiden Vorkommen/Lage bzw. die Reihenfolge der Kandidaten nur noch zwischen diesen
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        var byTerm = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+                        void Put(string v, double s) { if (!byTerm.TryGetValue(v, out var c) || c < s) byTerm[v] = s; }
+                        foreach (var (m, _) in top.Where(m => !string.IsNullOrWhiteSpace(m.Rule.Keyword)))
+                        {
+                            try
+                            {
+                                foreach (var v in NearKeyword(m, text, true).Where(v => Match(m, v) >= 0.999)) Put(v, 1.0);
+                                foreach (var (v, s) in KeywordProximity(m, text)) Put(v, s);
+                            }
+                            catch { }
+                        }
+                        var near = fit.Where(x => byTerm.ContainsKey(x.Value)).ToList();
+                        if (near.Count > 0)
+                        {
+                            // Nur die am nächsten beim Begriff stehenden Werte bleiben
+                            var max = near.Max(x => byTerm[x.Value]);
+                            list = near.Where(x => byTerm[x.Value] >= max - 0.1).ToList();
+                        }
+                    }
+                }
             }
             return list.OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault().Value;
         }

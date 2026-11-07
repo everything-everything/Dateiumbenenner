@@ -310,8 +310,34 @@ namespace Dateiumbenenner.Engine
         {
             var field = new Field();
             if (string.IsNullOrEmpty(text)) return field;
+            var scores = ScoreDocumentTypes(text, out _);
+            // nur Bezüge/Floskeln ("Ihr Auftrag", "Danke für Ihren Auftrag"): kein Hinweis auf die Belegart
+            foreach (var kv in scores)
+                if (kv.Value >= 0.25) field.Add(DocTypeStore.Canonical(kv.Key), kv.Value, "Schlüsselwort");
+            return field;
+        }
+
+        /// <summary>Belegart, die als Überschrift im Kopf des Belegs steht (z. B. "LIEFERSCHEIN", "R E C H N U N G"), sonst null.</summary>
+        public static string? HeadingType(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return null;
+            ScoreDocumentTypes(text, out var headings);
+            var best = headings.OrderByDescending(kv => kv.Value).FirstOrDefault();
+            return best.Value > 0 ? DocTypeStore.Canonical(best.Key) : null;
+        }
+
+        // gesperrt geschriebene Überschriften: "R E C H N U N G" -> "RECHNUNG"
+        private static readonly Regex LetterSpaced = new(@"(?<!\S)(?:\p{Lu}[ ]{1,2}){3,}\p{Lu}(?!\S)", RegexOptions.Compiled);
+        // Höflichkeitsfloskel: "Vielen Dank für Ihren Auftrag", "Danke für den erteilten Auftrag"
+        private static readonly Regex Courtesy = new(@"\bDank\w*\b[^.!?]{0,40}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static Dictionary<string, double> ScoreDocumentTypes(string text, out Dictionary<string, double> headings)
+        {
+            text = LetterSpaced.Replace(text, m => m.Value.Replace(" ", ""));
             var lines = text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
             var scores = new Dictionary<string, double>();
+            headings = new Dictionary<string, double>();
+            var hits = new Dictionary<string, int>();
             var title = new Dictionary<string, double>();     // stärkster Titel-Treffer je Belegart
             var labeled = new HashSet<string>();              // Belegarten mit eigener Nummernbezeichnung
             var block = new LineBlock(lines);
@@ -332,8 +358,16 @@ namespace Dateiumbenenner.Engine
                     foreach (Match m in rx.Matches(lines[i]))
                     {
                         double f = MatchFactor(lines[i], m);
-                        scores[type] = scores.GetValueOrDefault(type) + weight * pos * f;
+                        if (f >= 1.0)
+                        {
+                            // wiederholte kurze Treffer (Spaltenköpfe, Tabellenzellen) zählen abnehmend
+                            int k = hits[type] = hits.GetValueOrDefault(type) + 1;
+                            scores[type] = scores.GetValueOrDefault(type) + weight * pos * f / k;
+                        }
+                        else scores[type] = scores.GetValueOrDefault(type) + weight * pos * f;
                         if (f >= 0.5) title[type] = Math.Max(title.GetValueOrDefault(type), weight * pos * f);
+                        double h = HeadingFactor(lines[i], m, i);
+                        if (h > 0) headings[type] = Math.Max(headings.GetValueOrDefault(type), weight * 2 * h);
                     }
                 }
                 for (int r = 0; r < nl; r++)
@@ -352,9 +386,26 @@ namespace Dateiumbenenner.Engine
             // Titel und passende Nummernbezeichnung zusammen ("Lieferschein" + "Lieferscheinnummer")
             foreach (var type in labeled)
                 if (title.TryGetValue(type, out var t)) scores[type] += 0.5 * t;
+            // Überschrift im Kopf ("LIEFERSCHEIN", "Rechnung" allein in der Zeile): schlägt Spaltenköpfe und Fließtext
+            foreach (var kv in headings) scores[kv.Key] = scores.GetValueOrDefault(kv.Key) + kv.Value;
             DocTypeStore.AddScores(block, scores, BuiltInTypes);
-            foreach (var kv in scores) field.Add(DocTypeStore.Canonical(kv.Key), kv.Value, "Schl\u00FCsselwort");
-            return field;
+            return scores;
+        }
+
+        private static double HeadingFactor(string line, Match m, int index)
+        {
+            if (index >= 40) return 0;
+            // "LIEFERSCHEIN-NR.": Feldbezeichnung; Tabellenzeilen mit vielen Spalten: Spaltenkopf
+            if (LabelSuffix.IsMatch(line.Substring(m.Index + m.Length))) return 0;
+            if (ColumnGap.Matches(line.Trim()).Count > 2) return 0;
+            var (start, end) = Segment(line, m);
+            var before = line.Substring(start, m.Index - start);
+            if (ReferencePrefix.IsMatch(before) || Courtesy.IsMatch(before)) return 0;
+            var segment = line.Substring(start, end - start).Trim();
+            string word = m.Value.Trim();
+            bool upper = word.Length >= 5 && word.Any(char.IsLetter) && !word.Any(char.IsLower);
+            if (upper) return segment.StartsWith(word, StringComparison.Ordinal) ? 1.5 : 0.5;
+            return segment.Equals(word, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         }
 
         private static readonly Regex ColumnGap = new(@"\s{3,}|\t", RegexOptions.Compiled);
@@ -393,6 +444,8 @@ namespace Dateiumbenenner.Engine
             if (LabelSuffix.IsMatch(line.Substring(m.Index + m.Length))) return 0;
             // Bezug auf einen anderen Beleg (z. B. "Ihr Angebot vom ..." auf einem Lieferschein): praktisch kein Hinweis
             if (ReferencePrefix.IsMatch(line.Substring(start, m.Index - start))) return f * 0.02;
+            // "Vielen Dank für Ihren Auftrag": Floskel, keine Belegart
+            if (Courtesy.IsMatch(line.Substring(start, m.Index - start))) return 0;
             return f;
         }
     }
