@@ -470,6 +470,15 @@ namespace Dateiumbenenner.Engine
                 var spec = manual.Max(x => x.Specificity);
                 var top = manual.Where(m => m.Specificity == spec).ToList();
                 var fit = list.Where(x => top.Any(m => Match(m.Rule, x.Value) >= 0.999)).ToList();
+                // Muster ist Pflicht: ohne genauen Treffer nur OCR-Lesefehler (O/0, I/1, Leerzeichen …) zulassen – eine anders
+                // aufgebaute Nummer (z. B. Durchwahl „06206-9884-827“ zu „$$$$$$$$$$$$“) nie; dann entscheidet der Begriff (null)
+                if (fit.Count == 0)
+                {
+                    fit = list.Where(x => top.Any(m => OcrFits(m.Rule, x.Value))).ToList();
+                    // Kern der Nummer ohne Zusatz (z. B. „23063123“ zu „$$$$$$$$? / $“, wenn im Text nur „23063123 / …“ steht)
+                    if (fit.Count == 0) fit = list.Where(x => top.Any(m => PrefixFits(m.Rule, x.Value))).ToList();
+                    if (fit.Count == 0) return null;
+                }
                 if (fit.Count > 0)
                 {
                     list = fit;
@@ -498,7 +507,68 @@ namespace Dateiumbenenner.Engine
                     }
                 }
             }
+            // Wert direkt hinter Telefon/Durchwahl/Fax/IBAN/USt … ist keine Belegnummer, solange es andere gibt
+            // (nur „links daneben“: ein Spaltenkopf darüber kann in Tabellen zu einer anderen Spalte gehören)
+            if (list.Count > 1 && !string.IsNullOrEmpty(text))
+            {
+                var own = list.Where(x => !ForeignLabel(text, x.Value)).ToList();
+                if (own.Count > 0) list = own;
+            }
             return list.OrderByDescending(x => x.T).ThenByDescending(x => x.S).FirstOrDefault().Value;
+        }
+
+        private static readonly Regex ForeignLabelRx = new(
+            @"durchwahl|telefon|telefax|\btel\b|\bfon\b|\bfax\b|mobil|handy|\biban\b|\bbic\b|\bblz\b|\bkonto|bankverbindung|\bust\b|ust-?id|umsatzsteuer|steuer|\bst\.?-?nr|\bhr[ab]\b|amtsgericht|registergericht|\bplz\b|postfach|e-?mail|\bwww\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>Steht direkt links neben dem Wert ein Begriff, der zu keiner Belegnummer gehört (Telefon, Durchwahl, Fax, IBAN, USt …)?</summary>
+        private static bool ForeignLabel(string text, string value)
+        {
+            try
+            {
+                var hit = ValueSources.Locate(SourceField.Nummer, text, value);
+                return hit?.Label != null && hit.Where == "links daneben" && ForeignLabelRx.IsMatch(hit.Label);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Passt der Wert zur Maske, wenn man typische OCR-Lesefehler zulässt (O/D↔0, I/l/|↔1, S↔5, B↔8, Z↔2, G↔6,
+        /// Leerzeichen in der Nummer)? Höchstens zwei Verwechslungen, Trennzeichen müssen stimmen.</summary>
+        private static bool OcrFits(NumberRule rule, string value)
+        {
+            if (rule.Kind != NumberRuleKind.Maske || string.IsNullOrEmpty(rule.Mask)) return false;
+            var mask = rule.Mask.Trim();
+            var v = mask.Contains(' ') ? value.Trim() : new string(value.Where(c => !char.IsWhiteSpace(c)).ToArray());
+            if (v.Length != mask.Length) return false;
+            int swaps = 0;
+            for (int i = 0; i < v.Length; i++)
+            {
+                if (Fits(mask[i], v[i])) continue;
+                bool ocr = mask[i] switch
+                {
+                    '$' => "ODoQIl|SBZG".IndexOf(v[i]) >= 0,
+                    '?' => "015826".IndexOf(v[i]) >= 0,
+                    _ => false
+                };
+                if (!ocr || ++swaps > 2) return false;
+            }
+            return true;
+        }
+
+        /// <summary>Passt der Wert genau auf den vorderen Teil der Maske bis zu einem Wechsel der Zeichenart
+        /// (z. B. „23063123“ auf „$$$$$$$$“ von „$$$$$$$$? / $“) und deckt den Großteil der Platzhalter ab?</summary>
+        private static bool PrefixFits(NumberRule rule, string value)
+        {
+            if (rule.Kind != NumberRuleKind.Maske || string.IsNullOrEmpty(rule.Mask)) return false;
+            var mask = rule.Mask.Trim();
+            var v = value.Trim();
+            if (v.Length < 4 || v.Length >= mask.Length) return false;
+            for (int i = 0; i < v.Length; i++)
+                if (!Fits(mask[i], v[i])) return false;
+            if (mask[v.Length] == mask[v.Length - 1]) return false;
+            static bool Slot(char c) => c is '$' or '?' or '#';
+            int slots = mask.Count(Slot);
+            return slots > 0 && v.Length >= 0.6 * slots;
         }
 
         /// <summary>Mehrere Masken in einem Feld, getrennt durch „;“ (ein „/“ kann Teil der Nummer sein).</summary>
