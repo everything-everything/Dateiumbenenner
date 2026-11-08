@@ -28,8 +28,36 @@
             <Button x:Name="BtnClearAll" Content="Alle entfernen" Width="100" Margin="5,0,5,0" Click="BtnClearAll_Click"/>
         </StackPanel>
 
-        <!-- ListView mit PDF-Dateien -->
-        <ListView x:Name="LvMergeItems" Grid.Row="1" Margin="10" SelectionMode="Extended" AllowDrop="True"
+        <!-- Vorschau (andockbar wie bei Umbenennen) | ListView mit PDF-Dateien | rechter Andockbereich -->
+        <Grid Grid.Row="1" Margin="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="ColMergeDockLeft" Width="2*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="3*" MinWidth="200"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition x:Name="ColMergeDockRight" Width="0"/>
+            </Grid.ColumnDefinitions>
+
+            <TabControl x:Name="MergeDockLeft" Grid.Column="0" Margin="0,0,4,0">
+                <TabItem x:Name="TabMergeDoc" Header="Dokument">
+                    <DockPanel Margin="4">
+                        <CheckBox x:Name="ChkMergePdf" DockPanel.Dock="Top" Content="PDF anzeigen (sonst Text)" IsChecked="True" Margin="0,0,0,4"/>
+                        <ContentControl x:Name="MergeSearchHost" DockPanel.Dock="Top" Focusable="False"/>
+                        <Grid x:Name="MergePreviewHost">
+                            <TextBox x:Name="TxtMergePreview" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" FontFamily="Consolas" FontSize="12"
+                                     VerticalScrollBarVisibility="Auto" Visibility="Collapsed"/>
+                            <TextBlock x:Name="TxtMergePreviewHint" Text="Datei in der Liste wählen, um sie hier anzuzeigen." Foreground="Gray"
+                                       TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10"/>
+                        </Grid>
+                    </DockPanel>
+                </TabItem>
+            </TabControl>
+
+            <GridSplitter x:Name="SplitMergeDockLeft" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" ResizeDirection="Columns" Background="#FFE0E0E0" ToolTip="Ziehen, um Vorschau/Dateiliste anzupassen"/>
+            <GridSplitter x:Name="SplitMergeDockRight" Grid.Column="3" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" ResizeDirection="Columns" Background="#FFE0E0E0" ToolTip="Ziehen, um Dateiliste/Vorschau anzupassen"/>
+            <TabControl x:Name="MergeDockRight" Grid.Column="4" Margin="4,0,0,0"/>
+
+        <ListView x:Name="LvMergeItems" Grid.Column="2" Margin="4,0,4,0" SelectionMode="Extended" AllowDrop="True"
                   Drop="LvMergeItems_Drop" DragOver="LvMergeItems_DragOver" SelectionChanged="LvMergeItems_SelectionChanged">
             <ListView.View>
                 <GridView>
@@ -88,6 +116,7 @@
                 </GridView>
             </ListView.View>
         </ListView>
+        </Grid>
 
         <!-- Ausgabe-Optionen -->
         <GroupBox Grid.Row="2" Header="Ausgabe" Margin="10,0,10,10" Padding="10">

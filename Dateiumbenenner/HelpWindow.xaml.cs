@@ -460,6 +460,7 @@ Klicken Sie auf ein unterstrichenes Thema, um es anzuzeigen. Mit den Schaltfläc
 * [[umbenennen|Dokumente erkennen und umbenennen]]
 * [[praefix|Präfix-Umbenennung]]
 * [[zusammenfuehren|PDF-Dateien zusammenführen]]
+* [[teilen|PDF-Dateien teilen]]
 * [[kompression|Kompressionseinstellungen]]
 * [[ocr|OCR-Korrektur und Wörterbücher]]
 * [[txtnummern|TXT-Nummern korrigieren]]
@@ -490,6 +491,7 @@ Klicken Sie auf ein unterstrichenes Thema, um es anzuzeigen. Mit den Schaltfläc
 * Automatische Erkennung von Dokumenttyp, Nummern und Datum ([[umbenennen|mehr]])
 * Präfix-Umbenennung vieler Dateien in einem Schritt ([[praefix|mehr]])
 * Zusammenführen mehrerer PDFs zu einer Datei ([[zusammenfuehren|mehr]])
+* Teilen von PDFs in Seiten oder Seitenbereiche ([[teilen|mehr]])
 * Verkleinern von PDF-Dateien ([[kompression|mehr]])
 * PDF-Vorschau direkt im Programm
 * Optionale Korrektur typischer Texterkennungsfehler ([[ocr|mehr]])
@@ -554,6 +556,20 @@ Siehe auch: [[umbenennen|Dokumente erkennen und umbenennen]]"),
 * ""Ausgewählte zusammenführen/komprimieren"" oder ""Alle zusammenführen/komprimieren"" klicken.
 
 Die Ausgabedatei kann dabei verkleinert werden, siehe [[kompression|Kompressionseinstellungen]]."),
+
+            ("teilen", "PDF-Dateien teilen", @"Registerkarte ""PDF teilen"":
+
+* Dateien hinzufügen (auch per Ziehen und Ablegen oder aus der Hauptliste). Links zeigt die Registerkarte ""Dokument"" die gewählte Datei mit Suche.
+* Aufteilung wählen: ""Jede Seite einzeln"", ""Alle N Seiten"" (z. B. alle 2 Seiten), ""Seitenbereiche"" oder ""An leeren Seiten (Trennblatt)"".
+* Seitenbereiche, z. B. ""1-3; 4; 6-"": je Bereich eine Datei. ""6-"" = ab Seite 6 bis zum Ende, ""-2"" = bis Seite 2, ""5-3"" = rückwärts. Nicht genannte Seiten werden nicht übernommen. Bei kürzeren Dateien wird ein Bereich am Dokumentende gekürzt, Bereiche ganz hinter dem Ende entfallen.
+* An leeren Seiten: leere Seiten trennen die Belege und werden weggelassen.
+* In der Spalte ""Eigene Bereiche"" können für einzelne Dateien abweichende Seitenbereiche eingetragen werden.
+* Die Spalte ""Ergebnis"" zeigt vorab, welche Teile entstehen.
+* Dateiname mit Platzhaltern: {name} = Originalname, {n} = Teilnummer, {von}/{bis} = erste/letzte Seite, {seiten} = Seitenliste. Vorhandene Dateien werden nicht überschrieben, sondern mit (2), (3) … ergänzt.
+* Zielordner: leer = Ordner der Originaldatei.
+* Optional: Zielordner öffnen, Originaldateien löschen (Papierkorb), neue Dateien in die Hauptliste laden.
+
+Als leer gilt eine Seite ohne Text und ohne Bild. Eingescannte Leerseiten enthalten meist ein Bild und werden daher nicht als leer erkannt."),
 
             ("kompression", "Kompressionseinstellungen", @"Aktivieren Sie ""Kompression aktivieren"" und wählen Sie einen Modus:
 
@@ -944,9 +960,12 @@ Mehrere Suchwörter durch Leerzeichen trennen; es werden nur Einträge angezeigt
 * [[listen|Dateinamen kopieren]]
 * [[listen|Filter]]
 > S
+* [[teilen|Seitenbereiche]]
 * [[signatur|Signatur]]
 * [[system|Systemanforderungen]]
 > T
+* [[teilen|Teilen]]
+* [[teilen|Trennblatt]]
 * [[txtnummern|TXT-Nummern korrigieren]]
 * [[txtnummern|Texterkennungsfehler in Nummern]]
 > U

@@ -70,24 +70,26 @@ namespace Dateiumbenenner
             if (_currentMeta is { Loaded: true } meta) _ = UpdatePdfPreviewAsync(meta);
         }
 
-        private static IDictionary<string, string> LoadDockLayout()
+        internal static IDictionary<string, string> LoadDockLayout(string? file = null)
         {
+            file ??= DockLayoutFile;
             try
             {
-                if (File.Exists(DockLayoutFile)
-                    && JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(DockLayoutFile)) is { } d)
+                if (File.Exists(file)
+                    && JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(file)) is { } d)
                     return new Dictionary<string, string>(d, StringComparer.OrdinalIgnoreCase);
             }
             catch { }
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
-        private static void SaveDockLayout(IDictionary<string, string> layout)
+        internal static void SaveDockLayout(IDictionary<string, string> layout, string? file = null)
         {
+            file ??= DockLayoutFile;
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(DockLayoutFile)!);
-                File.WriteAllText(DockLayoutFile, JsonSerializer.Serialize(layout));
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                File.WriteAllText(file, JsonSerializer.Serialize(layout));
             }
             catch { }
         }

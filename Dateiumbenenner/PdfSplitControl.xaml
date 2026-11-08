@@ -1,0 +1,146 @@
+﻿<UserControl x:Class="Dateiumbenenner.PdfSplitControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="600" d:DesignWidth="900">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header mit Buttons -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10">
+            <Button x:Name="BtnUseMainList" Content="Hauptliste Verwenden" Width="150" Margin="0,0,5,0" Click="BtnUseMainList_Click"/>
+            <Button x:Name="BtnLoadFromMain" Content="Auswahl aus Hauptliste" Width="160" Margin="5,0,5,0" Click="BtnLoadFromMain_Click"/>
+            <Button x:Name="BtnAddFiles" Content="Dateien hinzufügen..." Width="150" Margin="5,0,5,0" Click="BtnAddFiles_Click"/>
+            <Separator Width="20" Background="Transparent"/>
+            <Button x:Name="BtnRemoveSelected" Content="Auswahl entfernen" Width="120" Margin="5,0,5,0" Click="BtnRemoveSelected_Click"/>
+            <Button x:Name="BtnClearAll" Content="Alle entfernen" Width="100" Margin="5,0,5,0" Click="BtnClearAll_Click"/>
+        </StackPanel>
+
+        <!-- Vorschau (andockbar wie bei Umbenennen) | Dateiliste | rechter Andockbereich -->
+        <Grid Grid.Row="1" Margin="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="ColSplitDockLeft" Width="2*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="3*" MinWidth="200"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition x:Name="ColSplitDockRight" Width="0"/>
+            </Grid.ColumnDefinitions>
+
+            <TabControl x:Name="SplitDockLeft" Grid.Column="0" Margin="0,0,4,0">
+                <TabItem x:Name="TabSplitDoc" Header="Dokument">
+                    <DockPanel Margin="4">
+                        <CheckBox x:Name="ChkSplitPdf" DockPanel.Dock="Top" Content="PDF anzeigen (sonst Text)" IsChecked="True" Margin="0,0,0,4"/>
+                        <ContentControl x:Name="SplitSearchHost" DockPanel.Dock="Top" Focusable="False"/>
+                        <Grid x:Name="SplitPreviewHost">
+                            <TextBox x:Name="TxtSplitPreview" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" FontFamily="Consolas" FontSize="12"
+                                     VerticalScrollBarVisibility="Auto" Visibility="Collapsed"/>
+                            <TextBlock x:Name="TxtSplitPreviewHint" Text="Datei in der Liste wählen, um sie hier anzuzeigen." Foreground="Gray"
+                                       TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10"/>
+                        </Grid>
+                    </DockPanel>
+                </TabItem>
+            </TabControl>
+
+            <GridSplitter x:Name="SplitSplitDockLeft" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" ResizeDirection="Columns" Background="#FFE0E0E0" ToolTip="Ziehen, um Vorschau/Dateiliste anzupassen"/>
+            <GridSplitter x:Name="SplitSplitDockRight" Grid.Column="3" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" ResizeDirection="Columns" Background="#FFE0E0E0" ToolTip="Ziehen, um Dateiliste/Vorschau anzupassen"/>
+            <TabControl x:Name="SplitDockRight" Grid.Column="4" Margin="4,0,0,0"/>
+
+            <ListView x:Name="LvSplitItems" Grid.Column="2" Margin="4,0,4,0" SelectionMode="Extended" AllowDrop="True"
+                      Drop="LvSplitItems_Drop" DragOver="LvSplitItems_DragOver" SelectionChanged="LvSplitItems_SelectionChanged">
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="Dateiname" Width="260" DisplayMemberBinding="{Binding FileName}"/>
+                        <GridViewColumn Header="Seiten" Width="60" DisplayMemberBinding="{Binding PageCount}"/>
+                        <GridViewColumn Header="Größe" Width="85" DisplayMemberBinding="{Binding SizeDisplay}"/>
+                        <GridViewColumn Header="Leere Seiten" Width="90" DisplayMemberBinding="{Binding BlankDisplay}"/>
+                        <GridViewColumn Header="Eigene Bereiche" Width="130">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBox Text="{Binding Ranges, UpdateSourceTrigger=PropertyChanged}" MinWidth="110"
+                                             ToolTip="Nur für diese Datei, z. B. 1-3; 4; 6-  (leer = Einstellung unten)"/>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Ergebnis" Width="300" DisplayMemberBinding="{Binding PartsDisplay}"/>
+                        <GridViewColumn Header="Pfad" Width="300" DisplayMemberBinding="{Binding FilePath}"/>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+        </Grid>
+
+        <!-- Teilen-Optionen -->
+        <GroupBox Grid.Row="2" Header="Teilen" Margin="10,0,10,10" Padding="10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Aufteilen:" VerticalAlignment="Top" Margin="0,2,10,0"/>
+                <WrapPanel Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal">
+                    <RadioButton x:Name="RbSingle" GroupName="SplitMode" Content="Jede Seite einzeln" IsChecked="True" Margin="0,2,15,4" VerticalAlignment="Center" Checked="SplitOption_Changed"/>
+                    <RadioButton x:Name="RbEveryN" GroupName="SplitMode" Content="Alle" Margin="0,2,4,4" VerticalAlignment="Center" Checked="SplitOption_Changed"/>
+                    <TextBox x:Name="TxtEveryN" Text="2" Width="40" Margin="0,0,4,4" VerticalContentAlignment="Center" TextChanged="SplitOption_Changed"
+                             ToolTip="Anzahl Seiten je Teil"/>
+                    <TextBlock Text="Seiten" VerticalAlignment="Center" Margin="0,0,15,4"/>
+                    <RadioButton x:Name="RbRanges" GroupName="SplitMode" Content="Seitenbereiche:" Margin="0,2,4,4" VerticalAlignment="Center" Checked="SplitOption_Changed"/>
+                    <TextBox x:Name="TxtRanges" Text="1-3; 4-" Width="150" Margin="0,0,15,4" VerticalContentAlignment="Center" TextChanged="SplitOption_Changed"
+                             ToolTip="Je Bereich eine Datei, getrennt mit ; oder ,&#x0a;1-3 = Seiten 1 bis 3, 4 = nur Seite 4, 6- = ab Seite 6 bis Ende, -2 = bis Seite 2, 5-3 = rückwärts.&#x0a;Nicht genannte Seiten werden nicht übernommen."/>
+                    <RadioButton x:Name="RbBlank" GroupName="SplitMode" Content="An leeren Seiten (Trennblatt)" Margin="0,2,0,4" VerticalAlignment="Center" Checked="SplitOption_Changed"
+                                 ToolTip="Leere Seiten (ohne Text und ohne Bild) trennen die Belege und werden weggelassen.&#x0a;Hinweis: Eingescannte Leerseiten enthalten meist ein Bild und werden daher nicht als leer erkannt."/>
+                </WrapPanel>
+
+                <CheckBox x:Name="ChkSkipBlank" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Content="Leere Seiten weglassen" Margin="0,4,0,0"
+                          Checked="SplitOption_Changed" Unchecked="SplitOption_Changed"
+                          ToolTip="Seiten ohne Text und ohne Bild werden in keinen Teil übernommen."/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Dateiname:" VerticalAlignment="Center" Margin="0,10,10,0"/>
+                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,10,0,0">
+                    <ComboBox x:Name="CmbNamePattern" IsEditable="True" Width="260" Text="{}{name}_Teil{n}" TextBoxBase.TextChanged="SplitOption_Changed"
+                              ToolTip="Platzhalter: {name} = Originalname, {n} = Teilnummer, {von}/{bis} = erste/letzte Seite, {seiten} = Seitenliste.&#x0a;Vorhandene Dateien werden nicht überschrieben, sondern mit (2), (3) … ergänzt.">
+                        <ComboBoxItem Content="{}{name}_Teil{n}"/>
+                        <ComboBoxItem Content="{}{name}_Seite{von}"/>
+                        <ComboBoxItem Content="{}{name}_S{von}-{bis}"/>
+                        <ComboBoxItem Content="{}{name}_{n}"/>
+                    </ComboBox>
+                    <TextBlock x:Name="TxtNameExample" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="Gray"/>
+                </StackPanel>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Zielordner:" VerticalAlignment="Center" Margin="0,10,10,0"/>
+                <TextBox x:Name="TxtOutputFolder" Grid.Row="3" Grid.Column="1" Margin="0,10,10,0" VerticalContentAlignment="Center"
+                         ToolTip="Leer = Ordner der Originaldatei"/>
+                <Button x:Name="BtnBrowseOutput" Grid.Row="3" Grid.Column="2" Content="Durchsuchen..." Width="100" Margin="0,10,0,0" Click="BtnBrowseOutput_Click"/>
+
+                <WrapPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0">
+                    <CheckBox x:Name="ChkOpenFolderAfterSplit" Content="Zielordner nach dem Teilen öffnen" IsChecked="True" Margin="0,0,20,0"/>
+                    <CheckBox x:Name="ChkDeleteAfterSplit" Content="Originaldateien nach dem Teilen löschen" IsChecked="False" Margin="0,0,20,0"/>
+                    <CheckBox x:Name="ChkPartsToMain" Content="Neue Dateien in die Hauptliste laden (wenn im geöffneten Ordner)" IsChecked="True"/>
+                </WrapPanel>
+            </Grid>
+        </GroupBox>
+
+        <!-- Aktions-Buttons -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="10">
+            <TextBlock x:Name="TxtStatus" VerticalAlignment="Center" Margin="0,0,20,0" Foreground="DarkBlue"/>
+            <Button x:Name="BtnSplitSelected" Content="Ausgewählte teilen" Width="200" Margin="0,0,5,0"
+                    Height="30" Click="BtnSplitSelected_Click" FontWeight="Bold"/>
+            <Button x:Name="BtnSplitAll" Content="Alle teilen" Width="200" Margin="5,0,0,0"
+                    Height="30" Click="BtnSplitAll_Click" FontWeight="Bold"/>
+        </StackPanel>
+    </Grid>
+</UserControl>

@@ -32,12 +32,17 @@ namespace Dateiumbenenner
     {
         private ObservableCollection<PdfMergeItem> _mergeItems = new();
         private MainWindow? _mainWindow;
+        private readonly PdfListPreview _preview;
 
         public PdfMergeControl()
         {
             InitializeComponent();
             LvMergeItems.ItemsSource = _mergeItems;
             LvMergeItems.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(MergeHeader_Click));
+            // Vorschau wie bei Umbenennen: Registerkarte links/rechts andockbar oder in eigenem Fenster
+            _preview = new PdfListPreview(this, MergeDockLeft, MergeDockRight, ColMergeDockLeft, ColMergeDockRight, SplitMergeDockLeft, SplitMergeDockRight, LvMergeItems,
+                TabMergeDoc, ChkMergePdf, MergeSearchHost, MergePreviewHost, TxtMergePreview, TxtMergePreviewHint, "registerkarten_pdf.json", "PDF Zusammenführen",
+                () => (LvMergeItems.SelectedItem as PdfMergeItem)?.FilePath, () => _mainWindow);
         }
 
         public void SetMainWindow(MainWindow mainWindow)
@@ -291,6 +296,7 @@ namespace Dateiumbenenner
             int deletedCount = 0;
             int failedCount = 0;
             var failedFiles = new System.Collections.Generic.List<string>();
+            _preview.Release();
 
             foreach (var item in selectedItems)
             {
@@ -356,7 +362,7 @@ namespace Dateiumbenenner
         }
 
         // Prüft ob ein Pfad auf einem Netzlaufwerk liegt
-        private bool IsNetworkPath(string path)
+        internal static bool IsNetworkPath(string path)
         {
             if (string.IsNullOrEmpty(path))
                 return false;
@@ -383,7 +389,7 @@ namespace Dateiumbenenner
         }
 
         // Verschiebt eine Datei in einen Backup-Ordner
-        private void MoveToBackupFolder(string filePath)
+        internal static void MoveToBackupFolder(string filePath)
         {
             var directory = Path.GetDirectoryName(filePath);
             if (string.IsNullOrEmpty(directory))
@@ -523,6 +529,7 @@ namespace Dateiumbenenner
                         int deletedCount = 0;
                         int failedCount = 0;
                         var failedFiles = new System.Collections.Generic.List<string>();
+                        _preview.Release();
 
                         foreach (var item in items)
                         {
@@ -610,37 +617,13 @@ namespace Dateiumbenenner
 
         private async void LvMergeItems_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            // Benachrichtige das MainWindow über die Auswahl-Änderung
+            _preview.Show();
+            // Benachrichtige das MainWindow ueber die Auswahl (separates Vorschaufenster, falls offen)
             if (_mainWindow != null && LvMergeItems.SelectedItem is PdfMergeItem selectedItem)
             {
-                // Lade den Text aus dem PDF, falls noch nicht vorhanden
-                string? fullText = null;
-                
-                try
-                {
-                    if (selectedItem.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-                    {
-                        await System.Threading.Tasks.Task.Run(() =>
-                        {
-                            using var doc = UglyToad.PdfPig.PdfDocument.Open(selectedItem.FilePath);
-                            var sb = new System.Text.StringBuilder();
-                            foreach (var page in doc.GetPages())
-                            {
-                                var text = page.Text;
-                                if (!string.IsNullOrWhiteSpace(text))
-                                {
-                                    sb.AppendLine(text);
-                                }
-                            }
-                            fullText = sb.ToString();
-                        });
-                    }
-                }
-                catch
-                {
-                    // Fehler beim Laden ignorieren
-                    fullText = null;
-                }
+                string? fullText;
+                try { fullText = await _preview.LoadTextAsync(selectedItem.FilePath); }
+                catch { fullText = null; }
 
                 // Aktualisiere das Vorschaufenster im MainWindow
                 await _mainWindow.UpdatePreviewWindowAsync(selectedItem.FilePath, fullText);

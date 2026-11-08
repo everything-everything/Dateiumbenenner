@@ -303,6 +303,7 @@ namespace Dateiumbenenner
                 TxtLineWidth.Text = Dateiumbenenner.Engine.TextReflow.Width.ToString();
                 var pdfMergeTab = FindName("PdfMergeTab") as PdfMergeControl;
                 pdfMergeTab?.SetMainWindow(this);
+                PdfSplitTab.SetMainWindow(this);
                 var prefixTab = FindName("PrefixRenamerTab") as PrefixRenamerControl;
                 prefixTab?.SetMainWindow(this);
                 prefixTab?.AttachExternalEditors(CmbMainCompany, TxtMainNewPrefix, TxtMainPrefixNewName);
@@ -610,6 +611,13 @@ namespace Dateiumbenenner
             var sel=_currentMeta?.FilePath;
             await LoadFolderAsync(folder);
             if(sel!=null){ var m=_items.FirstOrDefault(i=>string.Equals(i.FilePath,sel,StringComparison.OrdinalIgnoreCase)); if(m!=null){ LvFiles.SelectedItem=m; LvFiles.ScrollIntoView(m); } }
+        }
+
+        /// <summary>Hauptliste neu laden, falls einer der Ordner gerade geöffnet ist (z. B. nach PDF teilen).</summary>
+        internal async Task RefreshIfFolderShownAsync(IEnumerable<string> folders){
+            static string Norm(string p){ try{ return Path.GetFullPath(p).TrimEnd('\\'); } catch{ return p; } }
+            var cur=TxtFolder.Text; if(string.IsNullOrEmpty(cur)||!Directory.Exists(cur)) return;
+            if(folders.Any(f=>!string.IsNullOrEmpty(f)&&string.Equals(Norm(f),Norm(cur),StringComparison.OrdinalIgnoreCase))) await RefreshFolderAsync();
         }
 
         private FileSystemWatcher? _watcher; private System.Windows.Threading.DispatcherTimer? _watchTimer;
@@ -1582,7 +1590,7 @@ namespace Dateiumbenenner
             {
                 var tab = new TabItem { Header = p.Plugin.Name, Content = p.Plugin.CreateTabContent() };
                 _pluginTabs[p.Plugin.Id] = tab;
-                // "PDF Zusammenführen" bleibt immer der letzte Tab
+                // "PDF Zusammenführen" und "PDF teilen" bleiben immer die letzten Tabs
                 var mergeTab = MainTabs.Items.OfType<TabItem>().FirstOrDefault(t => (t.Header as string) == "PDF Zusammenführen");
                 if (mergeTab != null) MainTabs.Items.Insert(MainTabs.Items.IndexOf(mergeTab), tab);
                 else MainTabs.Items.Add(tab);
@@ -3347,6 +3355,8 @@ namespace Dateiumbenenner
         public List<string> GetSelectedFiles()=> LvFiles.SelectedItems.Cast<DocumentMetadata>().Where(m=>!string.IsNullOrEmpty(m.FilePath)&&Path.GetExtension(m.FilePath).Equals(".pdf",StringComparison.OrdinalIgnoreCase)).Select(m=>m.FilePath).ToList();
         public List<string> GetAllFiles()=> (LvFiles.ItemsSource as IEnumerable<DocumentMetadata> ?? _items).Where(m=>!string.IsNullOrEmpty(m.FilePath)&&Path.GetExtension(m.FilePath).Equals(".pdf",StringComparison.OrdinalIgnoreCase)).Select(m=>m.FilePath).ToList();
         public void PreviewWindowClosed(){ _openPreviewWindow=null; }
+        /// <summary>Bereits geladener (ggf. OCR-)Text einer Datei aus der Hauptliste, sonst null.</summary>
+        internal string? GetLoadedText(string filePath)=> _items.FirstOrDefault(m=>m.Loaded&&string.Equals(m.FilePath,filePath,StringComparison.OrdinalIgnoreCase))?.FullText;
         public async Task UpdatePreviewWindowAsync(string filePath,string? fullText){ if(_openPreviewWindow!=null && !string.IsNullOrEmpty(filePath)) await _openPreviewWindow.LoadPdfAsync(filePath,fullText); }
         private TextPointer? GetTextPointerAtOffset(TextPointer start,int offset,bool dummy){ return GetTextPointerAtOffset(start,offset); }
 

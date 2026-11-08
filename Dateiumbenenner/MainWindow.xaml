@@ -614,6 +614,11 @@
         <TabItem Header="PDF Zusammenführen">
             <local:PdfMergeControl x:Name="PdfMergeTab"/>
         </TabItem>
+
+        <!-- Registerkarte: PDF teilen -->
+        <TabItem Header="PDF teilen">
+            <local:PdfSplitControl x:Name="PdfSplitTab"/>
+        </TabItem>
     </TabControl>
     </DockPanel>
 </Window>
