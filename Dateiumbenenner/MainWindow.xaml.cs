@@ -277,6 +277,7 @@ namespace Dateiumbenenner
             ListViewSorter.Register();
             ListViewSearch.Register();
             InitializeComponent();
+            InitMainDocking();
             Title += $" – Profil: {ProfileManager.ActiveProfile}";
             Dateiumbenenner.Engine.NumberFixStore.TextFilesChanged += OnTextFilesChanged;
             Closed += (_, _) => Dateiumbenenner.Engine.NumberFixStore.TextFilesChanged -= OnTextFilesChanged;

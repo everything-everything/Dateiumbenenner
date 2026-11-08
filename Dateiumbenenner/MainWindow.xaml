@@ -66,12 +66,15 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*"/>
-                    <ColumnDefinition Width="3*"/>
+                    <ColumnDefinition x:Name="ColMainDockLeft" Width="2*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="3*" MinWidth="200"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition x:Name="ColMainDockRight" Width="2*"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Top bar -->
-                <Grid Grid.Row="0" Grid.ColumnSpan="2" Margin="0,0,0,10">
+                <Grid Grid.Row="0" Grid.ColumnSpan="5" Margin="0,0,0,10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
@@ -131,8 +134,11 @@
                     </WrapPanel>
                 </Grid>
 
+                <GridSplitter x:Name="SplitMainDockLeft" Grid.Row="1" Grid.Column="1" Width="6" Margin="0,10,0,10" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" ResizeDirection="Columns" Background="#FFE0E0E0" ToolTip="Ziehen, um Seitenfenster/Dateiliste anzupassen"/>
+                <GridSplitter x:Name="SplitMainDockRight" Grid.Row="1" Grid.Column="3" Width="6" Margin="0,10,0,10" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" ResizeDirection="Columns" Background="#FFE0E0E0" ToolTip="Ziehen, um Dateiliste/Seitenfenster anzupassen"/>
+
                 <!-- File list -->
-                <Grid Grid.Row="1" Grid.Column="0" Margin="0,10,10,10">
+                <Grid x:Name="PnlMainList" Grid.Row="1" Grid.Column="2" Margin="4,10,4,10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
@@ -253,15 +259,11 @@
                     </ListView>
                 </Grid>
 
-                <!-- Details and preview - Rest des bestehenden Codes -->
-                <Grid Grid.Row="1" Grid.Column="1" Margin="0,10,0,10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="3*"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <GroupBox Header="Details" Grid.Row="0" Margin="0,0,0,5">
+                <!-- Seitenbereich rechts: Werte (Registerkarten andockbar wie im INI-Generator) -->
+                <TabControl x:Name="MainDockRight" Grid.Row="1" Grid.Column="4" Margin="4,10,0,10">
+                <TabItem x:Name="TabMainValues" Header="Werte">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <GroupBox Header="Details" Margin="0,0,0,5">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -288,14 +290,15 @@
                             <TextBlock Text="Datum (erster Treffer):" Grid.Row="2" Grid.Column="0" Margin="0,0,5,5"/>
                             <TextBlock x:Name="TxtDetailDate" Grid.Row="2" Grid.Column="1"/>
                             <TextBlock Text="Seiten:" Grid.Row="3" Grid.Column="0" Margin="0,0,5,5"/>
-                            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+                            <WrapPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
                                 <TextBlock x:Name="TxtDetailPages"/>
                                 <TextBlock Text="Absender:" Margin="20,0,5,0"/>
                                 <TextBlock x:Name="TxtDetailAddress" ToolTip="Erkannte Absenderadresse (Engine-Bewertung)"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <!-- Präfix (Firmenname) - aus dem Präfix-Bereich hierher verlagert -->
-                            <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,10,0,5">
+                            <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,10,0,5">
+                            <WrapPanel Orientation="Horizontal" HorizontalAlignment="Left">
                                 <TextBlock Text="Firma:" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <ComboBox x:Name="CmbMainCompany" IsEditable="True" IsTextSearchEnabled="False" Width="170" Margin="0,0,4,0" ToolTip="Firmenname auswählen oder eingeben"/>
                                 <Button x:Name="BtnMainTransferName" Content="&#220;bertragen&#8230;" Padding="6,0" Margin="0,0,4,0" Click="BtnMainTransferName_Click" ToolTip="Firmennamen auf weitere Dateien &#252;bertragen (Auswahl in &#220;bersicht)"/>
@@ -304,14 +307,13 @@
                                 <TextBox x:Name="TxtMainNewPrefix" Width="130" Margin="0,0,10,0" VerticalContentAlignment="Center"/>
                                 <TextBlock x:Name="TxtMainPrefixNewName" VerticalAlignment="Center" FontWeight="Bold" Foreground="Green" ToolTip="Neuer Dateiname nach Präfix-Umbenennung"/>
                                 <TextBlock x:Name="TxtMainSplitInfo" Text="Akt. Präfix: –  |  Suffix: –" VerticalAlignment="Center" Foreground="Gray" Margin="10,0,0,0" ToolTip="Aufteilung des aktuellen Dateinamens nach Trennzeichen/Segment-Index"/>
+                            </WrapPanel>
+                            <!-- Überschrift für Einfügepositionen -->
+                            <TextBlock Text="Einfügepositionen (aktivieren/deaktivieren)" FontWeight="Bold" Margin="0,6,0,0" HorizontalAlignment="Right"/>
                             </StackPanel>
 
-                            <!-- Überschrift für Einfügepositionen -->
-                            <TextBlock Grid.Row="4" Grid.Column="1" Text="Einfügepositionen (aktivieren/deaktivieren)" 
-                                       FontWeight="Bold" Margin="0,10,0,5" HorizontalAlignment="Right"/>
-
                             <TextBlock Text="Dokumenttyp (Auswahl):" Grid.Row="5" Grid.Column="0" Margin="0,4,5,5"/>
-                            <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
+                            <WrapPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
                                 <ComboBox x:Name="CmbDocType" IsEditable="True" IsTextSearchEnabled="False" SelectionChanged="CmbDocType_SelectionChanged" DropDownClosed="CmbDocType_DropDownClosed"
                                           LostFocus="EditableCombo_DropDownClosed" MaxDropDownHeight="180" KeyDown="EditableCombo_KeyDown" 
                                           Width="170" Margin="0,0,4,0"/>
@@ -323,10 +325,10 @@
                                     <ComboBoxItem Content="Position 3"/>
                                     <ComboBoxItem Content="Deaktiviert"/>
                                 </ComboBox>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Text="Nummer (Auswahl / editierbar):" Grid.Row="6" Grid.Column="0" Margin="0,4,5,5"/>
-                            <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
+                            <WrapPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
                                 <ComboBox x:Name="CmbNumberCandidates" IsEditable="True" IsTextSearchEnabled="False" SelectionChanged="CmbNumberCandidates_SelectionChanged" 
                                           LostFocus="CmbNumberCandidates_LostFocus" TextBoxBase.TextChanged="CmbNumberCandidates_TextChanged" 
                                           PreviewMouseLeftButtonDown="EditableCombo_PreviewMouseLeftButtonDown" 
@@ -367,10 +369,10 @@
                                         </TextBlock>
                                     </TextBox.ToolTip>
                                 </TextBox>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Text="Datum (Auswahl / editierbar):" Grid.Row="7" Grid.Column="0" Margin="0,4,5,5"/>
-                            <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
+                            <WrapPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
                                 <ComboBox x:Name="CmbDateCandidates" IsEditable="True" IsTextSearchEnabled="False" SelectionChanged="CmbDateCandidates_SelectionChanged" 
                                           LostFocus="CmbDateCandidates_LostFocus" TextBoxBase.TextChanged="CmbDateCandidates_TextChanged" 
                                           PreviewMouseLeftButtonDown="EditableCombo_PreviewMouseLeftButtonDown" 
@@ -399,7 +401,7 @@
                                     <ComboBoxItem Content="Position 3"/>
                                     <ComboBoxItem Content="Deaktiviert"/>
                                 </ComboBox>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Text="Trennzeichen:" Grid.Row="8" Grid.Column="0" Margin="0,4,5,5"/>
                             <TextBox x:Name="TxtDelimiter" Grid.Row="8" Grid.Column="1" Width="50" Text="_" TextChanged="DelimiterRelated_Changed" VerticalContentAlignment="Center" HorizontalAlignment="Left">
@@ -409,7 +411,7 @@
                             </TextBox>
 
                             <TextBlock Text="Segment-Index:" Grid.Row="9" Grid.Column="0" Margin="0,4,5,5"/>
-                            <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal">
+                            <WrapPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal">
                                 <TextBox x:Name="TxtSegmentIndex" Width="60" Text="2" TextChanged="TxtSegmentIndex_TextChanged" VerticalContentAlignment="Center" HorizontalAlignment="Left">
                                     <TextBox.ToolTip>
                                         <TextBlock Text="Gibt den Segment-Index an, an dem eingefügt wird."/>
@@ -445,7 +447,7 @@
                                     </CheckBox.ToolTip>
                                 </CheckBox>
                                 <TextBlock x:Name="TxtDelimiterFound" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="Blue" FontWeight="Bold"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Text="Einfügen:" Grid.Row="10" Grid.Column="0" Margin="0,4,5,5" VerticalAlignment="Top"/>
                             <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Vertical">
@@ -502,9 +504,22 @@
                             </TextBox>
                         </Grid>
                     </GroupBox>
-                
-                <!-- PDF Vorschau (jetzt oben, Grid.Row="1") -->
-                <GroupBox Header="Vorschau (PDF)" Grid.Row="1" MinHeight="200">
+                </ScrollViewer>
+                </TabItem>
+                </TabControl>
+
+                <!-- Seitenbereich links: Dokument (PDF- und Text-Vorschau) -->
+                <TabControl x:Name="MainDockLeft" Grid.Row="1" Grid.Column="0" Margin="0,10,4,10">
+                <TabItem x:Name="TabMainDoc" Header="Dokument">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="3*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                <!-- PDF Vorschau -->
+                <GroupBox Header="Vorschau (PDF)" Grid.Row="0" MinHeight="200">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -519,8 +534,7 @@
                             </ComboBox>
                             <Button x:Name="BtnOpenPdfInWindow" Content="In neuem Fenster öffnen" Margin="10,0,0,0" Click="BtnOpenPdfInWindow_Click" Width="160"/>
                         </StackPanel>
-                        <Grid Grid.Row="1">
-                            <wv2:WebView2 x:Name="PdfWebView" Visibility="Collapsed"/>
+                        <Grid x:Name="PdfViewHost" Grid.Row="1">
                             <Image x:Name="ImgPdfPreview" Stretch="Uniform" Visibility="Collapsed"/>
                             <ScrollViewer x:Name="PdfTextScroll" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                                 <TextBox x:Name="TxtPdfFallback" 
@@ -535,11 +549,11 @@
                 </GroupBox>
                 
                 <!-- GridSplitter für variable Größenanpassung -->
-                <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center" 
+                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center" 
                               Background="LightGray" ShowsPreview="True" Cursor="SizeNS"/>
-                
-                <!-- Text Vorschau (jetzt unten, Grid.Row="3") -->
-                <GroupBox Header="Vorschau (Text)" Grid.Row="3" MinHeight="100">
+
+                <!-- Text Vorschau (unten) -->
+                <GroupBox Header="Vorschau (Text)" Grid.Row="2" MinHeight="100">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -547,7 +561,7 @@
                         </Grid.RowDefinitions>
                         
                         <!-- Suchleiste -->
-                        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,5">
+                        <WrapPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,5">
                             <TextBlock Text="Suchen:" VerticalAlignment="Center" Margin="0,0,5,0"/>
                             <TextBox x:Name="TxtSearch" Width="200" VerticalContentAlignment="Center" TextChanged="TxtSearch_TextChanged"/>
                             <Button x:Name="BtnSearchPrevious" Content="◀ Zurück" Width="70" Margin="5,0,0,0" Click="BtnSearchPrevious_Click"/>
@@ -560,7 +574,7 @@
                             <Button x:Name="BtnHighlightDate" Content="🔍 Datum markieren" Width="130" Margin="0,0,5,0" Click="BtnHighlightDate_Click"/>
                             <Button x:Name="BtnClearHighlight" Content="✖ Zurücksetzen" Width="110" Margin="0,0,0,0" Click="BtnClearHighlight_Click"/>
                             <Button x:Name="BtnNumberFix" Content="🛠 TXT-Nummern korrigieren" Margin="5,0,0,0" Padding="6,0,6,0" Click="MenuNumberFix_Click" ToolTip="Wiederkehrende OCR-Fehler in Nummern in den TXT-Dateien korrigieren. Markierter Text bzw. die Belegnummer wird als Beispiel übernommen."/>
-                        </StackPanel>
+                        </WrapPanel>
                         
                         <!-- Text mit RichTextBox für Highlighting -->
                         <RichTextBox x:Name="TxtPreviewRich" 
@@ -574,12 +588,14 @@
                     </Grid>
                 </GroupBox>
             </Grid>
+                </TabItem>
+                </TabControl>
 
                 <!-- Präfix-Logik (unsichtbar; Bedienung über obere Leiste und Details-Box) -->
-                <local:PrefixRenamerControl x:Name="PrefixRenamerTab" Grid.Row="3" Grid.ColumnSpan="2" Visibility="Collapsed"/>
+                <local:PrefixRenamerControl x:Name="PrefixRenamerTab" Grid.Row="3" Grid.ColumnSpan="5" Visibility="Collapsed"/>
 
                 <!-- Status -->
-                <StatusBar Grid.Row="4" Grid.ColumnSpan="2">
+                <StatusBar Grid.Row="4" Grid.ColumnSpan="5">
                     <StatusBarItem>
                         <TextBlock x:Name="TxtStatus" Text="Bereit"/>
                     </StatusBarItem>
