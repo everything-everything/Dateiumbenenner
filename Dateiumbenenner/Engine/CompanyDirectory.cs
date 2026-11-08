@@ -72,7 +72,6 @@ namespace Dateiumbenenner.Engine
             }
             catch { }
             try { LoadGleif(); } catch { }
-            try { ImportBundledGleifPackage(); } catch (Exception ex) { Report("GLEIF-Paket: Fehler – " + ex.Message, 0); }
             Changed?.Invoke(null, EventArgs.Empty);
         });
 
@@ -327,11 +326,18 @@ namespace Dateiumbenenner.Engine
             return JsonSerializer.Deserialize<GleifInfo>(r.ReadToEnd()) ?? throw new InvalidOperationException("Quellangaben im Paket sind leer.");
         }
 
+        /// <summary>Quellangaben eines GLEIF-Pakets lesen (zur Anzeige vor dem Installieren).</summary>
+        public static GleifInfo ReadGleifPackageInfo(string zipPath)
+        {
+            using var zip = ZipFile.OpenRead(zipPath);
+            return ReadPackageInfo(zip);
+        }
+
         /// <summary>
-        /// GLEIF-Paket übernehmen. <paramref name="onlyIfNewer"/>: nur wenn sein Stand neuer ist als der vorhandene.
-        /// Liefert eine Meldung oder null, wenn nichts übernommen wurde.
+        /// GLEIF-Paket installieren – nur auf ausdrücklichen Wunsch des Benutzers (Menü bzw. Firmenverzeichnis), nie automatisch.
+        /// Danach wird der Datensatz wie nach einem Download bei jedem Start geladen. Liefert eine Meldung.
         /// </summary>
-        public static string? ImportGleifPackage(string zipPath, bool onlyIfNewer)
+        public static string ImportGleifPackage(string zipPath)
         {
             if (GleifJob is { IsCompleted: false }) throw new InvalidOperationException("Der GLEIF-Download läuft gerade.");
             if (!SecureStorage.IsUnlocked) throw new UnauthorizedAccessException("Daten sind gesperrt (Passwort erforderlich).");
@@ -339,8 +345,6 @@ namespace Dateiumbenenner.Engine
             using (var zip = ZipFile.OpenRead(zipPath))
             {
                 info = ReadPackageInfo(zip);
-                var current = GleifSource;
-                if (onlyIfNewer && _gleif.Names > 0 && current != null && current.Publish >= info.Publish) return null;
                 data = ReadPackageEntry(zip, GleifEntryData);
             }
             if (data.Length >= 6 && Encoding.ASCII.GetString(data, 0, 6) == "DUENC1")
@@ -356,24 +360,10 @@ namespace Dateiumbenenner.Engine
             if (info.Companies <= 0) info.Companies = layer.Names;
             SecureStorage.WriteAllText(GleifInfoPath, JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true }));
             _gleif = layer;
-            var msg = $"GLEIF-Paket übernommen: {info.Companies:N0} aktive deutsche Firmen (Stand {info.Publish:dd.MM.yyyy}).";
+            var msg = $"GLEIF-Paket installiert: {info.Companies:N0} aktive deutsche Firmen (Stand {info.Publish:dd.MM.yyyy}).";
             Report(msg, 100);
             Changed?.Invoke(null, EventArgs.Empty);
             return msg;
-        }
-
-        /// <summary>Beim Start: neuestes GleifDaten*.zip neben dem Programm oder im Datenordner übernehmen, falls neuer.</summary>
-        private static void ImportBundledGleifPackage()
-        {
-            if (!SecureStorage.IsUnlocked) return;
-            var best = new[] { AppContext.BaseDirectory, ProfileManager.RootDirectory }
-                .Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase)
-                .SelectMany(d => Directory.GetFiles(d, GleifPackagePrefix + "*.zip"))
-                .Select(f => { try { using var z = ZipFile.OpenRead(f); return (File: f, Info: ReadPackageInfo(z)); } catch { return (File: f, Info: (GleifInfo?)null); } })
-                .Where(x => x.Info != null)
-                .OrderByDescending(x => x.Info!.Publish)
-                .FirstOrDefault();
-            if (best.Info != null) ImportGleifPackage(best.File, true);
         }
 
         public const string GleifApi = "https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest";

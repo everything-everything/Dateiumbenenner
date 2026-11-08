@@ -105,6 +105,12 @@ namespace Dateiumbenenner
             new CompanyDirectoryWindow(this) { Owner = this }.ShowDialog();
         }
 
+        private async void MenuGleifPackageInstall_Click(object sender, RoutedEventArgs e)
+        {
+            var msg = await CompanyDirectoryWindow.InstallPackageAsync(this);
+            if (msg != null) FlashCompanyText(msg);
+        }
+
         // ---------- Gegenprüfung (Microsoft Recognizers-Text) ----------
 
         private static string CrossCheckFile => Path.Combine(Plugins.PluginManager.BaseDirectory, "crosscheck.flag");

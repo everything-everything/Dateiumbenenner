@@ -30,8 +30,8 @@ namespace Dateiumbenenner
         private readonly WpfButton _btnGleif = new() { Content = "GLEIF herunterladen / aktualisieren (~480 MB)…", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 6, 0) };
         private readonly WpfButton _btnGleifRemove = new() { Content = "GLEIF entfernen", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 6, 0) };
         private readonly WpfButton _btnCancel = new() { Content = "Abbrechen", Padding = new Thickness(8, 2, 8, 2) };
-        private readonly WpfButton _btnPackLoad = new() { Content = "GLEIF-Paket laden…", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 6, 0),
-            ToolTip = "GleifDaten-….zip übernehmen – ohne Download, z. B. auf Rechnern ohne Internet.\nLiegt das Paket neben Dateiumbenenner.exe, wird es beim Start automatisch übernommen, wenn es neuer ist." };
+        private readonly WpfButton _btnPackLoad = new() { Content = "GLEIF-Paket installieren…", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 6, 0),
+            ToolTip = "GleifDaten-….zip auswählen und installieren – ohne Download, z. B. auf Rechnern ohne Internet.\nWie bei Plugins nur manuell; danach wird der Datensatz bei jedem Start geladen." };
         private readonly WpfButton _btnPackSave = new() { Content = "Als GLEIF-Paket speichern…", Padding = new Thickness(8, 2, 8, 2),
             ToolTip = "Das geladene GLEIF-Verzeichnis als GleifDaten-….zip speichern (unverschlüsselt, mit Lizenzhinweis), um es an andere Rechner weiterzugeben." };
         private readonly WpfTextBox _testName = new() { Width = 260, Margin = new Thickness(0, 0, 6, 0) };
@@ -163,16 +163,57 @@ namespace Dateiumbenenner
 
         private async System.Threading.Tasks.Task LoadPackageAsync()
         {
-            var dlg = new Microsoft.Win32.OpenFileDialog { Title = "GLEIF-Paket laden", Filter = "GLEIF-Paket (GleifDaten*.zip)|GleifDaten*.zip|ZIP-Dateien (*.zip)|*.zip" };
-            if (dlg.ShowDialog(this) != true) return;
             _btnPackLoad.IsEnabled = false;
+            string? msg = null;
+            try { msg = await InstallPackageAsync(this); }
+            finally { Refresh(); }
+            if (msg != null) _gleifStatus.Text = msg;
+        }
+
+        /// <summary>GLEIF-Paket auswählen, Angaben anzeigen, nach Bestätigung installieren (wie "Plugin importieren"). Liefert die Meldung oder null.</summary>
+        public static async System.Threading.Tasks.Task<string?> InstallPackageAsync(Window owner)
+        {
+            const string caption = "GLEIF-Paket installieren";
+            if (CompanyDirectory.GleifJob is { IsCompleted: false })
+            {
+                WpfMessageBox.Show(owner, "Der GLEIF-Download läuft gerade. Bitte warten oder abbrechen.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                return null;
+            }
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = caption, Filter = "GLEIF-Paket (GleifDaten*.zip)|GleifDaten*.zip|ZIP-Dateien (*.zip)|*.zip",
+                ClientGuid = new Guid("6C2F1B7E-0D4A-4E58-9B3C-2A71E5F09D14")
+            };
+            if (dlg.ShowDialog(owner) != true) return null;
+            CompanyDirectory.GleifInfo info;
+            try { info = await System.Threading.Tasks.Task.Run(() => CompanyDirectory.ReadGleifPackageInfo(dlg.FileName)); }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(owner, "Die Datei ist kein gültiges GLEIF-Paket:\n" + ex.Message, caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return null;
+            }
+            await CompanyDirectory.EnsureLoadedAsync();
+            var current = CompanyDirectory.GleifCount > 0 ? CompanyDirectory.GleifSource : null;
+            var text = $"Paket: {System.IO.Path.GetFileName(dlg.FileName)}\nStand: {info.Publish:dd.MM.yyyy}"
+                + (info.Companies > 0 ? $", {info.Companies:N0} aktive deutsche Firmen" : "")
+                + "\nQuelle: GLEIF-Verzeichnis (CC0 1.0), nur Name, PLZ und Ort.\n\n"
+                + (current == null ? "Bisher ist kein GLEIF-Verzeichnis installiert."
+                   : $"Installiert ist der Stand vom {current.Publish:dd.MM.yyyy} ({current.Companies:N0} Firmen) – er wird ersetzt.")
+                + (current != null && current.Publish > info.Publish ? "\n\nAchtung: Das Paket ist ÄLTER als der installierte Stand." : "")
+                + "\n\nDer Inhalt wird vor der Übernahme geprüft. Danach wird das Verzeichnis bei jedem Start geladen.\n\nJetzt installieren?";
+            var icon = current != null && current.Publish > info.Publish ? MessageBoxImage.Warning : MessageBoxImage.Question;
+            if (WpfMessageBox.Show(owner, text, caption, MessageBoxButton.YesNo, icon, MessageBoxResult.No) != MessageBoxResult.Yes) return null;
             try
             {
-                var msg = await System.Threading.Tasks.Task.Run(() => CompanyDirectory.ImportGleifPackage(dlg.FileName, false));
-                _gleifStatus.Text = msg ?? "";
+                var msg = await System.Threading.Tasks.Task.Run(() => CompanyDirectory.ImportGleifPackage(dlg.FileName));
+                WpfMessageBox.Show(owner, msg, caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                return msg;
             }
-            catch (Exception ex) { WpfMessageBox.Show(this, "GLEIF-Paket konnte nicht übernommen werden:\n" + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Warning); }
-            finally { Refresh(); }
+            catch (Exception ex)
+            {
+                WpfMessageBox.Show(owner, "GLEIF-Paket konnte nicht installiert werden – der bisherige Stand bleibt erhalten:\n" + ex.Message, caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return null;
+            }
         }
 
         private async System.Threading.Tasks.Task SavePackageAsync()

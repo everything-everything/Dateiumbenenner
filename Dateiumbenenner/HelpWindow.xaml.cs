@@ -692,8 +692,8 @@ Menü Extras → ""Firmenverzeichnis (eigene DB, GLEIF)..."". Der Stand wird rec
 
 # GLEIF-Paket (ohne Download)
 * ""Als GLEIF-Paket speichern..."" legt das geladene Verzeichnis als GleifDaten-<Stand>.zip ab (unverschlüsselt, mit Lizenzhinweis) – zur Weitergabe an andere Rechner, z. B. ohne Internet.
-* ""GLEIF-Paket laden..."" übernimmt ein solches Paket; der Inhalt wird vorher auf Plausibilität geprüft und bei eingerichtetem Passwortschutz verschlüsselt gespeichert.
-* Liegt ein GleifDaten*.zip neben Dateiumbenenner.exe oder im Ordner Daten, wird es beim Start automatisch übernommen, wenn sein Stand neuer ist als der vorhandene.
+* ""GLEIF-Paket installieren..."" (im Firmenverzeichnis oder Menü Extras) wählt ein solches Paket aus, zeigt Stand und Anzahl Firmen und installiert es erst nach Rückfrage. Der Inhalt wird vorher auf Plausibilität geprüft und bei eingerichtetem Passwortschutz verschlüsselt gespeichert.
+* Wie bei Plugins wird nur manuell installiert – ZIP-Dateien werden nie automatisch eingelesen. Einmal installiert, wird das Verzeichnis bei jedem Start geladen.
 * Die GLEIF-Daten stehen unter CC0 1.0 und dürfen frei weitergegeben werden. Das Paket stammt nicht von GLEIF und wird dort nicht geprüft; Angaben ohne Gewähr.
 
 # Testfeld

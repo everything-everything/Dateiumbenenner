@@ -23,6 +23,7 @@
             <MenuItem Header="_PLZ-Verzeichnis (DE) prüfen und aktualisieren..." Click="MenuPlzUpdate_Click" ToolTip="Eine PLZ-Liste ist mitgeliefert. Optional: Aktualisierung von download.geonames.org mit Prüfung und Vorschau vor der Übernahme."/>
             <MenuItem Header="PLZ-Verzeichnis: _mitgelieferte Liste verwenden..." Click="MenuPlzRestore_Click"/>
             <MenuItem Header="_Firmenverzeichnis (eigene DB, GLEIF)..." Click="MenuCompanyDirectory_Click" ToolTip="Bekannte Firmen aus eigener Datenbank, Gelerntem und optional dem freien GLEIF-Verzeichnis geben bei der Firmenerkennung Pluspunkte – besonders, wenn ihre PLZ im Beleg steht."/>
+            <MenuItem Header="GLEIF-Paket _installieren..." Click="MenuGleifPackageInstall_Click" ToolTip="GleifDaten-….zip auswählen und installieren (ohne Download). Wie bei Plugins nur manuell; danach wird das Verzeichnis bei jedem Start geladen."/>
             <MenuItem x:Name="MenuCrossCheck" Header="Hintergrund-_Gegenprüfung Datum/Betrag (Test)" IsCheckable="True" Click="MenuCrossCheck_Click" ToolTip="Prüft Datum und Betrag aller Belege im Hintergrund mit Microsoft Recognizers-Text als Zweitmeinung. Ändert nichts – Abweichungen werden in der Spalte „Prüf.“ markiert."/>
             <Separator/>
             <MenuItem x:Name="MenuClearOnExit" Header="Datenbank und _Lerndaten beim Schließen leeren" IsCheckable="True" Click="MenuClearOnExit_Click" ToolTip="Beim Beenden werden Dokument-Datenbank und gelernte Daten des aktiven Profils gelöscht. Einstellungen bleiben erhalten."/>

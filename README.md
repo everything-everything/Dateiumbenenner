@@ -45,8 +45,8 @@ Das Plugin gehört nicht in das Hauptprogramm-ZIP und wird nicht automatisch hoc
 
 Mit `-GleifDaten` entsteht zusätzlich `release\GleifDaten-<Version>.zip` mit dem
 GLEIF-Firmenverzeichnis (aktive deutsche Firmen, CC0 1.0) aus der lokalen `gleif_de.dat`
-(oder `-GleifDatenOrdner <Ordner>`). Das Paket wird nicht hochgeladen; neben
-`Dateiumbenenner.exe` abgelegt, übernimmt das Programm es beim Start, wenn es neuer ist.
+(oder `-GleifDatenOrdner <Ordner>`). Das Paket wird nicht hochgeladen und im Programm
+nur manuell installiert (Extras → „GLEIF-Paket installieren…“), nie automatisch.
 
 Für das Plugin ausschließlich das vom Release-Build erzeugte ZIP aus
 `Plugins\IniGeneratorPlugin\dist` verwenden, nicht den vollständigen `bin`- oder
