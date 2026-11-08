@@ -3,7 +3,11 @@
 param(
     [string]$Version = "1.0.0",
     [string]$Subject = 'CN=everything-everything, E="85025743+everything-everything@users.noreply.github.com"',
-    [switch]$IncludeIniGeneratorPlugin
+    [switch]$IncludeIniGeneratorPlugin,
+    # Zusätzliches Paket release\GleifDaten-<Version>.zip (wird nicht hochgeladen)
+    [switch]$GleifDaten,
+    # Ordner mit gleif_de.dat (Standard: neueste unter Dateiumbenenner\bin\*\*\Daten)
+    [string]$GleifDatenOrdner = ""
 )
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
@@ -84,11 +88,44 @@ if ($IncludeIniGeneratorPlugin) {
     Write-Host "Separates Plugin-Paket: $pluginZip"
 }
 
+if ($GleifDaten) {
+    if ($GleifDatenOrdner) { $gleifFile = Get-Item -LiteralPath (Join-Path $GleifDatenOrdner "gleif_de.dat") }
+    else {
+        $gleifFile = Get-ChildItem (Join-Path $root "Dateiumbenenner\bin") -Recurse -Filter "gleif_de.dat" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    }
+    if (-not $gleifFile) { throw "Keine gleif_de.dat gefunden. Im Programm GLEIF laden oder -GleifDatenOrdner angeben." }
+    $infoFile = "$($gleifFile.FullName).quelle.json"
+    if (-not (Test-Path -LiteralPath $infoFile)) { throw "Quellangaben fehlen: $infoFile" }
+    $magic = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($gleifFile.FullName), 0, 6)
+    if ($magic -eq "DUENC1" -or [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($infoFile), 0, 6) -eq "DUENC1") {
+        throw "GLEIF-Daten sind verschlüsselt. Im Programm Extras > Firmenverzeichnis > 'Als GLEIF-Paket speichern' verwenden."
+    }
+    $info = Get-Content -LiteralPath $infoFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $gleifZip = Join-Path $root "release\GleifDaten-$Version.zip"
+    $stage = Join-Path ([IO.Path]::GetTempPath()) ("gleifpack_" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory $stage | Out-Null
+    try {
+        Copy-Item -LiteralPath $gleifFile.FullName, $infoFile -Destination $stage
+        $lic = "Enthält Daten aus dem LEI-Verzeichnis der Global Legal Entity Identifier Foundation (GLEIF), www.gleif.org.`r`n" +
+            "Die Daten stehen unter CC0 1.0 Universal (https://creativecommons.org/publicdomain/zero/1.0/).`r`n" +
+            "Auszug: nur aktive Firmen mit Sitz in Deutschland (Name, PLZ, Ort). Ohne Gewähr für Richtigkeit, Vollständigkeit und Aktualität.`r`n" +
+            "Dieses Paket wird nicht von GLEIF herausgegeben oder geprüft.`r`n"
+        [IO.File]::WriteAllText((Join-Path $stage "LIZENZ-GLEIF.txt"), $lic, (New-Object Text.UTF8Encoding($false)))
+        if (Test-Path $gleifZip) { Remove-Item $gleifZip }
+        Compress-Archive -Path "$stage\*" -DestinationPath $gleifZip
+    } finally { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
+    "{0}  {1}" -f (Get-FileHash $gleifZip -Algorithm SHA256).Hash.ToLower(), (Split-Path $gleifZip -Leaf) | Set-Content "$gleifZip.sha256" -Encoding UTF8
+    $stand = [datetime]$info.Publish
+    Write-Host ("GLEIF-Paket (nicht hochladen): {0}  Stand {1:dd.MM.yyyy}, {2:N0} Firmen" -f $gleifZip, $stand, $info.Companies)
+    if ($stand -lt (Get-Date).AddDays(-60)) { Write-Warning "GLEIF-Stand ist älter als 60 Tage – vorher im Programm aktualisieren?" }
+}
+
 # SIG # Begin signature block
 # MIIH/AYJKoZIhvcNAQcCoIIH7TCCB+kCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDBsXia/v8mpe3z
-# xcs2rMWuq07pHc7iOCj3LuH+zodiNaCCBKQwggSgMIIDCKADAgECAhBDYujFJsGA
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC7M763ZYFaC2aH
+# 0yw+IKj+QJEQgzBS6E705sDEvTJi76CCBKQwggSgMIIDCKADAgECAhBDYujFJsGA
 # mEtWv63vIZ0LMA0GCSqGSIb3DQEBCwUAMGgxRjBEBgkqhkiG9w0BCQEWNzg1MDI1
 # NzQzK2V2ZXJ5dGhpbmctZXZlcnl0aGluZ0B1c2Vycy5ub3JlcGx5LmdpdGh1Yi5j
 # b20xHjAcBgNVBAMMFWV2ZXJ5dGhpbmctZXZlcnl0aGluZzAeFw0yNjEwMDIyMjMz
@@ -118,14 +155,14 @@ if ($IncludeIniGeneratorPlugin) {
 # Yi5jb20xHjAcBgNVBAMMFWV2ZXJ5dGhpbmctZXZlcnl0aGluZwIQQ2LoxSbBgJhL
 # Vr+t7yGdCzANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgACh
 # AoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAM
-# BgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAn6eRTw3KAkdUMoteAo7DzMrUx
-# GfUCqTs9XgOlHoKjqTANBgkqhkiG9w0BAQEFAASCAYBI4YD/Slc7GiSCcJitH3mm
-# JK4BTxJLTwK6i9Ss1aXo6o7l0X/nElXFHuRUoq5mhhzFE4ZQZYbeYbrQVF5lT8w2
-# tvB42FACTAu+eLQ0kZ+PWq+tYTUGUh+tXH5GNKbSsUGSwV2gLPItAubdaia+mugC
-# 6bt7RNhNpn438kPfHyKONRTYj2yecqJRviK81ce/hKjTeoK6Co351kj18gv87zz1
-# GZ1LU9ufzaQxXQnC0RUNLV1nzkHded59cwhH1fxMxPQuGDyra+6MBA7PjoabZp7w
-# JFmQLxn+SCMUjEy87lYom7pHHFbddpmKqbkWyD10H991Qwv6X5YsZnJ9JXzuHLUa
-# GDEOXueNYdx9iyDMbfqCIv8R5S873+HM1RzxmrmACeaEVbFPf4+opWKcaqGViUCw
-# k81+SldDZs3BpfYCX6BD7HtMGqqht8lfeaQ2L7nw2VDkv/ZAtcwDSVPsg87AZlwU
-# 4S6XLlkSU9ZS++EnEaKuHo6frRZ4BEBqW5m0rS4rweE=
+# BgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDVqdZFHrynrgV0bok/hhsK6sLA
+# onGGwW1k4CzWxnYiBTANBgkqhkiG9w0BAQEFAASCAYCqKjw/MUCoACRDhH3rsEAU
+# tkJqcUZLNSeqZQxobrYxl/B0L1d5OBx3xiXYxigvP51iAXGk6xyiHN5dl4UZg6Tf
+# ezINw9GFnUX/JP+G74qr14Cp8/gtxn7u0+MYOHlala30XOYsVeKAXAxnGlX93Epg
+# PKY5Lwj1fk8fmwI9rewwxEBhp4Y51b267m3fUVjqqLrAAXwU8SyCHdqyN2OeCv0p
+# wqc41luKKCAywJWFRvCK/nMgA35ZATXFEdJ1mtr4RmzPIj3cZAwAOC4lwmC+KEcp
+# s4VeG+/50Ktx9ptGBTF+DiSvqKXlphccRXUcAnFZH4LmIjm8Y6OeVwwOTUqBEy2M
+# 9P/+Kam21KENgs1bSjm+0NENYhtw4UXbIUBdabSKR6NYb2LEvEFbnSYRphf5fvHM
+# A3VSurPh1WxK9WERmJZlBmWHd7Czh7aEZOvkR+gFqETXbU2UF2Ki/tcMQszrxjvq
+# WQWQ2spfqA1cqmuzGyxoErwfyRc7LLtSh/LH7YosBIo=
 # SIG # End signature block

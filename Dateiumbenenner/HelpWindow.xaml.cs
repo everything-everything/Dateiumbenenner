@@ -690,6 +690,12 @@ Menü Extras → ""Firmenverzeichnis (eigene DB, GLEIF)..."". Der Stand wird rec
 * Gespeichert werden nur aktive deutsche Firmen (Name, PLZ, Ort) als kompakte Datei Daten\gleif_de.dat (ca. 5 MB) für alle Profile; die heruntergeladene Datei wird danach gelöscht.
 * ""GLEIF entfernen"" löscht die Datei wieder.
 
+# GLEIF-Paket (ohne Download)
+* ""Als GLEIF-Paket speichern..."" legt das geladene Verzeichnis als GleifDaten-<Stand>.zip ab (unverschlüsselt, mit Lizenzhinweis) – zur Weitergabe an andere Rechner, z. B. ohne Internet.
+* ""GLEIF-Paket laden..."" übernimmt ein solches Paket; der Inhalt wird vorher auf Plausibilität geprüft und bei eingerichtetem Passwortschutz verschlüsselt gespeichert.
+* Liegt ein GleifDaten*.zip neben Dateiumbenenner.exe oder im Ordner Daten, wird es beim Start automatisch übernommen, wenn sein Stand neuer ist als der vorhandene.
+* Die GLEIF-Daten stehen unter CC0 1.0 und dürfen frei weitergegeben werden. Das Paket stammt nicht von GLEIF und wird dort nicht geprüft; Angaben ohne Gewähr.
+
 # Testfeld
 Firmenname und optional PLZ eingeben: angezeigt werden Vergleichsschlüssel, Pluspunkte und gefundene Einträge mit Quelle.
 
@@ -784,7 +790,7 @@ Dateiumbenenner steht unter der MIT-Lizenz (freie Software). Copyright (c) 2026 
 # Mitgelieferte Daten
 > GeoNames-Postleitzahlen DE   CC BY 4.0, unverändert eingebettet
 > OCR-Fachwortliste            MIT, eigene Zusammenstellung
-> GLEIF-Firmenverzeichnis      CC0 1.0, optionaler Download
+> GLEIF-Firmenverzeichnis      CC0 1.0, optionaler Download oder Paket GleifDaten-*.zip
 
 Postleitzahlen-Daten von GeoNames (www.geonames.org), lizenziert unter Creative Commons Attribution 4.0 (creativecommons.org/licenses/by/4.0). Siehe [[plz|PLZ-Verzeichnis]].
 

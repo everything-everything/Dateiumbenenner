@@ -30,6 +30,10 @@ namespace Dateiumbenenner
         private readonly WpfButton _btnGleif = new() { Content = "GLEIF herunterladen / aktualisieren (~480 MB)…", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 6, 0) };
         private readonly WpfButton _btnGleifRemove = new() { Content = "GLEIF entfernen", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 6, 0) };
         private readonly WpfButton _btnCancel = new() { Content = "Abbrechen", Padding = new Thickness(8, 2, 8, 2) };
+        private readonly WpfButton _btnPackLoad = new() { Content = "GLEIF-Paket laden…", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 6, 0),
+            ToolTip = "GleifDaten-….zip übernehmen – ohne Download, z. B. auf Rechnern ohne Internet.\nLiegt das Paket neben Dateiumbenenner.exe, wird es beim Start automatisch übernommen, wenn es neuer ist." };
+        private readonly WpfButton _btnPackSave = new() { Content = "Als GLEIF-Paket speichern…", Padding = new Thickness(8, 2, 8, 2),
+            ToolTip = "Das geladene GLEIF-Verzeichnis als GleifDaten-….zip speichern (unverschlüsselt, mit Lizenzhinweis), um es an andere Rechner weiterzugeben." };
         private readonly WpfTextBox _testName = new() { Width = 260, Margin = new Thickness(0, 0, 6, 0) };
         private readonly WpfTextBox _testZip = new() { Width = 70, Margin = new Thickness(0, 0, 6, 0), ToolTip = "Optional: PLZ, die im Beleg steht" };
         private readonly TextBlock _testResult = new() { TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Consolas"), Margin = new Thickness(0, 6, 0, 0) };
@@ -57,6 +61,9 @@ namespace Dateiumbenenner
             var buttons = new StackPanel { Orientation = WpfOrientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
             buttons.Children.Add(_btnDb); buttons.Children.Add(_btnGleif); buttons.Children.Add(_btnGleifRemove); buttons.Children.Add(_btnCancel);
             src.Children.Add(buttons);
+            var packButtons = new StackPanel { Orientation = WpfOrientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+            packButtons.Children.Add(_btnPackLoad); packButtons.Children.Add(_btnPackSave);
+            src.Children.Add(packButtons);
             src.Children.Add(_progress);
             src.Children.Add(_gleifStatus);
             root.Children.Add(new GroupBox { Header = "Quellen", Content = src, Padding = new Thickness(6), Margin = new Thickness(0, 0, 0, 10) });
@@ -90,6 +97,8 @@ namespace Dateiumbenenner
                 Refresh();
             };
             _btnCancel.Click += (_, _) => CompanyDirectory.CancelGleif();
+            _btnPackLoad.Click += async (_, _) => await LoadPackageAsync();
+            _btnPackSave.Click += async (_, _) => await SavePackageAsync();
             _testName.TextChanged += (_, _) => UpdateTest();
             _testZip.TextChanged += (_, _) => UpdateTest();
 
@@ -129,6 +138,8 @@ namespace Dateiumbenenner
             bool running = CompanyDirectory.GleifJob is { IsCompleted: false };
             _btnGleif.IsEnabled = !running;
             _btnGleifRemove.IsEnabled = !running && CompanyDirectory.GleifCount > 0;
+            _btnPackLoad.IsEnabled = !running;
+            _btnPackSave.IsEnabled = !running && CompanyDirectory.GleifCount > 0;
             _btnCancel.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
             _progress.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
             _progress.Value = CompanyDirectory.GleifProgress;
@@ -148,6 +159,41 @@ namespace Dateiumbenenner
             if (WpfMessageBox.Show(this, text, Title, MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             CompanyDirectory.StartGleifImport();
             Refresh();
+        }
+
+        private async System.Threading.Tasks.Task LoadPackageAsync()
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog { Title = "GLEIF-Paket laden", Filter = "GLEIF-Paket (GleifDaten*.zip)|GleifDaten*.zip|ZIP-Dateien (*.zip)|*.zip" };
+            if (dlg.ShowDialog(this) != true) return;
+            _btnPackLoad.IsEnabled = false;
+            try
+            {
+                var msg = await System.Threading.Tasks.Task.Run(() => CompanyDirectory.ImportGleifPackage(dlg.FileName, false));
+                _gleifStatus.Text = msg ?? "";
+            }
+            catch (Exception ex) { WpfMessageBox.Show(this, "GLEIF-Paket konnte nicht übernommen werden:\n" + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Warning); }
+            finally { Refresh(); }
+        }
+
+        private async System.Threading.Tasks.Task SavePackageAsync()
+        {
+            var stand = CompanyDirectory.GleifSource?.Publish ?? DateTime.Today;
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Als GLEIF-Paket speichern", Filter = "ZIP-Dateien (*.zip)|*.zip", DefaultExt = ".zip",
+                FileName = $"{CompanyDirectory.GleifPackagePrefix}-{stand:yyyy-MM-dd}.zip"
+            };
+            if (dlg.ShowDialog(this) != true) return;
+            _btnPackSave.IsEnabled = false;
+            string? done = null;
+            try
+            {
+                await System.Threading.Tasks.Task.Run(() => CompanyDirectory.ExportGleifPackage(dlg.FileName));
+                done = $"GLEIF-Paket gespeichert: {dlg.FileName}";
+            }
+            catch (Exception ex) { WpfMessageBox.Show(this, "GLEIF-Paket konnte nicht gespeichert werden:\n" + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Warning); }
+            finally { Refresh(); }
+            if (done != null) _gleifStatus.Text = done;
         }
 
         private void UpdateTest()

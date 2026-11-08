@@ -72,6 +72,7 @@ namespace Dateiumbenenner.Engine
             }
             catch { }
             try { LoadGleif(); } catch { }
+            try { ImportBundledGleifPackage(); } catch (Exception ex) { Report("GLEIF-Paket: Fehler – " + ex.Message, 0); }
             Changed?.Invoke(null, EventArgs.Empty);
         });
 
@@ -265,6 +266,114 @@ namespace Dateiumbenenner.Engine
             if (File.Exists(GleifInfoPath)) File.Delete(GleifInfoPath);
             _gleif = Layer.Empty;
             Changed?.Invoke(null, EventArgs.Empty);
+        }
+
+        // ---------- GLEIF-Paket (GleifDaten-*.zip) zur Weitergabe ohne Download ----------
+
+        public const string GleifPackagePrefix = "GleifDaten";
+        private const string GleifEntryData = "gleif_de.dat", GleifEntryInfo = "gleif_de.dat.quelle.json", GleifEntryLicense = "LIZENZ-GLEIF.txt";
+        private const long MaxGleifPackageEntryBytes = 200L * 1024 * 1024;
+        public const string GleifLicenseText =
+            "Enthält Daten aus dem LEI-Verzeichnis der Global Legal Entity Identifier Foundation (GLEIF), www.gleif.org.\r\n" +
+            "Die Daten stehen unter CC0 1.0 Universal (https://creativecommons.org/publicdomain/zero/1.0/).\r\n" +
+            "Auszug: nur aktive Firmen mit Sitz in Deutschland (Name, PLZ, Ort). Ohne Gewähr für Richtigkeit, Vollständigkeit und Aktualität.\r\n" +
+            "Dieses Paket wird nicht von GLEIF herausgegeben oder geprüft.\r\n";
+
+        /// <summary>Geladenes GLEIF-Verzeichnis unverschlüsselt als Paket speichern (für Rechner ohne Download).</summary>
+        public static void ExportGleifPackage(string zipPath)
+        {
+            if (!File.Exists(GleifPath)) throw new InvalidOperationException("Es ist kein GLEIF-Verzeichnis geladen.");
+            var data = SecureStorage.ReadAllBytes(GleifPath);
+            var info = GleifSource ?? new GleifInfo { Publish = File.GetLastWriteTime(GleifPath), Retrieved = File.GetLastWriteTime(GleifPath), Companies = GleifCount };
+            var tmp = zipPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                using (var zip = ZipFile.Open(tmp, ZipArchiveMode.Create))
+                {
+                    void Add(string name, byte[] bytes, CompressionLevel level)
+                    {
+                        using var s = zip.CreateEntry(name, level).Open();
+                        s.Write(bytes, 0, bytes.Length);
+                    }
+                    Add(GleifEntryData, data, CompressionLevel.NoCompression);
+                    Add(GleifEntryInfo, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true })), CompressionLevel.Optimal);
+                    Add(GleifEntryLicense, Encoding.UTF8.GetBytes(GleifLicenseText), CompressionLevel.Optimal);
+                }
+                File.Move(tmp, zipPath, true);
+            }
+            finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
+        }
+
+        private static byte[] ReadPackageEntry(ZipArchive zip, string name)
+        {
+            var e = zip.GetEntry(name) ?? throw new InvalidOperationException($"{name} fehlt im Paket.");
+            if (e.Length <= 0 || e.Length > MaxGleifPackageEntryBytes) throw new InvalidOperationException($"{name}: unplausible Größe ({e.Length:N0} Byte).");
+            using var s = e.Open();
+            using var ms = new MemoryStream((int)e.Length);
+            var buf = new byte[1 << 16]; int n; long total = 0;
+            while ((n = s.Read(buf, 0, buf.Length)) > 0)
+            {
+                total += n;
+                if (total > MaxGleifPackageEntryBytes) throw new InvalidOperationException($"{name}: Paket ist beschädigt.");
+                ms.Write(buf, 0, n);
+            }
+            return ms.ToArray();
+        }
+
+        private static GleifInfo ReadPackageInfo(ZipArchive zip)
+        {
+            var bytes = ReadPackageEntry(zip, GleifEntryInfo);
+            using var r = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, true);
+            return JsonSerializer.Deserialize<GleifInfo>(r.ReadToEnd()) ?? throw new InvalidOperationException("Quellangaben im Paket sind leer.");
+        }
+
+        /// <summary>
+        /// GLEIF-Paket übernehmen. <paramref name="onlyIfNewer"/>: nur wenn sein Stand neuer ist als der vorhandene.
+        /// Liefert eine Meldung oder null, wenn nichts übernommen wurde.
+        /// </summary>
+        public static string? ImportGleifPackage(string zipPath, bool onlyIfNewer)
+        {
+            if (GleifJob is { IsCompleted: false }) throw new InvalidOperationException("Der GLEIF-Download läuft gerade.");
+            if (!SecureStorage.IsUnlocked) throw new UnauthorizedAccessException("Daten sind gesperrt (Passwort erforderlich).");
+            GleifInfo info; byte[] data;
+            using (var zip = ZipFile.OpenRead(zipPath))
+            {
+                info = ReadPackageInfo(zip);
+                var current = GleifSource;
+                if (onlyIfNewer && _gleif.Names > 0 && current != null && current.Publish >= info.Publish) return null;
+                data = ReadPackageEntry(zip, GleifEntryData);
+            }
+            if (data.Length >= 6 && Encoding.ASCII.GetString(data, 0, 6) == "DUENC1")
+                throw new InvalidOperationException("Die Daten im Paket sind verschlüsselt und auf diesem Rechner nicht lesbar.");
+            Layer layer;
+            try { layer = Build(ReadGleifLines(data)); }
+            catch (Exception ex) when (ex is InvalidDataException or IOException) { throw new InvalidOperationException("Die Daten im Paket sind beschädigt.", ex); }
+            if (layer.Names < MinGleifCompanies || layer.Names > 2 * MaxGleifCompanies)
+                throw new InvalidOperationException($"Unplausible Anzahl Firmen im Paket: {layer.Names:N0}. Nichts übernommen.");
+            Directory.CreateDirectory(Path.GetDirectoryName(GleifPath)!);
+            SecureStorage.WriteAllBytes(GleifPath, data);
+            info.Retrieved = DateTime.Now;
+            if (info.Companies <= 0) info.Companies = layer.Names;
+            SecureStorage.WriteAllText(GleifInfoPath, JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true }));
+            _gleif = layer;
+            var msg = $"GLEIF-Paket übernommen: {info.Companies:N0} aktive deutsche Firmen (Stand {info.Publish:dd.MM.yyyy}).";
+            Report(msg, 100);
+            Changed?.Invoke(null, EventArgs.Empty);
+            return msg;
+        }
+
+        /// <summary>Beim Start: neuestes GleifDaten*.zip neben dem Programm oder im Datenordner übernehmen, falls neuer.</summary>
+        private static void ImportBundledGleifPackage()
+        {
+            if (!SecureStorage.IsUnlocked) return;
+            var best = new[] { AppContext.BaseDirectory, ProfileManager.RootDirectory }
+                .Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase)
+                .SelectMany(d => Directory.GetFiles(d, GleifPackagePrefix + "*.zip"))
+                .Select(f => { try { using var z = ZipFile.OpenRead(f); return (File: f, Info: ReadPackageInfo(z)); } catch { return (File: f, Info: (GleifInfo?)null); } })
+                .Where(x => x.Info != null)
+                .OrderByDescending(x => x.Info!.Publish)
+                .FirstOrDefault();
+            if (best.Info != null) ImportGleifPackage(best.File, true);
         }
 
         public const string GleifApi = "https://goldencopy.gleif.org/api/v2/golden-copies/publishes/latest";
