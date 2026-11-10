@@ -17,7 +17,7 @@ namespace Dateiumbenenner
     {
         public const string FileName = "dokumente.db";
         /// <summary>Erhöhen, wenn sich die Erkennungslogik ändert – dann werden alle Dateien neu ausgewertet.</summary>
-        public const int ExtractorVersion = 3;
+        public const int ExtractorVersion = 4;
 
         private static readonly object Sync = new();
         private static string? _connString;
@@ -354,11 +354,12 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
             try
             {
                 var full = Path.GetFullPath(path);
-                // Noch nicht geschriebener Stand hat Vorrang (wird mit der aktuellen Datei geschrieben)
+                // Noch nicht geschriebener Stand gehoert zum Dateistand beim Einreihen, nicht zum spaeteren Schreibzeitpunkt.
                 PendingDoc? pd;
                 lock (PendingSync) PendingDocs.TryGetValue(full, out pd);
                 if (pd != null)
                 {
+                    if (!SameFileVersion(full, pd.Size, pd.Ticks)) return null;
                     upToDate = pd.SettingsKey == settingsKey;
                     return JsonSerializer.Deserialize(pd.Data, StoreJsonContext.Default.Record);
                 }
@@ -414,7 +415,8 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
             {
                 if (!File.Exists(path)) return;
                 var full = Path.GetFullPath(path);
-                var doc = new PendingDoc(full, settingsKey, JsonSerializer.Serialize(rec, StoreJsonContext.Default.Record), SearchText(rec));
+                var hash = Stamp(full, out var size, out var ticks);
+                var doc = new PendingDoc(full, settingsKey, JsonSerializer.Serialize(rec, StoreJsonContext.Default.Record), SearchText(rec), hash, size, ticks);
                 lock (PendingSync) PendingDocs[full] = doc;
                 StartFlusher();
             }
@@ -423,8 +425,14 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
             }
         }
 
-        private sealed record PendingDoc(string FullPath, string SettingsKey, string Data, string Text);
+        private sealed record PendingDoc(string FullPath, string SettingsKey, string Data, string Text, string Hash, long Size, long Ticks);
         private static readonly Dictionary<string, PendingDoc> PendingDocs = new(StringComparer.OrdinalIgnoreCase);
+
+        private static bool SameFileVersion(string path, long size, long ticks)
+        {
+            var file = new FileInfo(path);
+            return file.Exists && file.Length == size && file.LastWriteTimeUtc.Ticks == ticks;
+        }
 
         /// <summary>Wartende Belegstände gebündelt schreiben (Datensatz + Volltextindex in einer Transaktion je Block).</summary>
         private static void FlushDocuments()
@@ -436,7 +444,7 @@ CREATE INDEX IF NOT EXISTS IX_Documents_Hash ON Documents(ContentHash, Size);";
                 var rows = new List<(PendingDoc D, string Hash, long Size, long Ticks)>();
                 foreach (var d in chunk)
                 {
-                    try { if (File.Exists(d.FullPath)) rows.Add((d, Stamp(d.FullPath, out var size, out var ticks), size, ticks)); }
+                    try { if (SameFileVersion(d.FullPath, d.Size, d.Ticks)) rows.Add((d, d.Hash, d.Size, d.Ticks)); }
                     catch { }
                 }
                 try
@@ -666,8 +674,9 @@ WHERE SearchTables.Checksum IS NOT excluded.Checksum OR SearchTables.Data IS NOT
             {
                 var full = Path.GetFullPath(path);
                 var key = PendingKey(pluginId, full);
-                lock (PendingSync)
-                    if (Pending.TryGetValue(key, out var p)) return p.Data;
+                PendingWrite? pending;
+                lock (PendingSync) Pending.TryGetValue(key, out pending);
+                if (pending != null) return SameFileVersion(full, pending.Size, pending.Ticks) ? pending.Data : null;
                 var (size, ticks) = StatOf(full);
                 if (!TakePlugin(key, out var row))
                 {
@@ -694,7 +703,7 @@ WHERE SearchTables.Checksum IS NOT excluded.Checksum OR SearchTables.Data IS NOT
             }
         }
 
-        private sealed record PendingWrite(string PluginId, string FullPath, string Data);
+        private sealed record PendingWrite(string PluginId, string FullPath, string Data, string Hash, long Size, long Ticks);
         private static readonly object PendingSync = new();
         private static readonly Dictionary<string, PendingWrite> Pending = new(StringComparer.OrdinalIgnoreCase);
         private static bool _flushRunning, _exitHooked;
@@ -707,7 +716,8 @@ WHERE SearchTables.Checksum IS NOT excluded.Checksum OR SearchTables.Data IS NOT
             try
             {
                 var full = Path.GetFullPath(path);
-                lock (PendingSync) Pending[PendingKey(pluginId, full)] = new PendingWrite(pluginId, full, data);
+                var hash = Stamp(full, out var size, out var ticks);
+                lock (PendingSync) Pending[PendingKey(pluginId, full)] = new PendingWrite(pluginId, full, data, hash, size, ticks);
                 StartFlusher();
             }
             catch
@@ -744,19 +754,16 @@ WHERE SearchTables.Checksum IS NOT excluded.Checksum OR SearchTables.Data IS NOT
             List<KeyValuePair<string, PendingWrite>> batch;
             lock (PendingSync) batch = new(Pending);
             if (batch.Count == 0) return;
-            var stamps = new Dictionary<string, (string Hash, long Size, long Ticks)?>(StringComparer.OrdinalIgnoreCase);
             foreach (var chunk in batch.Chunk(500))
             {
                 var rows = new List<(PendingWrite W, string Hash, long Size, long Ticks)>();
                 foreach (var (_, w) in chunk)
                 {
-                    if (!stamps.TryGetValue(w.FullPath, out var st))
+                    try { if (SameFileVersion(w.FullPath, w.Size, w.Ticks)) rows.Add((w, w.Hash, w.Size, w.Ticks)); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
-                        try { st = File.Exists(w.FullPath) ? (Stamp(w.FullPath, out var size, out var ticks), size, ticks) : null; }
-                        catch { st = null; }
-                        stamps[w.FullPath] = st;
+                        System.Diagnostics.Trace.TraceWarning($"Plugin-Daten nicht gespeichert ({w.FullPath}): {ex.Message}");
                     }
-                    if (st is { } s) rows.Add((w, s.Hash, s.Size, s.Ticks));
                 }
                 try
                 {

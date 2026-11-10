@@ -10,7 +10,7 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         
-        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,10">
+        <WrapPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,10">
             <TextBlock Text="Modus:" VerticalAlignment="Center" Margin="0,0,6,0"/>
             <ComboBox x:Name="CmbPdfPreviewMode" Width="180" SelectionChanged="CmbPdfPreviewMode_SelectionChanged" MaxDropDownHeight="180">
                 <ComboBoxItem Content="Auto" IsSelected="True"/>
@@ -22,8 +22,10 @@
             <Button Content="◀" Width="28" Margin="3,0,0,0" Click="BtnSearchPrev_Click"/>
             <Button Content="▶" Width="28" Margin="3,0,0,0" Click="BtnSearchNext_Click"/>
             <TextBlock x:Name="TxtSearchInfo" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="Gray"/>
-            <TextBlock x:Name="TxtFileName" VerticalAlignment="Center" Margin="20,0,0,0" FontWeight="Bold"/>
-        </StackPanel>
+            <TextBox x:Name="TxtFileName" VerticalAlignment="Center" Margin="20,0,0,0" FontWeight="Bold"
+                     IsReadOnly="True" BorderThickness="0" Background="Transparent" Padding="0" MaxWidth="420"
+                     ToolTip="Dateiname markieren und mit Strg+C oder Rechtsklick → Kopieren kopieren. Strg+A markiert den gesamten Namen."/>
+        </WrapPanel>
         
         <Grid Grid.Row="1">
             <wv2:WebView2 x:Name="PdfWebView" Visibility="Collapsed"/>

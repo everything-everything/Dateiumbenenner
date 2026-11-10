@@ -306,6 +306,19 @@ namespace Dateiumbenenner.Engine
 
         private static readonly HashSet<string> BuiltInTypes = new(TypeRules.Select(r => r.Type), StringComparer.OrdinalIgnoreCase);
 
+        public static (int Index, int Length) FindDocumentTypeTerm(string? text, string? documentType)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrWhiteSpace(documentType)) return (-1, 0);
+            var type = DocTypeStore.Canonical(documentType);
+            foreach (var rule in TypeRules.Concat(NumberLabelRules))
+            {
+                if (!string.Equals(DocTypeStore.Canonical(rule.Type), type, StringComparison.OrdinalIgnoreCase)) continue;
+                var hit = rule.Rx.Match(text);
+                if (hit.Success) return (hit.Index, hit.Length);
+            }
+            return (-1, 0);
+        }
+
         public static Field ExtractDocumentType(string? text)
         {
             var field = new Field();
