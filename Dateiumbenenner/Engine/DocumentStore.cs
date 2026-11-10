@@ -17,7 +17,7 @@ namespace Dateiumbenenner
     {
         public const string FileName = "dokumente.db";
         /// <summary>Erhöhen, wenn sich die Erkennungslogik ändert – dann werden alle Dateien neu ausgewertet.</summary>
-        public const int ExtractorVersion = 2;
+        public const int ExtractorVersion = 3;
 
         private static readonly object Sync = new();
         private static string? _connString;
@@ -460,13 +460,10 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                         var pv = cmd.Parameters.Add("$v", SqliteType.Integer);
                         var pd = cmd.Parameters.Add("$d", SqliteType.Text);
                         var pu = cmd.Parameters.Add("$u", SqliteType.Text);
-                        using var del = c.CreateCommand();
-                        del.Transaction = tx;
-                        del.CommandText = "DELETE FROM DocText WHERE Path=$p";
-                        var dp = del.Parameters.Add("$p", SqliteType.Text);
                         using var ins = c.CreateCommand();
                         ins.Transaction = tx;
-                        ins.CommandText = "INSERT INTO DocText(Path,Text) VALUES($p,$t)";
+                        ins.CommandText = @"INSERT INTO DocSearch(Path,Text) VALUES($p,$t)
+ON CONFLICT(Path) DO UPDATE SET Text=excluded.Text WHERE DocSearch.Text IS NOT excluded.Text";
                         var ip = ins.Parameters.Add("$p", SqliteType.Text);
                         var it = ins.Parameters.Add("$t", SqliteType.Text);
                         var now = DateTime.UtcNow.ToString("O");
@@ -478,7 +475,6 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                             cmd.ExecuteNonQuery();
                             if (fts)
                             {
-                                dp.Value = d.FullPath; del.ExecuteNonQuery();
                                 ip.Value = d.FullPath; it.Value = d.Text; ins.ExecuteNonQuery();
                             }
                         }
@@ -509,6 +505,7 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
         }
 
         private static bool? _fts;
+        public static string? FullTextIndexError { get; private set; }
         /// <summary>True, wenn der Volltext-Suchindex bereits erstellt und geöffnet ist.</summary>
         public static bool IsFullTextIndexReady => _fts == true;
         private static string SearchText(Record rec) => string.Join("\n", rec.CompanyName, rec.FullText);
@@ -520,11 +517,26 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
             try
             {
                 using var cmd = c.CreateCommand();
-                cmd.CommandText = "SELECT count(*) FROM sqlite_master WHERE name='DocText'";
-                bool exists = Convert.ToInt64(cmd.ExecuteScalar()) > 0;
+                cmd.CommandText = "SELECT count(*) FROM sqlite_master WHERE name IN ('DocSearch','DocText')";
+                bool exists = Convert.ToInt64(cmd.ExecuteScalar()) == 2;
                 if (!exists)
                 {
-                    cmd.CommandText = "CREATE VIRTUAL TABLE DocText USING fts5(Path UNINDEXED, Text, tokenize='trigram case_sensitive 0')";
+                    using var tx = c.BeginTransaction();
+                    cmd.Transaction = tx;
+                    cmd.CommandText = @"DROP TABLE IF EXISTS DocText;
+DROP TABLE IF EXISTS DocSearch;
+CREATE TABLE DocSearch(Path TEXT NOT NULL UNIQUE COLLATE NOCASE, Text TEXT NOT NULL);
+CREATE VIRTUAL TABLE DocText USING fts5(Text, content='DocSearch', content_rowid='rowid', tokenize='trigram case_sensitive 0');
+CREATE TRIGGER DocSearch_Insert AFTER INSERT ON DocSearch BEGIN
+  INSERT INTO DocText(rowid,Text) VALUES(new.rowid,new.Text);
+END;
+CREATE TRIGGER DocSearch_Delete AFTER DELETE ON DocSearch BEGIN
+  INSERT INTO DocText(DocText,rowid,Text) VALUES('delete',old.rowid,old.Text);
+END;
+CREATE TRIGGER DocSearch_Update AFTER UPDATE OF Text ON DocSearch WHEN old.Text IS NOT new.Text BEGIN
+  INSERT INTO DocText(DocText,rowid,Text) VALUES('delete',old.rowid,old.Text);
+  INSERT INTO DocText(rowid,Text) VALUES(new.rowid,new.Text);
+END;";
                     cmd.ExecuteNonQuery();
                     var rows = new List<(string, string)>();
                     cmd.CommandText = "SELECT count(*) FROM Documents";
@@ -536,23 +548,28 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                         {
                             var rec = JsonSerializer.Deserialize(r.GetString(1), StoreJsonContext.Default.Record);
                             if (rec != null) rows.Add((r.GetString(0), SearchText(rec)));
-                            if (++done % 200 == 0) progress?.Report((done, total));
                         }
-                    progress?.Report((total, total));
-                    using var tx = c.BeginTransaction();
                     using var ins = c.CreateCommand();
                     ins.Transaction = tx;
-                    ins.CommandText = "INSERT INTO DocText(Path,Text) VALUES($p,$t)";
+                    ins.CommandText = "INSERT INTO DocSearch(Path,Text) VALUES($p,$t)";
                     var pp = ins.Parameters.Add("$p", SqliteType.Text);
                     var pt = ins.Parameters.Add("$t", SqliteType.Text);
-                    foreach (var (p, t) in rows) { pp.Value = p; pt.Value = t; ins.ExecuteNonQuery(); }
+                    done = 0;
+                    foreach (var (p, t) in rows)
+                    {
+                        pp.Value = p; pt.Value = t; ins.ExecuteNonQuery();
+                        if (++done % 200 == 0) progress?.Report((done, total));
+                    }
                     tx.Commit();
+                    progress?.Report((total, total));
                 }
                 _fts = true;
+                FullTextIndexError = null;
             }
-            catch
+            catch (Exception ex)
             {
                 _fts = false;
+                FullTextIndexError = ex.Message;
             }
             return _fts.Value;
         }
@@ -570,7 +587,7 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                     return EnsureFts(c, progress);
                 }
             }
-            catch { return false; }
+            catch (Exception ex) { FullTextIndexError = ex.Message; return false; }
         }
 
         /// <summary>Pfade aller Belege, deren Text den Suchbegriff enthält (mind. 3 Zeichen). null = Index nicht verfügbar.</summary>
@@ -586,17 +603,60 @@ ON CONFLICT(Path) DO UPDATE SET Size=$s,Ticks=$t,ContentHash=$h,SettingsKey=$k,E
                 c.Open();
                 ApplyKey(c, Dateiumbenenner.Engine.SecureStorage.DatabaseKey);
                 using var cmd = c.CreateCommand();
-                cmd.CommandText = "SELECT Path FROM DocText WHERE DocText MATCH $q";
+                cmd.CommandText = "SELECT s.Path FROM DocText JOIN DocSearch s ON s.rowid=DocText.rowid WHERE DocText MATCH $q";
                 cmd.Parameters.AddWithValue("$q", "Text:\"" + query.Trim().Replace("\"", "\"\"") + "\"");
                 var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 using var r = cmd.ExecuteReader();
                 while (r.Read()) set.Add(r.GetString(0));
+                FullTextIndexError = null;
                 return set;
             }
-            catch
+            catch (Exception ex)
             {
+                FullTextIndexError = ex.Message;
                 return null;
             }
+        }
+
+        /// <summary>Suchtabellen je Datenquelle und geprüftem Stand; gehören zur geschützten Profil-Datenbank.</summary>
+        public static string? LoadSearchTable(string source, string checksum)
+        {
+            lock (Sync)
+            {
+                _ = ConnectionString;
+                using var c = Open();
+                EnsureSearchTables(c);
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "SELECT Data FROM SearchTables WHERE Source=$s AND Checksum=$c";
+                cmd.Parameters.AddWithValue("$s", source);
+                cmd.Parameters.AddWithValue("$c", checksum);
+                return cmd.ExecuteScalar() as string;
+            }
+        }
+
+        public static void SaveSearchTable(string source, string checksum, string data)
+        {
+            lock (Sync)
+            {
+                _ = ConnectionString;
+                using var c = Open();
+                EnsureSearchTables(c);
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = @"INSERT INTO SearchTables(Source,Checksum,Data) VALUES($s,$c,$d)
+ON CONFLICT(Source) DO UPDATE SET Checksum=excluded.Checksum,Data=excluded.Data
+WHERE SearchTables.Checksum IS NOT excluded.Checksum OR SearchTables.Data IS NOT excluded.Data";
+                cmd.Parameters.AddWithValue("$s", source);
+                cmd.Parameters.AddWithValue("$c", checksum);
+                cmd.Parameters.AddWithValue("$d", data);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        private static void EnsureSearchTables(SqliteConnection c)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "CREATE TABLE IF NOT EXISTS SearchTables(Source TEXT PRIMARY KEY, Checksum TEXT NOT NULL, Data TEXT NOT NULL)";
+            cmd.ExecuteNonQuery();
         }
 
         /// <summary>Plugin-Daten lesen (noch nicht geschriebene Werte aus der Warteschlange haben Vorrang).</summary>
@@ -932,22 +992,6 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Ticks=$t,Data=$d
                         using var r = q.ExecuteReader();
                         while (r.Read()) pluginIds.Add(r.GetString(0));
                     }
-                    // Volltextindex: Pfad steht dort ohne Index – Zeilennummern einmal für alle Dateien ermitteln
-                    var ftsRows = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
-                    if (fts)
-                    {
-                        using var q = c.CreateCommand();
-                        q.Transaction = tx;
-                        q.CommandText = "SELECT rowid, Path FROM DocText";
-                        using var r = q.ExecuteReader();
-                        while (r.Read())
-                        {
-                            if (r.IsDBNull(1)) continue;
-                            var p = r.GetString(1);
-                            if (!ftsRows.TryGetValue(p, out var l)) ftsRows[p] = l = new List<long>();
-                            l.Add(r.GetInt64(0));
-                        }
-                    }
                     using var del = c.CreateCommand();
                     del.Transaction = tx;
                     del.CommandText = "DELETE FROM Documents WHERE Path=$n";
@@ -970,13 +1014,13 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Ticks=$t,Data=$d
                     var pun = pupd.Parameters.Add("$n", SqliteType.Text);
                     using var fdel = c.CreateCommand();
                     fdel.Transaction = tx;
-                    fdel.CommandText = "DELETE FROM DocText WHERE rowid=$r";
-                    var fdr = fdel.Parameters.Add("$r", SqliteType.Integer);
+                    fdel.CommandText = "DELETE FROM DocSearch WHERE Path=$p";
+                    var fdp = fdel.Parameters.Add("$p", SqliteType.Text);
                     using var fupd = c.CreateCommand();
                     fupd.Transaction = tx;
-                    fupd.CommandText = "UPDATE DocText SET Path=$n WHERE rowid=$r";
+                    fupd.CommandText = "UPDATE DocSearch SET Path=$n WHERE Path=$o";
                     var fun = fupd.Parameters.Add("$n", SqliteType.Text);
-                    var fur = fupd.Parameters.Add("$r", SqliteType.Integer);
+                    var fuo = fupd.Parameters.Add("$o", SqliteType.Text);
                     foreach (var (o, n) in pairs)
                     {
                         // Nur Groß-/Kleinschreibung geändert: nicht vorher löschen (wäre derselbe Datensatz)
@@ -990,13 +1034,8 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Ticks=$t,Data=$d
                         }
                         if (fts)
                         {
-                            if (!sameFile && ftsRows.Remove(n, out var old))
-                                foreach (var r in old) { fdr.Value = r; fdel.ExecuteNonQuery(); }
-                            if (ftsRows.Remove(o, out var rows))
-                            {
-                                foreach (var r in rows) { fun.Value = n; fur.Value = r; fupd.ExecuteNonQuery(); }
-                                ftsRows[n] = rows;
-                            }
+                            if (!sameFile) { fdp.Value = n; fdel.ExecuteNonQuery(); }
+                            fun.Value = n; fuo.Value = o; fupd.ExecuteNonQuery();
                         }
                     }
                     tx.Commit();
@@ -1024,6 +1063,7 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Ticks=$t,Data=$d
                         using var r = cmd.ExecuteReader();
                         while (r.Read()) if (!File.Exists(r.GetString(0))) gone.Add(r.GetString(0));
                     }
+                    bool fts = EnsureFts(c);
                     using var tx = c.BeginTransaction();
                     foreach (var p in gone)
                     {
@@ -1032,7 +1072,7 @@ ON CONFLICT(PluginId,Path) DO UPDATE SET ContentHash=$h,Size=$s,Ticks=$t,Data=$d
                         del.CommandText = "DELETE FROM Documents WHERE Path=$p";
                         del.Parameters.AddWithValue("$p", p);
                         del.ExecuteNonQuery();
-                        if (EnsureFts(c)) { del.CommandText = "DELETE FROM DocText WHERE Path=$p"; del.ExecuteNonQuery(); }
+                        if (fts) { del.CommandText = "DELETE FROM DocSearch WHERE Path=$p"; del.ExecuteNonQuery(); }
                     }
                     tx.Commit();
                     try

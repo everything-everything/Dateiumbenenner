@@ -166,7 +166,8 @@ namespace Dateiumbenenner
             foreach (var c in candidates)
             {
                 var (best, score) = BestMatch(c, known, knownNorm);
-                if (best != null && score >= Threshold)
+                if (best != null && score >= Threshold
+                    && (Normalize(c) == Normalize(best) || !AppearsLiterally(c, fullText)))
                 {
                     Add(result, best, 1.0 + score);  // bekannte Firma bevorzugen
                     if (score < 1 && !string.Equals(Normalize(c), Normalize(best), StringComparison.Ordinal)) replaced.Add(c);
@@ -212,7 +213,7 @@ namespace Dateiumbenenner
                         }
                     }
                     // nur unscharf gefunden, aber eine andere ähnliche bekannte Firma steht wörtlich da → das ist die andere Firma
-                    if (bestLine >= Threshold && (bestLine >= 1 || SimilarRivalInText(k, fullText) == null)) Add(result, k, 1.0 + bestLine);
+                    if (bestLine >= Threshold && (bestLine >= 1 || SimilarRivalInText(k, fullText, candidates) == null)) Add(result, k, 1.0 + bestLine);
                 }
             }
 

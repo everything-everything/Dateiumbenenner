@@ -30,6 +30,7 @@ namespace Dateiumbenenner
             // Event-Handler für das Schließen des Fensters
             this.Closed += (s, e) =>
             {
+                _searchTimer?.Stop();
                 if (_mainWindow != null)
                 {
                     _mainWindow.PreviewWindowClosed();
@@ -45,6 +46,7 @@ namespace Dateiumbenenner
         public async Task LoadPdfAsync(string filePath, string? fullText = null)
         {
             _marks.Clear();
+            ClearSearchMarks();
             _currentFilePath = filePath;
             _fullText = fullText;
             
@@ -57,6 +59,7 @@ namespace Dateiumbenenner
         public async Task ShowDocumentAsync(string filePath, string? fullText, bool asText)
         {
             _marks.Clear();
+            ClearSearchMarks();
             _currentFilePath = filePath;
             _fullText = fullText;
             TxtFileName.Text = Path.GetFileName(filePath);
@@ -183,6 +186,7 @@ namespace Dateiumbenenner
         /// <summary>Beleg direkt in der Text-Ansicht oeffnen (ohne PDF-Ansicht vorher zu laden) und Fundstellen markieren.</summary>
         public void ShowDocumentText(string filePath, string? fullText, IReadOnlyList<(int Index, int Length, int LabelIndex, int LabelLength)> marks, int focus = 0)
         {
+            ClearSearchMarks();
             _currentFilePath = filePath;
             _fullText = fullText;
             TxtFileName.Text = Path.GetFileName(filePath);
@@ -224,7 +228,37 @@ namespace Dateiumbenenner
         private static readonly Brush TermBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0xC8, 0x80));
         private static readonly Brush HitBrush = Brushes.Aquamarine;
         private readonly List<(int Index, int Length, int LabelIndex, int LabelLength)> _marks = new();
+        private readonly List<(int Index, int Length)> _searchMarks = new();
+        private string _searchDocumentText = "";
+        private int _activeSearchIndex = -1;
         private bool _decorationsPending;
+        private DispatcherTimer? _searchTimer;
+        private string _searchQuery = "";
+
+        private void TxtSearch_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ClearSearchMarks();
+            if (string.IsNullOrWhiteSpace(TxtSearch.Text)) return;
+            if (_searchTimer == null)
+            {
+                _searchTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+                _searchTimer.Tick += (_, _) => { _searchTimer.Stop(); Search(true); };
+            }
+            _searchTimer.Start();
+        }
+
+        private void ClearSearchMarks()
+        {
+            _searchTimer?.Stop();
+            bool redraw = _searchMarks.Count > 0;
+            _searchMarks.Clear();
+            _searchQuery = "";
+            _searchDocumentText = "";
+            _activeSearchIndex = -1;
+            if (TxtSearchInfo != null) TxtSearchInfo.Text = "";
+            if (TxtPdfFallback != null) TxtPdfFallback.Select(0, 0);
+            if (redraw) ScheduleDecorations();
+        }
 
         private void TxtPdfFallback_SizeChanged(object sender, SizeChangedEventArgs e) => ScheduleDecorations();
 
@@ -287,6 +321,9 @@ namespace Dateiumbenenner
                 if (m.LabelIndex >= 0) MarkRange(m.LabelIndex, m.LabelLength, TermBrush);
                 MarkRange(m.Index, m.Length, HitBrush);
             }
+            if (_searchDocumentText == text)
+                for (int i = 0; i < _searchMarks.Count; i++)
+                    MarkRange(_searchMarks[i].Index, _searchMarks[i].Length, i == _activeSearchIndex ? Brushes.Orange : Brushes.Yellow);
         }
 
         /// <summary>Bereich hinterlegen; bei Zeilenumbruch je Bildschirmzeile ein Rechteck.</summary>
@@ -318,8 +355,9 @@ namespace Dateiumbenenner
         /// <summary>Sucht in der Text-Ansicht; schaltet bei Bedarf von der PDF-Ansicht auf Text um.</summary>
         private void Search(bool forward)
         {
+            _searchTimer?.Stop();
             var term = TxtSearch.Text;
-            if (string.IsNullOrEmpty(term)) { TxtSearchInfo.Text = string.Empty; return; }
+            if (string.IsNullOrWhiteSpace(term)) { ClearSearchMarks(); return; }
             if (PdfTextScroll.Visibility != Visibility.Visible)
             {
                 CmbPdfPreviewMode.SelectedIndex = 2;
@@ -328,36 +366,26 @@ namespace Dateiumbenenner
             }
             var box = TxtPdfFallback;
             var text = box.Text ?? string.Empty;
-            int pos;
-            if (forward)
+            if (_searchQuery != term || _searchDocumentText != text)
             {
-                int start = box.SelectionLength > 0 ? box.SelectionStart + 1 : box.CaretIndex;
-                pos = start < text.Length ? text.IndexOf(term, start, StringComparison.CurrentCultureIgnoreCase) : -1;
-                if (pos < 0) pos = text.IndexOf(term, StringComparison.CurrentCultureIgnoreCase);
+                _searchMarks.Clear();
+                _searchQuery = term;
+                _searchDocumentText = text;
+                int idx = 0;
+                while ((idx = text.IndexOf(term, idx, StringComparison.CurrentCultureIgnoreCase)) >= 0)
+                {
+                    _searchMarks.Add((idx, term.Length));
+                    idx += term.Length;
+                }
             }
-            else
-            {
-                int start = box.SelectionStart - 1;
-                pos = start >= 0 ? text.LastIndexOf(term, start, StringComparison.CurrentCultureIgnoreCase) : -1;
-                if (pos < 0) pos = text.LastIndexOf(term, StringComparison.CurrentCultureIgnoreCase);
-            }
-            if (pos < 0) { TxtSearchInfo.Text = "Nicht gefunden"; return; }
-            int count = 0, idx = 0, current = 0;
-            while ((idx = text.IndexOf(term, idx, StringComparison.CurrentCultureIgnoreCase)) >= 0)
-            {
-                count++;
-                if (idx == pos) current = count;
-                idx += term.Length;
-            }
-            TxtSearchInfo.Text = $"{current} / {count}";
-            box.Select(pos, term.Length);
-            box.UpdateLayout();
-            var rect = box.GetRectFromCharacterIndex(pos);
-            if (!rect.IsEmpty)
-            {
-                var top = box.TranslatePoint(rect.TopLeft, PdfTextScroll).Y + PdfTextScroll.VerticalOffset;
-                PdfTextScroll.ScrollToVerticalOffset(Math.Max(0, top - PdfTextScroll.ViewportHeight / 3));
-            }
+            _activeSearchIndex = forward
+                ? _searchMarks.FindIndex(m => box.SelectionLength > 0 ? m.Index > box.SelectionStart : m.Index >= box.CaretIndex)
+                : _searchMarks.FindLastIndex(m => m.Index < box.SelectionStart);
+            if (_activeSearchIndex < 0) _activeSearchIndex = forward ? 0 : _searchMarks.Count - 1;
+            ScheduleDecorations();
+            if (_searchMarks.Count == 0) { TxtSearchInfo.Text = "Nicht gefunden"; return; }
+            TxtSearchInfo.Text = $"{_activeSearchIndex + 1} / {_searchMarks.Count}";
+            TextSearchBar.Show(box, _searchMarks[_activeSearchIndex], PdfTextScroll);
         }
     }
 }

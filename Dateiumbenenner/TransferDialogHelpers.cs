@@ -10,6 +10,7 @@ using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using WpfBrush = System.Windows.Media.Brush;
 using WpfButton = System.Windows.Controls.Button;
 using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using WpfCheckBox = System.Windows.Controls.CheckBox;
@@ -289,7 +290,7 @@ namespace Dateiumbenenner
         private static readonly SolidColorBrush Fill = Freeze(new SolidColorBrush(System.Windows.Media.Color.FromArgb(120, 255, 214, 0)));
         private static readonly System.Windows.Media.Pen Border = Freeze(new System.Windows.Media.Pen(new SolidColorBrush(System.Windows.Media.Color.FromArgb(200, 230, 150, 0)), 1));
         private readonly WpfTextBox _box;
-        private List<(int Start, int Length)> _ranges = new();
+        private List<(int Start, int Length, WpfBrush Fill, System.Windows.Media.Pen? Border, double Opacity)> _ranges = new();
         /// <summary>Text, zu dem die Fundstellen gehören – nach einem Belegwechsel passen sie nicht mehr.</summary>
         private string _rangesText = "";
         private bool _retry;
@@ -307,7 +308,14 @@ namespace Dateiumbenenner
 
         public void SetRanges(List<(int Start, int Length)> ranges)
         {
-            _ranges = ranges;
+            _ranges = ranges.Select(r => (r.Start, r.Length, (WpfBrush)Fill, (System.Windows.Media.Pen?)Border, 1.0)).ToList();
+            _rangesText = _box.Text ?? "";
+            InvalidateVisual();
+        }
+
+        public void SetColoredRanges(List<(int Start, int Length, WpfBrush Brush)> ranges)
+        {
+            _ranges = ranges.Select(r => (r.Start, r.Length, r.Brush, (System.Windows.Media.Pen?)null, 0.45)).ToList();
             _rangesText = _box.Text ?? "";
             InvalidateVisual();
         }
@@ -343,7 +351,7 @@ namespace Dateiumbenenner
             if (last < 0 || last >= lines) last = lines - 1;
             int from = _box.GetCharacterIndexFromLineIndex(first);
             int to = Math.Min(textLength, _box.GetCharacterIndexFromLineIndex(last) + _box.GetLineLength(last));
-            foreach (var (start, length) in _ranges)
+            foreach (var (start, length, fill, border, opacity) in _ranges)
             {
                 int end = Math.Min(start + length, textLength);
                 if (end <= from || start >= to) continue;
@@ -358,7 +366,11 @@ namespace Dateiumbenenner
                     var a = _box.GetRectFromCharacterIndex(pos);
                     var b = _box.GetRectFromCharacterIndex(segEnd - 1, true);
                     if (!a.IsEmpty && !b.IsEmpty && b.Right > a.Left)
-                        dc.DrawRectangle(Fill, Border, new Rect(new System.Windows.Point(a.Left, a.Top), new System.Windows.Point(b.Right, Math.Max(a.Bottom, b.Bottom))));
+                    {
+                        dc.PushOpacity(opacity);
+                        dc.DrawRectangle(fill, border, new Rect(new System.Windows.Point(a.Left, a.Top), new System.Windows.Point(b.Right, Math.Max(a.Bottom, b.Bottom))));
+                        dc.Pop();
+                    }
                     pos = segEnd;
                 }
             }
@@ -622,12 +634,26 @@ namespace Dateiumbenenner
 
         internal static int Count(string text, string term) => Matches(text, term).Count;
 
-        private static void Show(WpfTextBox view, (int Start, int Length) m)
+        internal static void Show(WpfTextBox view, (int Start, int Length) m, ScrollViewer? outerScroll = null)
         {
+            var text = view.Text;
             view.IsInactiveSelectionHighlightEnabled = true;
             view.Select(m.Start, m.Length);
             view.Dispatcher.InvokeAsync(() =>
             {
+                if (view.Text != text || view.SelectionStart != m.Start || view.SelectionLength != m.Length) return;
+                if (outerScroll != null)
+                {
+                    outerScroll.UpdateLayout();
+                    var rect = view.GetRectFromCharacterIndex(m.Start);
+                    if (!rect.IsEmpty)
+                    {
+                        var top = view.TranslatePoint(rect.TopLeft, outerScroll).Y + outerScroll.VerticalOffset;
+                        outerScroll.ScrollToVerticalOffset(Math.Max(0, top - outerScroll.ViewportHeight / 3));
+                    }
+                    return;
+                }
+                view.UpdateLayout();
                 var line = view.GetLineIndexFromCharacterIndex(m.Start);
                 if (line >= 0) view.ScrollToLine(Math.Max(0, line - 3));
             }, System.Windows.Threading.DispatcherPriority.Loaded);

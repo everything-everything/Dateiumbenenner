@@ -18,7 +18,7 @@
                 <ComboBoxItem Content="Text"/>
             </ComboBox>
             <TextBlock Text="Suchen:" VerticalAlignment="Center" Margin="15,0,5,0"/>
-            <TextBox x:Name="TxtSearch" Width="160" VerticalContentAlignment="Center" KeyDown="TxtSearch_KeyDown" ToolTip="Enter = weiter, Umschalt+Enter = zurück. In der PDF-Ansicht: Strg+F"/>
+            <TextBox x:Name="TxtSearch" Width="160" VerticalContentAlignment="Center" KeyDown="TxtSearch_KeyDown" TextChanged="TxtSearch_TextChanged" ToolTip="Live-Suche nach kurzer Tipp-Pause. Enter = weiter, Umschalt+Enter = zurück. Treffer werden farbig markiert; die Suche schaltet bei Bedarf auf Text um."/>
             <Button Content="◀" Width="28" Margin="3,0,0,0" Click="BtnSearchPrev_Click"/>
             <Button Content="▶" Width="28" Margin="3,0,0,0" Click="BtnSearchNext_Click"/>
             <TextBlock x:Name="TxtSearchInfo" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="Gray"/>

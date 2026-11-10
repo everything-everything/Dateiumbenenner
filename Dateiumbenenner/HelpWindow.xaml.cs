@@ -521,8 +521,14 @@ Siehe auch: [[system|Systemanforderungen]]"),
 * Prüfen Sie Dokumenttyp, Nummer und Datum und wählen Sie bei Bedarf einen anderen Vorschlag aus.
 * Klicken Sie auf ""Ausgewählte umbenennen"" oder ""Alle umbenennen"".
 
+# Suche in der Vorschau
+* Im separaten Vorschaufenster läuft die Suche beim Tippen nach einer kurzen Pause von 300 ms. Enter/▶ springt zum nächsten Treffer, Umschalt+Enter/◀ zurück. Trefferlisten werden beim Weiterblättern wiederverwendet. Alle Treffer bleiben gelb, der aktuelle orange markiert, auch wenn der Fokus im Suchfeld bleibt.
+* Die Suche schaltet bei Bedarf auf die Textansicht um. Das gleiche Vorschaufenster wird auch vom XML-Editor und vom INI-Generator verwendet.
+
 # Weitere Optionen
 * Filterfeld über der Liste: zeigt nur passende Dateien an.
+* Der Volltext-Suchindex wird in der Profil-Datenbank gespeichert und beim Programmstart wieder geöffnet. Nur neue oder geänderte Texte werden indexiert; Umbenennen und reine Metadatenänderungen lösen keinen Neuaufbau aus. Hauptprogramm und Plugin nutzen denselben Index.
+* Eine einmalige Umstellung des Indexformats kann einen Neuaufbau erfordern, ein gewöhnlicher Neustart oder Versionswechsel nicht. Bei aktivierter Option ""Datenbank und Lerndaten beim Schließen leeren"" wird auch der Index absichtlich gelöscht.
 * Natürliche Dateinamensortierung: sortiert 2 vor 10 und behandelt _ wie -.
 * OCR Korrektur: siehe [[ocr|OCR-Korrektur und Wörterbücher]].
 * MB/KB umschalten: ändert die Anzeige der Dateigröße.

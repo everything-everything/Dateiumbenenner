@@ -311,6 +311,7 @@ namespace Dateiumbenenner
                 if (TxtMainNewPrefix != null) TxtMainNewPrefix.TextChanged += (_, _) => { if (_currentMeta != null) RefreshNewNamePreview(_currentMeta); };
                 if (CmbMainCompany != null) HookMainCompanyEditing();
                 InitBackgroundServices();
+                _ = InitializeSearchIndexAsync();
                 InitPlugins();
                 var txtSteps = FindName("TxtDocTypeNumberSteps") as System.Windows.Controls.TextBox;
                 if (txtSteps != null && string.IsNullOrEmpty(txtSteps.Text)) txtSteps.Text = _docTypeNumberSteps.ToString();
@@ -3309,12 +3310,13 @@ namespace Dateiumbenenner
             cur.ApplyPropertyValue(TextElement.ForegroundProperty, new SolidColorBrush(Colors.White));
             cur.ApplyPropertyValue(TextElement.FontWeightProperty, FontWeights.Bold);
 
-            try
+            TxtPreviewRich.Dispatcher.InvokeAsync(() =>
             {
+                if (_currentSearchIndex < 0 || _currentSearchIndex >= _searchResults.Count || !ReferenceEquals(cur, _searchResults[_currentSearchIndex])) return;
+                TxtPreviewRich.UpdateLayout();
                 var rect = cur.Start.GetCharacterRect(LogicalDirection.Forward);
-                TxtPreviewRich.ScrollToVerticalOffset(Math.Max(rect.Top - 40, 0));
-            }
-            catch { }
+                if (!rect.IsEmpty) TxtPreviewRich.ScrollToVerticalOffset(Math.Max(TxtPreviewRich.VerticalOffset + rect.Top - 40, 0));
+            }, System.Windows.Threading.DispatcherPriority.Loaded);
 
             UpdateSearchInfo();
         }
@@ -3370,7 +3372,7 @@ namespace Dateiumbenenner
                     List<DocumentMetadata> result; int textHits=0;
                     var idxProgress=new Progress<(int Done,int Total)>(p=>{ if(v!=_filterVersion) return; ShowIndexBuilding(p.Done,p.Total); });
                                         if(ft.Trim().Length>=3 && !DocumentStore.IsFullTextIndexReady) ShowIndexBuilding(0,0); else ShowSearching();
-                    try{ result=await Task.Run(()=>{ if(!DocumentStore.IsFullTextIndexReady) DocumentStore.EnsureFullTextIndex(idxProgress); var full=DocumentStore.SearchFullText(ft,idxProgress); tok.ThrowIfCancellationRequested(); var list=new List<DocumentMetadata>(); var opts=new ParallelOptions{CancellationToken=tok}; var hit=new bool[snapshot.Count];
+                    try{ result=await Task.Run(()=>{ var full=DocumentStore.SearchFullText(ft,idxProgress); tok.ThrowIfCancellationRequested(); var list=new List<DocumentMetadata>(); var opts=new ParallelOptions{CancellationToken=tok}; var hit=new bool[snapshot.Count];
                         Parallel.For(0,snapshot.Count,opts,k=>{ var i=snapshot[k]; var key=string.Concat(i.FileName,"\u0001",i.InvoiceNumber,"\u0001",i.DocumentNumber,"\u0001",i.CompanyName,"\u0001",i.DocumentType,"\u0001",Convert.ToString(i.Date)); hit[k]=key.Contains(ft,StringComparison.OrdinalIgnoreCase) || (full!=null && full.Contains(i.FilePath)); });
                         for(int k=0;k<hit.Length;k++) if(hit[k]) list.Add(snapshot[k]); if(full!=null) textHits=full.Count; return list; },tok); }
                     catch(OperationCanceledException){ if(v==_filterVersion) UpdateIndexState(); return; }
@@ -3396,13 +3398,27 @@ namespace Dateiumbenenner
             IdxBar.Visibility=Visibility.Visible; IdxBar.IsIndeterminate=true;
             IdxText.Text="Suche läuft …";
         }
+        private async Task InitializeSearchIndexAsync()
+        {
+            IdxText.Text = "Gespeicherter Suchindex wird geöffnet …";
+            var progress = new Progress<(int Done, int Total)>(p => ShowIndexBuilding(p.Done, p.Total));
+            await Task.Run(() => DocumentStore.EnsureFullTextIndex(progress));
+            if (_filterCts == null) UpdateIndexState();
+        }
+
         private void UpdateIndexState()
         {
             _bookTimer?.Stop(); IdxBar.Visibility=Visibility.Collapsed;
+            if (DocumentStore.FullTextIndexError is { } error)
+            {
+                IdxLamp.Fill = System.Windows.Media.Brushes.Red;
+                IdxText.Text = "Suchindex-Fehler: " + error;
+                return;
+            }
             bool ok=DocumentStore.IsFullTextIndexReady;
             IdxLamp.Fill=ok?System.Windows.Media.Brushes.LimeGreen:System.Windows.Media.Brushes.Gray;
             IdxIcon.Text=ok?"\U0001F4D7":"\U0001F4D5";
-            IdxText.Text=ok?"Index bereit":"Suchindex: wird bei der ersten Suche (ab 3 Zeichen) erstellt";
+            IdxText.Text=ok?"Index bereit (dauerhaft gespeichert)":"Suchindex wird geöffnet …";
         }
         private void CmbDocType_SelectionChanged(object s,SelectionChangedEventArgs e){ if(_isPopulatingSelectors) return; if(_currentMeta is { Loaded:true } meta){ meta.DocTypeManuallySet=true; UpdateMetadataFromSelections(meta); var picked=e.AddedItems.Count>0 ? e.AddedItems[0] as string : null; if(!string.IsNullOrWhiteSpace(picked)) meta.DocumentType=picked.Trim(); if(ApplyLearnedRules(meta)){ PopulateNumberDate(meta); ScheduleStoreSave(meta); } AutoAssignNumbers(meta); ShowDetails(meta); RefreshNewNamePreview(meta); QueueDocTypeAsk(meta, picked ?? meta.DocumentType); } }
 
