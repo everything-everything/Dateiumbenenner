@@ -1,6 +1,6 @@
 # Dateiumbenenner
 
-Version 5.1.2652 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen und Komprimieren von PDF-Dokumenten (Rechnungen, Belege).
+Version 5.1.2653 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen und Komprimieren von PDF-Dokumenten (Rechnungen, Belege).
 
 ## Funktionen
 - Erkennung von Dokumenttyp, Rechnungs-/Belegnummer und Datum
