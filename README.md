@@ -1,6 +1,6 @@
 # Dateiumbenenner
 
-Version 5.1.2657 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen und Komprimieren von PDF-Dokumenten (Rechnungen, Belege).
+Version 5.1.2658 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen und Komprimieren von PDF-Dokumenten (Rechnungen, Belege).
 
 ## Funktionen
 - Erkennung von Dokumenttyp, Rechnungs-/Belegnummer und Datum
@@ -93,6 +93,11 @@ Editor einen Fehler, statt diese andere Datei zu überschreiben.
   `Vielen Dank`, `Sehr geehrte …`, `MfG` usw.) werden nie als Firma vorgeschlagen,
   gelernt oder als Absender übernommen – unabhängig von der Ausschlussliste.
   Steht eine Firma mit Rechtsform direkt dahinter, wird nur diese übernommen.
+- **INI-Generator-Plugin:** Die bestehende Firmen-Vorauswahl wird automatisch
+  nach Inhalt/Formulartext und Straßen nachgefiltert. Reine Beträge und Mengen
+  erscheinen weder als Firmen- noch als Inhaltsvorschläge. Eine bearbeitbare
+  sichere Inhaltsliste gilt im aktiven Profil; Textnachweise, echte Absender
+  und bewusste Feldzuordnungen bleiben geschützt. Das Plugin wird separat ausgeliefert.
 - **XML-Editor-Vorgaben** gelten nur für genau die Firma und Belegart, für die sie
   gespeichert wurden. Ältere, firmenweite Vorgaben werden nicht mehr angewendet.
   Wird eine Vorgabezeile im Beleg nicht über Rohzeile, Erkennungsmerkmal oder
