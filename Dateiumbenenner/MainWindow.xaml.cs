@@ -278,7 +278,9 @@ namespace Dateiumbenenner
             ListViewSearch.Register();
             InitializeComponent();
             InitMainDocking();
-            Title += $" – Profil: {ProfileManager.ActiveProfile}";
+            SetWorkingFolderTitle(CurrentFolder);
+            TxtFolder.TextChanged += (_, _) => { if (TxtFolder.IsVisible) SetWorkingFolderTitle(CurrentFolder); };
+            TxtFolder.IsVisibleChanged += (_, _) => { if (TxtFolder.IsVisible) SetWorkingFolderTitle(CurrentFolder); };
             Dateiumbenenner.Engine.NumberFixStore.TextFilesChanged += OnTextFilesChanged;
             Closed += (_, _) => Dateiumbenenner.Engine.NumberFixStore.TextFilesChanged -= OnTextFilesChanged;
             if (LvFiles != null)
@@ -979,6 +981,8 @@ namespace Dateiumbenenner
 
         public IReadOnlyList<DocumentMetadata> Documents => _items.ToList();
         public string? CurrentFolder => string.IsNullOrWhiteSpace(TxtFolder?.Text) ? null : TxtFolder.Text;
+        public void SetWorkingFolderTitle(string? folder)
+            => Title = $"Dateiumbenenner – Profil: {ProfileManager.ActiveProfile} | Arbeit: {(string.IsNullOrWhiteSpace(folder) ? Environment.CurrentDirectory : folder.Trim())} | Programm: {AppContext.BaseDirectory}";
         public string? LoadPluginData(string pluginId, string filePath) => DocumentStore.LoadPluginData(pluginId, filePath);
         public void SavePluginData(string pluginId, string filePath, string data) => DocumentStore.SavePluginData(pluginId, filePath, data);
         public string ActiveProfile => ProfileManager.ActiveProfile;

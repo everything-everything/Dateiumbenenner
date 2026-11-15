@@ -43,6 +43,7 @@ namespace Dateiumbenenner
         public string Label { get; init; } = "";
         /// <summary>Wert der Quelle (Anzeige und Vergleich mit <see cref="TransferDoc.Values"/>); null bei Optionen.</summary>
         public string? Value { get; init; }
+        public Func<TransferDoc, string?>? ResolveValue { get; init; }
         /// <summary>Am Quellbeleg von Hand geändert (gegenüber der Erkennung).</summary>
         public bool Changed { get; init; }
         public bool Selected { get; set; }
@@ -70,6 +71,7 @@ namespace Dateiumbenenner
             internal double Sim { get; init; }
             /// <summary>Eigenschaften, die sich bei diesem Beleg ändern würden.</summary>
             public string Changes { get => _changes; set { if (_changes == value) return; _changes = value; Changed(nameof(Changes)); } }
+            internal bool WillChange { get; set; }
             internal Action? SelectionChanged;
             public event PropertyChangedEventHandler? PropertyChanged;
             private void Changed(string n) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
@@ -302,7 +304,7 @@ namespace Dateiumbenenner
             }
             Btn("Sichtbare anhaken", (_, _) => { foreach (Group g in _view!) g.Selected = true; });
             Btn("Sichtbare abwählen", (_, _) => { foreach (Group g in _view!) g.Selected = false; });
-            Btn("Nur mit Änderung", (_, _) => { foreach (var r in _groups.SelectMany(g => g.Rows)) r.Selected = r.Selected && r.Changes != NoChange; });
+            Btn("Nur mit Änderung", (_, _) => { foreach (var r in _groups.SelectMany(g => g.Rows)) r.Selected = r.Selected && r.WillChange; });
             _ok = Btn("Übertragen", (_, _) =>
             {
                 var chosen = _groups.SelectMany(g => g.Rows).Where(r => r.Selected).Select(r => r.Doc.Item).ToHashSet();
@@ -482,8 +484,13 @@ namespace Dateiumbenenner
             var props = _props.Where(p => p.Selected && !p.IsOption).ToList();
             foreach (var r in _groups.SelectMany(g => g.Rows))
             {
-                var c = props.Where(p => !r.Doc.Values.TryGetValue(p.Key, out var v) || !SameValue(v, p.Value)).Select(p => p.Label).ToList();
-                r.Changes = c.Count == 0 ? NoChange : string.Join(", ", c);
+                var values = props.Select(p => (Property: p, Value: p.ResolveValue == null ? p.Value : p.ResolveValue(r.Doc))).ToList();
+                var skipped = values.Where(p => p.Property.ResolveValue != null && p.Value == null).Select(p => p.Property.Label).ToList();
+                var changed = values.Where(p => !(p.Property.ResolveValue != null && p.Value == null)
+                    && (!r.Doc.Values.TryGetValue(p.Property.Key, out var v) || !SameValue(v, p.Value))).Select(p => p.Property.Label).ToList();
+                r.WillChange = changed.Count > 0;
+                r.Changes = (changed.Count == 0 ? NoChange : string.Join(", ", changed))
+                    + (skipped.Count > 0 ? "; übersprungen (kein eindeutiger Positionstreffer): " + string.Join(", ", skipped) : "");
             }
             foreach (var g in _groups) g.Notify();
             UpdateInfo();
@@ -493,7 +500,7 @@ namespace Dateiumbenenner
         {
             if (_info == null || _ok == null) return;
             var rows = _groups.SelectMany(g => g.Rows).Where(r => r.Selected).ToList();
-            int changing = rows.Count(r => r.Changes != NoChange);
+            int changing = rows.Count(r => r.WillChange);
             bool any = _props.Any(p => p.Selected);
             _info.Text = $"{rows.Count} Beleg(e) angehakt, bei {changing} ändert sich ein Wert"
                 + (_props.Any(p => p.Selected && p.IsOption) ? " (Optionen wirken auf alle angehakten)" : "")
