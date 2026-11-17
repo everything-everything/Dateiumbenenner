@@ -1,6 +1,6 @@
 # Dateiumbenenner
 
-Version 5.1.2659 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen und Komprimieren von PDF-Dokumenten (Rechnungen, Belege).
+Version 5.1.2660 – WPF-Tool (.NET 8) zum automatischen Umbenennen, Zusammenführen und Komprimieren von PDF-Dokumenten (Rechnungen, Belege).
 
 ## Funktionen
 - Erkennung von Dokumenttyp, Rechnungs-/Belegnummer und Datum
@@ -53,12 +53,14 @@ Für das Plugin ausschließlich das vom Release-Build erzeugte ZIP aus
 Publish-Ordner packen: Dieser enthält auch große Abhängigkeiten des Hauptprogramms
 und native Bibliotheken für andere Plattformen.
 Das Plugin-ZIP enthält den Ordner `Dateiumbenenner.IniGenerator.Plugin` mit den
-Plugin-Dateien sowie `Server\dateiumbenenner_api.php` für die separate Installation
+Plugin-Dateien sowie `Server\dateiumbenenner_api.php` und `Server\partner_create.php` für die separate Installation
 auf dem Webserver. Der Plugin-Ordner wird unter `Plugins` neben der EXE installiert;
-die PHP-Datei gehört auf den Webserver, nicht in das Hauptprogramm-Verzeichnis.
+die PHP-Dateien gehören auf den Webserver, nicht in das Hauptprogramm-Verzeichnis.
 
 ## XML-Dateinamen und Kennungen (INI-Generator-Plugin)
 ### Vereinfachte INI-Ausgabe
+**Vereinfachte INI** ist standardmäßig aktiviert, wenn noch keine entsprechende
+Einstellung gespeichert ist. Eine ausdrücklich gespeicherte Auswahl bleibt erhalten.
 Der Schalter **Vereinfachte INI** neben **XML mit erzeugen** ersetzt `LName`,
 `Name`, `Suchname`, `PLZ`, `Ort` und `Strasse` durch `AdresseDTM=Firmenname`.
 Alle übrigen Felder bleiben unverändert, auch Erfassungsnummer und leere
@@ -69,6 +71,36 @@ Umschalten verändert keine vorhandenen Dateien; zum Konvertieren die INIs
 erneut erzeugen und das Überschreiben bestätigen. Beide Formate können im
 INI-Modus eingelesen werden. XML-Ausgabe und gespeicherte Belegdaten bleiben
 vom INI-Format unabhängig.
+
+### Partnerdatenbank und NEU
+Normale Datenbankabfragen und die INI-/XML-Erzeugung verwenden schreibgeschützte
+Verbindungen. Nur **Suchen und wählen → NEU → Anlegen und auswählen** erlaubt
+nach Bestätigung genau einen neuen Datensatz in der konfigurierten Adresstabelle.
+Views, INSERT-Trigger und eine nicht nachweisbare Triggerprüfung sperren die Anlage.
+Vorhandene Datensätze und andere Tabellen werden nicht geändert.
+
+ID und Partnernummer werden unmittelbar vor dem INSERT erneut als höchste belegte
+Nummer im eigenen Nummernkreis plus eins geprüft. Bei fünf Stellen beginnen
+Debitoren bei 10000 und Kreditoren bei 70000. Der Index lässt sich im Suchdialog
+aktualisieren; mehrdeutige oder nicht vorhandene Partner werden nicht durch
+erfundene Nummern ersetzt. Bereits gültige Zuordnungen bleiben erhalten.
+
+Der NEU-Dialog übernimmt die ausgewählte Adresse und bietet Mandant, Jahr
+(Vorgabe 0) und einen bearbeitbaren Suchnamen an. Mandant wird aus den Ziffern
+zwischen `a_` und dem nächsten Unterstrich des Tabellennamens vorgeschlagen:
+`a_999_archivpersonenkonten` ergibt 999. Eigene Eingaben bleiben beim Aktualisieren
+und Partnerartwechsel erhalten. Nicht ausgefüllte bekannte Adress-/Kontakt-Textfelder
+werden auch bei NOT NULL ohne Standardwert als `''` eingefügt; vorhandene andere
+Standardwerte und berechnete Spalten bleiben erhalten. Schlagwort01–10 und
+Schlagwortgruen erhalten leeren Text, steuerfrei 0. Zahlen-/Datums-/Binärspalten
+werden nicht mit ungültigen Leerstrings gefüllt. Das erweiterte INI-Format enthält
+zusätzlich Kreditorennummer und Debitorennummer; vereinfachte INI und XML bleiben
+davon unberührt.
+
+Bei PHP-Zugriff müssen beide mitgelieferten PHP-Dateien auf dem Server aktualisiert
+werden. Die Anlage benötigt einen API-Schlüssel, eine ausdrückliche Freischaltung
+über `$ALLOW_PARTNER_CREATE` und die festgelegte Zieldatenbank/-tabelle
+`$PARTNER_CREATE_DATABASE` / `$PARTNER_CREATE_TABLE`; standardmäßig bleibt sie gesperrt.
 
 ### XML-Kennung
 Beim Erzeugen und Speichern von XML-Dateien werden Dateiname (ohne `.xml`) und

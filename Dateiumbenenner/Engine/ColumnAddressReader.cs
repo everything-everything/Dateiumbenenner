@@ -22,7 +22,7 @@ namespace Dateiumbenenner.Engine
         private static readonly Regex SharpS = new(@"(stra)(?:B|8|R|13|\u00DF)(e)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex InnerB = new(@"(?<=[a-zäöü])B(?=[a-zäöü])", RegexOptions.Compiled);
         private static readonly Regex DocLabel = new(
-            @"^(?:Rechnung|Rechnungs|Lieferschein|Kunden|Auftrag|Auftrags|Beleg|Datum|Seite|Tel|Telefon|Fax|USt|Steuer|IBAN|BIC)\b",
+            @"^(?:(?:Ihre?|Unsere?)\s+)?(?:(?:Rechnungs?|Beleg|Kunden|Auftrags?|Bestell|Lieferschein)(?:nummer|nr\.?)|Rechnung|Rechnungs|Lieferschein|Kunden|Auftrag|Auftrags|Beleg|Datum|Seite|Tel|Telefon|Fax|USt|Steuer|IBAN|BIC)\b",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private sealed class Piece

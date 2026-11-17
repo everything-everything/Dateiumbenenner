@@ -16,9 +16,9 @@ namespace Dateiumbenenner.Engine
         // StraBe, Stra8e, StraRe, Stra13e -> Straße
         private static readonly Regex SharpS = new(@"(stra)(?:B|8|R|13|\u00DF)(e)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         // Schlüsselwörter, die nicht zur Adresse gehören -> Zeile dort trennen
-        private static readonly Regex KeywordSplit = new(@"\s(?=(?:Rechnung|Rechnungs|Lieferschein|Kunden|Auftrags?|Beleg|Datum|Seite|Tel|Telefon|Fax|USt|Steuer|IBAN|BIC)\b)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex KeywordSplit = new(@"\s(?=(?:(?:Ihre?|Unsere?)\s+)?(?:(?:Rechnungs?|Beleg|Kunden|Auftrags?|Bestell|Lieferschein)(?:nummer|nr\.?)|Rechnung|Rechnungs|Lieferschein|Kunden|Auftrags?|Beleg|Datum|Seite|Tel|Telefon|Fax|USt|Steuer|IBAN|BIC)\b)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex KeywordStart = new(
-            @"^(?:Rechnung|Rechnungs|Lieferschein|Kunden|Auftrags?|Beleg|Datum|Seite|Tel|Telefon|Fax|USt|Steuer|IBAN|BIC|Leistung\w*|Herst\w*)\b",
+            @"^(?:(?:Ihre?|Unsere?)\s+)?(?:(?:Rechnungs?|Beleg|Kunden|Auftrags?|Bestell|Lieferschein)(?:nummer|nr\.?)|Rechnung|Rechnungs|Lieferschein|Kunden|Auftrags?|Beleg|Datum|Seite|Tel|Telefon|Fax|USt|Steuer|IBAN|BIC|Leistung\w*|Herst\w*)\b",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex KeywordLine = new(
             @"\b(Rechnung|Nr\.?|Datum|Seite|Tel|Fax|IBAN|BIC|USt|EUR|Summe|Betrag)\b|:",

@@ -671,6 +671,7 @@ Menüpunkt ""PLZ-Verzeichnis: mitgelieferte Liste verwenden..."" – entfernt Da
 
 # Hinweis
 In den GeoNames-Daten stehen bei Großkunden-PLZ teils Firmennamen statt Ortsnamen. Das ist im Original so und wird bei der Prüfung toleriert.
+Eine nicht gelistete PLZ aus dem Beleg wird nur zusammen mit einer erkannten Straße und einem vollständig bekannten Ortsnamen als Adresskandidat berücksichtigt. Die PLZ bleibt unverändert; dies ist keine Bestätigung ihrer Richtigkeit. Solche Postfach-/OCR-Angaben bitte vor der Übernahme prüfen. Beschriftete Kunden- oder Belegnummern werden dadurch nicht zu PLZ.
 
 Siehe auch: [[lizenzen|Lizenzen und Drittanbieter]]"),
 

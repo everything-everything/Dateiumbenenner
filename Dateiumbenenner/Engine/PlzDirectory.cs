@@ -75,6 +75,7 @@ namespace Dateiumbenenner.Engine
             IsBundled = bundled;
             _placeWords = null;
             _localityWords = null;
+            _localityNames = null;
             System.Threading.Interlocked.Increment(ref _version);
         }
 
@@ -299,6 +300,7 @@ namespace Dateiumbenenner.Engine
         private static readonly char[] PlaceSeparators = { ' ', '-', '/', '(', ')', '.', ',' };
         private HashSet<string>? _placeWords;
         private HashSet<string>? _localityWords;
+        private HashSet<string>? _localityNames;
         private volatile HashSet<string> _organisations = new();
 
         // Die Liste enthält auch Großkunden ("Stadtsparkasse Augsburg", "Kreissparkasse Ostalb"): Namen mit Institutionswort sind kein Ort
@@ -344,6 +346,20 @@ namespace Dateiumbenenner.Engine
 
         private static readonly System.Text.RegularExpressions.Regex LegalFormToken = new(
             @"^(g?GmbH|mbH|AG|KG|KGaA|SE|OHG|GbR|UG|eG|Co|Ltd|Inc)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>Vollständiger bekannter Ortsname, keine Ortsbestandteile oder Großkunden.</summary>
+        public bool IsKnownLocality(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text) || !IsLoaded) return false;
+            var names = _localityNames;
+            if (names == null)
+            {
+                names = _map.Values.SelectMany(v => v).Where(c => !_organisations.Contains(c))
+                    .Select(Fold).ToHashSet(StringComparer.Ordinal);
+                _localityNames = names;
+            }
+            return names.Contains(Fold(text.Trim()));
+        }
 
         /// <summary>true, wenn PLZ bekannt ist (oder kein Verzeichnis geladen).</summary>
         public bool IsValid(string zip) => !IsLoaded || _map.ContainsKey(zip);

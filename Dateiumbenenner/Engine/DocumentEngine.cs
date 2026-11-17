@@ -347,7 +347,7 @@ namespace Dateiumbenenner.Engine
                 {
                     var zip = zm.Groups[1].Value;
                     var city = zm.Groups[2].Value.Trim();
-                    if (!Plz.IsValid(zip)) continue;                           // unbekannte PLZ (Kunden-Nr. o. ä.)
+                    bool knownZip = Plz.IsValid(zip);
                     var official = Plz.Resolve(zip, city);
                     var firstWord = city.Split(' ')[0].TrimEnd('.', ':', ',');
                     if (official == null && CityStopWords.Contains(firstWord)) continue;          // "16126 Seite"
@@ -359,6 +359,8 @@ namespace Dateiumbenenner.Engine
                     var sm = StreetRegex.Match(before);
                     if (sm.Success) score += 3;
                     else if (i > 0) { sm = StreetRegex.Match(lines[i - 1]); if (sm.Success) score += 2; }
+                    // Nicht gelistete Postfach-/OCR-PLZ nur mit Straße und bekanntem Ort aus dem Beleg übernehmen.
+                    if (!knownZip && (!sm.Success || !Plz.IsKnownLocality(city))) continue;
                     if (city.Length >= 3) score += 1;
                     if (official != null) score += 2;                          // PLZ im Verzeichnis bestätigt
                     score += PositionScore(i, lines[i], before);
@@ -370,8 +372,9 @@ namespace Dateiumbenenner.Engine
                     if (own) score -= 10;                                      // eigene Firma = Empfänger
 
                     if (sm.Success && recipientStreets.Contains(StreetKey(FormatStreet(sm)))) score -= 10;
-                    result.Zip.Add(zip, score, "PLZ/Ort");
-                    result.City.Add(city, score, "PLZ/Ort");
+                    var source = knownZip ? "PLZ/Ort" : "PLZ/Ort (PLZ nicht im Verzeichnis)";
+                    result.Zip.Add(zip, score, source);
+                    result.City.Add(city, score, source);
                     if (sm.Success) result.Street.Add(FormatStreet(sm), score, "Straße vor PLZ");
                 }
             }
